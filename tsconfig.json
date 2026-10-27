@@ -13,12 +13,11 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
-      "@chql/core": ["packages/core/src/index.ts"],
-      "@chql/compiler": ["packages/compiler/src/index.ts"],
-      "@chql/client": ["packages/client/src/index.ts"],
-      "@chql/codegen": ["packages/codegen/src/index.ts"]
+      "@chql/core": ["./packages/core/src/index.ts"],
+      "@chql/compiler": ["./packages/compiler/src/index.ts"],
+      "@chql/client": ["./packages/client/src/index.ts"],
+      "@chql/codegen": ["./packages/codegen/src/index.ts"]
     }
   },
   "include": ["packages/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "vitest.config.ts"],

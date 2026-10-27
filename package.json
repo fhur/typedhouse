@@ -5,10 +5,13 @@
   "packageManager": "pnpm@10.11.0",
   "engines": { "node": ">=20" },
   "scripts": {
+    "capture:type-corpus": "tsup scripts/capture-type-corpus.ts --format esm --external testcontainers --out-dir node_modules/.cache/chql-capture && node node_modules/.cache/chql-capture/capture-type-corpus.js",
     "build": "pnpm -r build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check:all": "pnpm typecheck && pnpm test && pnpm build"
+    "verify:type-corpus": "pnpm capture:type-corpus --check",
+    "verify:core-package": "node scripts/verify-core-package.mjs",
+    "check:all": "pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

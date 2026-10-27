@@ -1,0 +1,17 @@
+{
+  "source": "Live system.columns from controlled DDL on throwaway testcontainers server (not production data)",
+  "image": "clickhouse/clickhouse-server:24.8",
+  "repoDigests": [
+    "clickhouse/clickhouse-server@sha256:1ffa82edee000a42c09313bd9f1293d94c570aee74babc1b3ca9983a35fa597b"
+  ],
+  "serverVersion": "24.8.14.39",
+  "capturedAt": "2026-10-27T13:56:28.518Z",
+  "query": "SELECT database, table, name, type, position FROM system.columns WHERE database = 'type_corpus' ORDER BY database, table, position",
+  "fixture": "packages/compiler/test/fixtures/type-corpus.sql",
+  "fixtureSha256": "dea4606a654f07970f4f5080ca0e5ed4ba28bf9cecdb0fa2cd4f6951c841de78",
+  "command": "pnpm capture:type-corpus",
+  "sha256": "f0b17effa8ab591ee9189c8a28b155b67295e5929170ede26b6581855b6c8042",
+  "count": 216,
+  "distinctTypes": 54,
+  "experimentalTypes": "JSON, Dynamic and Variant are covered by unit/type tests, not enabled in this 24.8 capture. Nullable(Nothing) was rejected by 24.8 with Code 370 DATA_TYPE_CANNOT_BE_USED_IN_TABLES; Nothing is tested separately."
+}
