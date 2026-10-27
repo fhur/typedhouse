@@ -1,0 +1,25 @@
+{
+  "kind": "controlled generated INSERT data; not production captures",
+  "generator": "scripts/generate-fixture-seed.ts",
+  "regeneration": "pnpm generate:fixture-seed",
+  "verification": "pnpm verify:fixture-seed",
+  "epochUTC": "2026-04-27T00:00:00.000Z",
+  "seed": 20261027,
+  "prng": "32-bit LCG seeded with 20261027: state=(1664525*state+1013904223) mod 2^32, one draw per tenant/metric table in declared order. Indexed mix: (entity*1664525 + version*1013904223 + week*69069 + draw) mod 100000; divided by 100. No server rand() or clock.",
+  "tenants": [
+    {
+      "name": "acme",
+      "components": 2000,
+      "parts": 3000
+    },
+    {
+      "name": "other",
+      "components": 40,
+      "parts": 40
+    }
+  ],
+  "sha256": "f54856b392a317aa0af3c3bad476e1a1516bc081f7bb070a8f52dd7e6af862c3",
+  "overlap": "acme indexes start at 0. Null categories 0..299, inactive 0..119, empty arrays 0..399 (deliberately nested). Shared participants 400..449 form 25 disjoint pairs referencing part_400..424; no other component references these ids. Component 450 references orphan_part. Parts 0..199 have null lifecycle. Other tenant reuses entity ids to test isolation.",
+  "metrics": "Every entity has entity%4+1 distinct versions at each of 26 weekly effectiveAt points (inclusive week 0..25). 10% of original sorting keys (seq%10=0 per tenant/table) receive one duplicate, so inserted rows = base*1.1, NOT 10% of final raw rows. Duplicate insertedAt is one second later and metric value increases by 1000. Exactly 5% of raw rows per warning column, including duplicates: base seq%20=0 and duplicate ordinal%20=0. INSERT uses optimize_on_insert=0 to retain within-block duplicates. Stop merges before inserts for raw assertions; FINAL is separately tested. Nullable lead_time_max_days is null for seq%10=0.",
+  "imageForVerification": "clickhouse/clickhouse-server:24.8"
+}

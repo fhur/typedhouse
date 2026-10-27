@@ -6,6 +6,9 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "capture:type-corpus": "tsup scripts/capture-type-corpus.ts --format esm --external testcontainers --out-dir node_modules/.cache/chql-capture && node node_modules/.cache/chql-capture/capture-type-corpus.js",
+    "generate:fixture-seed": "tsup scripts/generate-fixture-seed.ts --format esm --out-dir node_modules/.cache/chql-seed && node node_modules/.cache/chql-seed/generate-fixture-seed.js",
+    "verify:fixture-seed": "pnpm generate:fixture-seed --check",
+    "test:compiler-integration": "vitest run --config vitest.compiler.config.ts",
     "build": "pnpm -r build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -13,7 +16,7 @@
     "verify:core-package": "node scripts/verify-core-package.mjs",
     "test:codegen-integration": "vitest run --config vitest.codegen.config.ts",
     "verify:codegen-package": "node scripts/verify-codegen-package.mjs",
-    "check:all": "pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm test:codegen-integration && pnpm verify:codegen-package"
+    "check:all": "pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm test:codegen-integration && pnpm verify:codegen-package && pnpm verify:fixture-seed && pnpm test:compiler-integration"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

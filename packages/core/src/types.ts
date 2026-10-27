@@ -1,6 +1,10 @@
 import type { CHType, ScalarName } from './ch-type.js';
 import type { TableDef } from './table.js';
 
+declare const nodeIdBrand: unique symbol;
+/** Identity is allocated monotonically across expression and relational nodes. */
+export type NodeId = number & { readonly [nodeIdBrand]: 'NodeId' };
+
 export type Decimal<P extends number = number, S extends number = number> = string & { __p: P; __s: S };
 export type UUID = string & { readonly __brand: 'UUID' };
 export type IPv4 = string & { readonly __brand: 'IPv4' };
