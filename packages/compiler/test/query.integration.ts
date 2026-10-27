@@ -24,6 +24,111 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('executes supported SAMPLE fractions on a sampling-key fixture', async () => {
+  await sql('CREATE TABLE sampling_probe (id UInt32, hash UInt64) ENGINE=MergeTree ORDER BY hash SAMPLE BY hash');
+  await sql('INSERT INTO sampling_probe SELECT number, cityHash64(number) FROM numbers(32)');
+  const q = from(table('sampling_probe', { id: col.UInt32, hash: col.UInt64 }, { engine: 'MergeTree', sortingKey: ['hash'], partitionKey: [] }));
+  for (const fraction of [1, 0.5, 1e-7]) {
+    const expected = JSON.parse(await sql(`SELECT groupArray(id) FROM (SELECT id FROM sampling_probe SAMPLE ${fraction} ORDER BY id) FORMAT JSONEachRow`)) as Record<string, number[]>;
+    expect(await client.run(q.sample(fraction).map(r => r.id).orderBy(r => r.id))).toEqual(expected['groupArray(id)']!.map(id => ({ id })));
+  }
+});
+it('composes patterned aliases with nested LEFT defaults and grouped multiplicity', async () => {
+  const q = from(db.entity_ots_component).where(r => r.entityId.eq('a')).map(() => ({
+    item_count: val(7, col.UInt32), nested: val([[], ['x', 'x']], col.Array(col.Array(col.String))),
+  }));
+  const alias: `item_${number}` = `item_${Number('42')}`;
+  const expanded = q.leftArrayJoin(r => r.nested, alias);
+  expect(await client.run(expanded)).toEqual([
+    { item_count: 7, nested: [[], ['x', 'x']], item_42: [] },
+    { item_count: 7, nested: [[], ['x', 'x']], item_42: ['x', 'x'] },
+  ]);
+  // Check punctuation aliases independently of optional pattern indexes.
+  const twice = q.leftArrayJoin(r => r.nested, 'a.b').leftArrayJoin(r => r['a.b'], '42');
+  expect(await client.run(twice.groupBy(r => r['42']).aggregate(() => count()).orderBy(r => r['42']))).toEqual([{ '42': '', count: 1n }, { '42': 'x', count: 2n }]);
+});
+it('executes FINAL deterministically with explicit replacement versions and composes hints', async () => {
+  await sql('CREATE TABLE final_probe (id UInt32, version UInt32, n UInt32) ENGINE=ReplacingMergeTree(version) ORDER BY id');
+  await sql('SYSTEM STOP MERGES final_probe');
+  await sql('INSERT INTO final_probe VALUES (1,1,10),(2,1,20)');
+  await sql('INSERT INTO final_probe VALUES (1,2,30)');
+  const q = from(table('final_probe', { id: col.UInt32, version: col.UInt32, n: col.UInt32 }, { engine: 'ReplacingMergeTree', sortingKey: ['id'], partitionKey: [] }));
+  expect(await client.run(q.final().orderBy(r => r.id))).toEqual([{ id: 1, version: 2, n: 30 }, { id: 2, version: 1, n: 20 }]);
+  expect(await client.run(q.final().groupBy(r => r.version).aggregate(g => ({ n: sum(g.n) })).orderBy(r => r.version))).toEqual([{ version: 1, n: 20n }, { version: 2, n: 30n }]);
+  expect(q.sample(0.1).final().toSQL().sql).toBe('SELECT `id`, `version`, `n` FROM `final_probe` FINAL SAMPLE 0.1');
+  expect(q.final().sample(0.1).toSQL().params).toEqual({});
+});
+it('expands arrays without replacing originals and uses exact LEFT child defaults', async () => {
+  await sql('CREATE TABLE array_join_probe (id UInt32, a Array(String), b Array(Nullable(Int32)), big Array(UInt64), pairs Array(Tuple(label String, n Nullable(Int32))), nested Array(Array(String))) ENGINE=Memory');
+  await sql("INSERT INTO array_join_probe VALUES (1,['x','x','y'],[NULL,7],[18446744073709551615],[('z',8)],[['a','b']]),(2,[],[],[],[],[])");
+  const q = from(table('array_join_probe', { id: col.UInt32, a: col.Array(col.String), b: col.Array(col.Nullable(col.Int32)), big: col.Array(col.UInt64), pairs: col.Array(col.Tuple({ label: col.String, n: col.Nullable(col.Int32) })), nested: col.Array(col.Array(col.String)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  expect(await client.run(q.arrayJoin(r => r.a, 'item').orderBy(r => r.item).map(r => ({ id: r.id, a: r.a, item: r.item })))).toEqual(['x','x','y'].map(item => ({ id: 1, a: ['x','x','y'], item })));
+  expect(await client.run(q.leftArrayJoin(r => r.a, '__proto__').where(r => r.id.eq(2)).map(r => ({ a: r.a, ['__proto__']: r.__proto__ })))).toEqual([{ a: [], ['__proto__']: '' }]);
+  expect(await client.run(q.leftArrayJoin(r => r.b, 'v').orderBy(r => r.id).thenBy(r => r.v.asc().nullsFirst()).map(r => ({ id: r.id, v: r.v })))).toEqual([{ id: 1, v: null }, { id: 1, v: 7 }, { id: 2, v: null }]);
+  expect(await client.run(q.leftArrayJoin(r => r.big, 'v').orderBy(r => r.id).map(r => ({ v: r.v })))).toEqual([{ v: 18446744073709551615n }, { v: 0n }]);
+  expect(await client.run(q.leftArrayJoin(r => r.pairs, 'pair').where(r => r.id.eq(2)).orderBy(r => r.id).limit(1).map(r => ({ pair: r.pair, label: r.pair.element('label'), n: r.pair.element('n') })))).toEqual([{ pair: { label: '', n: null }, label: '', n: null }]);
+  expect(await client.run(q.leftArrayJoin(r => r.nested, 'arr').arrayJoin(r => r.arr, 'v').map(r => ({ v: r.v })).orderBy(r => r.v))).toEqual([{ v: 'a' }, { v: 'b' }]);
+  expect(await client.run(q.leftArrayJoin(r => r.nested, 'arr').where(r => r.id.eq(2)).map(r => r.arr))).toEqual([{ arr: [] }]);
+  expect(await client.run(q.arrayJoin(r => r.pairs.element('label'), 'label').map(r => r.label))).toEqual([{ label: 'z' }]);
+  expect(await client.run(q.aggregate(g => ({ pairs: max(g.pairs) })).arrayJoin(r => r.pairs, 'pair').map(r => r.pair.element('label')))).toEqual([{ pair: 'z' }]);
+  expect(await client.run(q.orderBy(r => r.id.desc()).limit(1).arrayJoin(r => r.a, 'v'))).toEqual([]);
+  expect(await client.run(q.arrayJoin(r => r.a, 'v').orderBy(r => r.v).limit(1).map(r => r.v))).toEqual([{ v: 'x' }]);
+  expect(await client.run(q.arrayJoin(r => r.a, 'v').groupBy(r => r.v).aggregate(() => count()).orderBy(r => r.v))).toEqual([{ v: 'x', count: 2n }, { v: 'y', count: 1n }]);
+  for (const alias of ['__chql_input', '__chql_element', 'constructor', 'x`\\\\ hostile']) {
+    const joined = q.where(r => r.id.eq(1)).arrayJoin(r => r.a, alias).map(r => ({ item: r[alias]! }));
+    expect(await client.run(joined)).toEqual([{ item: 'x' }, { item: 'x' }, { item: 'y' }]);
+  }
+  const shared = val(['p','p'], col.Array(col.String));
+  const computed = q.where(r => r.a.hasAny(shared)).arrayJoin(() => shared, 'item');
+  expect(computed.toSQL().params).toEqual({ p0: "['p','p']" });
+  expect(computed.toSQL().sql.match(/\{p0:Array\(String\)\}/g)).toHaveLength(2);
+  expect(await client.run(q.limit(1).arrayJoin(() => shared, 'item').map(r => r.item))).toEqual([{ item: 'p' }, { item: 'p' }]);
+});
+it('retains numeric source columns at runtime with a widened string expansion alias', async () => {
+  const alias: string = ['expandedName'].join('');
+  const q = from(db.entity_ots_component).where(r => r.entityId.eq('a'))
+    .map(() => ({ n: val(7, col.UInt32), names: val(['x'], col.Array(col.String)) }));
+  for (const expanded of [q.arrayJoin(r => r.names, alias), q.leftArrayJoin(r => r.names, alias)]) {
+    expect(expanded.toSQL().columns.n).toEqual(col.UInt32.type);
+    expect(await client.run(expanded)).toEqual([{ n: 7, names: ['x'], expandedName: 'x' }]);
+  }
+});
+it('creates only the selected pattern or union alias, including after FINAL and composition', async () => {
+  await sql('CREATE TABLE alias_final_probe (id UInt32, version UInt32, names Array(String)) ENGINE=ReplacingMergeTree(version) ORDER BY id');
+  await sql('SYSTEM STOP MERGES alias_final_probe');
+  await sql("INSERT INTO alias_final_probe VALUES (1,1,['old'])");
+  await sql("INSERT INTO alias_final_probe VALUES (1,2,['new','new']),(2,1,[])");
+  const q = from(table('alias_final_probe', { id: col.UInt32, version: col.UInt32, names: col.Array(col.String) }, { engine: 'ReplacingMergeTree', sortingKey: ['id'], partitionKey: [] })).final();
+  const patternedAlias: `item_${string}` = `item_${['actual'].join('')}`;
+  for (const expanded of [q.arrayJoin(r => r.names, patternedAlias), q.leftArrayJoin(r => r.names, patternedAlias)]) {
+    expect(Object.hasOwn(expanded.row, 'item_missing')).toBe(false);
+    expect(Object.hasOwn(expanded.toSQL().columns, 'item_missing')).toBe(false);
+    const rows = await client.run(expanded.where(r => r.id.eq(1)).orderBy(r => r.id).limit(2));
+    expect(rows).toEqual([{ id: 1, version: 2, names: ['new','new'], item_actual: 'new' }, { id: 1, version: 2, names: ['new','new'], item_actual: 'new' }]);
+    expect(rows.every(row => !Object.hasOwn(row, 'item_missing'))).toBe(true);
+  }
+  for (const alias of ['first', 'second'] as const) {
+    const expanded = q.leftArrayJoin(r => r.names, alias).where(r => r.id.eq(2));
+    expect(await client.run(expanded)).toEqual([{ id: 2, version: 1, names: [], [alias]: '' }]);
+  }
+});
+it('keeps repeated expansions Cartesian across distinct, aliases and empty Bool defaults', async () => {
+  const q = from(db.entity_ots_component).where(r => r.entityId.eq('a'))
+    .map(r => ({ id: r.entityId, a: val([true, false, true], col.Array(col.Bool)) }));
+  const twice = q.arrayJoin(r => r.a, '__chql_input').arrayJoin(r => r.a, '__chql_element');
+  expect(await client.run(twice.aggregate(() => count()))).toEqual([{ count: 9n }]);
+  expect(await client.run(twice.distinct().aggregate(() => count()))).toEqual([{ count: 4n }]);
+  expect(await client.run(twice.where(r => r.__chql_input.eq(false)).where(r => r.__chql_element.eq(false))
+    .map(r => ({ a: r.a, first: r.__chql_input, second: r.__chql_element })))).toEqual([{ a: [true, false, true], first: false, second: false }]);
+  const empty = q.map(r => ({ id: r.id, a: val([], col.Array(col.Bool)) }));
+  expect(await client.run(empty.leftArrayJoin(r => r.a, 'v').map(r => ({ a: r.a, v: r.v })))).toEqual([{ a: [], v: false }]);
+  expect(await client.run(empty.arrayJoin(r => r.a, 'v').aggregate(() => count()))).toEqual([{ count: 0n }]);
+  const shared = val(['same'], col.Array(col.String));
+  const equal = val(['same'], col.Array(col.String));
+  const parameters = q.map(r => ({ id: r.id, shared })).arrayJoin(() => shared, 'first').arrayJoin(() => equal, 'second');
+  expect(parameters.toSQL().params).toEqual({ p0: "['same']", p1: '[true,false,true]', p2: 'a', p3: "['same']" });
+  expect(await client.run(parameters.map(r => ({ first: r.first, second: r.second })))).toEqual([{ first: 'same', second: 'same' }]);
+});
 it('executes grouped/global aggregates with nullable and empty inputs', async () => {
   await sql('CREATE TABLE aggregation_probe (k Nullable(String), n UInt32, f Float64, v Nullable(Int32)) ENGINE=Memory');
   await sql("INSERT INTO aggregation_probe VALUES ('a',2,1.5,4),('a',3,2.5,NULL),(NULL,7,3,NULL)");

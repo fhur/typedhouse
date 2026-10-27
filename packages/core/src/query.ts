@@ -22,6 +22,22 @@ export type IsLive<Q> = Q extends Query<infer _R, infer C> ? C['live'] : never;
 type DescribedRow<R, D> = { readonly [K in keyof R]: Expr<R[K], K & string> & { readonly ir: ExprNode & { readonly type: K extends keyof D ? D[K] extends CHType ? D[K] : CHType : CHType } } };
 type WithRow<Q, R> = Q & { readonly row: R };
 type Projection = Record<string, Expr<unknown, string, 'row'>>;
+type ArrayValue<E> = E extends Expr<readonly (infer T)[], string> ? T : never;
+type ArrayChild<E extends Expr<readonly unknown[], string>> = E['ir']['type'] extends { readonly kind: 'Array'; readonly inner: infer D extends CHType } ? D : CHType;
+type IsUnion<A, Whole = A> = A extends Whole ? [Whole] extends [A] ? false : true : never;
+// Pattern indexes (including `${number}`) accept an empty record, unlike a
+// concrete literal key. Union detection alone cannot distinguish these.
+type OptionalAlias<A extends string> = true extends IsUnion<A> ? true : {} extends Record<A, unknown> ? true : false;
+// Only a singleton alias is guaranteed to exist. A widened index must also
+// admit every source value; intersecting a child-only index corrupts those fields.
+type Expanded<R, E, A extends string> = string extends A
+  ? R & Partial<Record<string, R[keyof R] | ArrayValue<E>>>
+  : OptionalAlias<A> extends true ? R & Partial<Record<A, R[Extract<keyof R, A>] | ArrayValue<E>>>
+  : { [K in keyof R | A]: K extends keyof R ? R[K] : ArrayValue<E> };
+type ExpandedRow<R, E extends Expr<readonly unknown[], string>, A extends string> = string extends A
+  ? R & Partial<Record<string, R[keyof R] | (Expr<ArrayValue<E>, string> & { readonly ir: ExprNode & { readonly type: ArrayChild<E> } })>>
+  : OptionalAlias<A> extends true ? R & Partial<{ [K in A]: R[Extract<keyof R, A>] | DescribedRow<{ [P in K]: ArrayValue<E> }, { [P in K]: ArrayChild<E> }>[K] }>
+  : R & DescribedRow<{ [K in A]: ArrayValue<E> }, { [K in A]: ArrayChild<E> }>;
 type ProjectRow<P extends Projection> = DescribedRow<Infer<P>, { [K in keyof P]: NonNullable<P[K]['ir']['type']> }>;
 type NamedProjection<E extends Expr<unknown, string>> = { [K in E['name']]: E };
 type ValidProjection<P> = P extends Expr<unknown, string> ? [P['name']] extends [never] ? { readonly unnamed_expression: never } : unknown : unknown;
@@ -131,6 +147,22 @@ export class Query<R, C extends Caps = Caps> {
   aggregate<A extends AggregateProjection>(f: (row: GroupedInput<this['row']>) => A & ValidNamed<A>): Query<AggregateRow<{}, A>, ExpressionCaps<C>> & { readonly row: OutputRow<{}, A> } {
     return new GroupedQuery<this['row'], {}, C>(this.ir, [], this.caps).aggregate<A>(f);
   }
+  arrayJoin<E extends Expr<readonly unknown[], string, 'row'>, A extends string>(f: (row: this['row']) => E, alias: A & (A extends keyof R ? { readonly duplicate_column: never } : unknown)): WithRow<Query<Expanded<R, E, A>, ExpressionCaps<C>>, ExpandedRow<this['row'], E, A>> {
+    return this.expand<E, A>(f, alias, false);
+  }
+  leftArrayJoin<E extends Expr<readonly unknown[], string, 'row'>, A extends string>(f: (row: this['row']) => E, alias: A & (A extends keyof R ? { readonly duplicate_column: never } : unknown)): WithRow<Query<Expanded<R, E, A>, ExpressionCaps<C>>, ExpandedRow<this['row'], E, A>> {
+    return this.expand<E, A>(f, alias, true);
+  }
+  private expand<E extends Expr<readonly unknown[], string>, A extends string>(f: (row: this['row']) => E, alias: A, left: boolean): WithRow<Query<Expanded<R, E, A>, ExpressionCaps<C>>, ExpandedRow<this['row'], E, A>> {
+    const e = f(this.row);
+    if (!(e instanceof Expr) || e.mode !== 'row' || e.ir.type?.kind !== 'Array') throw new Error('invalid_array_join_expression');
+    if (typeof alias !== 'string' || alias.includes('\0')) throw new Error('invalid_array_join_alias');
+    if (this.ir.output.shape !== 'flat') throw new Error('unsupported_output');
+    if (Object.hasOwn(this.ir.output.columns, alias)) throw new Error(`duplicate_column: ${alias}`);
+    const input = this.ir.output;
+    const output = flatOutput([...input.order.map(name => [name, input.columns[name]!] as const), [alias, e.ir.type.inner]]);
+    return new Query(relNode({ kind: 'ArrayJoin', input: this.ir, expr: e.ir, alias, left, columns: output.columns, output }), { live: this.caps.live && deterministic(e.ir) }) as WithRow<Query<Expanded<R, E, A>, ExpressionCaps<C>>, ExpandedRow<this['row'], E, A>>;
+  }
   limit(n: number, offset?: number): WithRow<Query<R, C>, this['row']> {
     return new Query(relNode({ kind: 'Limit', input: this.ir, n, ...(offset === undefined ? {} : { offset }), output: this.ir.output }), this.caps) as WithRow<Query<R, C>, this['row']>;
   }
@@ -161,8 +193,18 @@ export class OrderedQuery<R, C extends Caps = Caps> extends Query<R, C> {
     return this.sort(this.ir.input, f, this.ir.keys);
   }
 }
+/** Scan hints retain descriptor evidence without adding fields to the frozen wrapper. */
+export class TableQuery<R, C extends Caps = Caps> extends Query<R, C> {
+  final(): WithRow<TableQuery<R, C>, this['row']> { return this.hint({ final: true }); }
+  sample(fraction: number): WithRow<TableQuery<R, C>, this['row']> { return this.hint({ sample: fraction }); }
+  private hint(hint: { final?: boolean; sample?: number }): WithRow<TableQuery<R, C>, this['row']> {
+    if (this.ir.kind !== 'Scan') throw new Error('invalid_scan_hint');
+    const { id: _id, ...fields } = this.ir;
+    return new TableQuery(relNode({ ...fields, ...hint }), this.caps) as WithRow<TableQuery<R, C>, this['row']>;
+  }
+}
 type SourceLive<T extends TableDef> = T extends { readonly source: object } ? true : T['source'] extends undefined ? false : boolean;
-export function from<T extends TableDef>(table: T): Query<Infer<T>, { live: SourceLive<T> }> & { readonly row: DescribedRow<Infer<T>, T['columns']> } {
+export function from<T extends TableDef>(table: T): TableQuery<Infer<T>, { live: SourceLive<T> }> & { readonly row: DescribedRow<Infer<T>, T['columns']> } {
   const output = flatOutput(Object.entries(table.columns));
-  return new Query(relNode({ kind: 'Scan', table, columns: output.columns, output }), { live: table.source !== undefined }) as Query<Infer<T>, { live: SourceLive<T> }> & { readonly row: DescribedRow<Infer<T>, T['columns']> };
+  return new TableQuery(relNode({ kind: 'Scan', table, columns: output.columns, output }), { live: table.source !== undefined }) as TableQuery<Infer<T>, { live: SourceLive<T> }> & { readonly row: DescribedRow<Infer<T>, T['columns']> };
 }

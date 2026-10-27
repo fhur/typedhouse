@@ -41,6 +41,14 @@ try {
     .orderBy(r => r.category);
   console.log(rollup.toSQL());
   console.log(await client.run(rollup));
+  const componentParts = from(db.entity_ots_component).where(c => c.tenantId.eq('acme'))
+    .leftArrayJoin(c => c.matched_part_ids, 'partId')
+    .map(c => ({ id: c.entityId, partId: c.partId }))
+    .orderBy(r => r.id).thenBy(r => r.partId).limit(10);
+  console.log(componentParts.toSQL());
+  console.log(await client.run(componentParts));
+  // Fixture tables have no sampling key: demonstrate SQL only, not execution.
+  console.log(from(db.entity_ots_component).sample(0.1).toSQL());
 } finally {
   await client.close();
 }

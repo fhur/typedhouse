@@ -5,7 +5,8 @@ import type { DescribedExpr, Expr } from './expr.js';
 export type Mode = 'row' | 'grouped' | 'agg';
 export type Grouped<T, N extends string = never> = Expr<T, N, 'grouped'>;
 export type AggExpr<T, N extends string = never> = Expr<T, N, 'agg'>;
-export type Row<R, C extends Partial<Record<keyof R, Column>> = {}> = { readonly [K in keyof R]: C[K] extends Column ? DescribedExpr<R[K], K & string, 'row', C[K]['type']> : Expr<R[K], K & string> };
+/** Optional dynamic keys may have no column expression, not an Expr of undefined. */
+export type Row<R, C extends Partial<Record<keyof R, Column>> = {}> = { readonly [K in keyof R]: (C[K] extends Column ? DescribedExpr<R[K], K & string, 'row', C[K]['type']> : Expr<R[K], K & string>) | ({} extends Pick<R, K> ? undefined extends R[K] ? undefined : never : never) };
 export type GroupedRow<R, C extends Partial<Record<keyof R, Column>> = {}> = { readonly [K in keyof R]: C[K] extends Column ? DescribedExpr<R[K], K & string, 'grouped', C[K]['type']> : Grouped<R[K], K & string> };
 export type Nullable<R> = { [K in keyof R]: R[K] | null };
 

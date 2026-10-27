@@ -13,8 +13,16 @@ try {
   for (const name of ['expect-type', '@types']) symlinkSync(resolve(`node_modules/${name}`), join(directory, `node_modules/${name}`), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
   writeFileSync(join(directory, 'consumer.ts'), readFileSync('test/types/query.ts', 'utf8') + '\nimport type { AggregationSnapshot } from "./aggregation.d.ts";\nconst snapshotQuery = q.groupBy(r => r.id).aggregate(g => ({ total: sum(g.id), count: count() }));\nexpectTypeOf<Infer<typeof snapshotQuery>>().toEqualTypeOf<AggregationSnapshot>();\nexpectTypeOf<Infer<typeof snapshotQuery>>().not.toBeAny();\n');
+  writeFileSync(join(directory, 'expansion.ts'), `import { expectTypeOf } from 'expect-type';
+import { from, table, col, type Infer } from '@chql/core';
+import type { ArrayJoinSnapshot } from './array-join.d.ts';
+const q = from(table('s', { specs: col.Array(col.Tuple({ name: col.Nullable(col.String) })), ids: col.Array(col.UInt64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).final().leftArrayJoin(r => r.specs, 'pair');
+expectTypeOf<Infer<typeof q>>().toEqualTypeOf<ArrayJoinSnapshot>();
+expectTypeOf<Infer<typeof q>>().not.toBeAny();
+`);
+  writeFileSync(join(directory, 'array-join.d.ts'), readFileSync('test/types/snapshots/array-join.d.ts', 'utf8'));
   writeFileSync(join(directory, 'aggregation.d.ts'), readFileSync('test/types/snapshots/aggregation.d.ts', 'utf8'));
-  writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, types: ['node'] }, include: ['consumer.ts'] }));
+  writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, types: ['node'] }, include: ['consumer.ts', 'expansion.ts'] }));
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -41,6 +49,12 @@ const mapped = Object.entries(rollup.toSQL().columns).map(([k, t]) => JSON.strin
 assert.equal(readFileSync('aggregation.d.ts', 'utf8'), 'export type AggregationSnapshot = { ' + mapped + ' };\\n');
 assert.equal(decoder(rollup.toSQL().columns.total)('4'), 4n);
 assert.equal('map' in q.groupBy(r => r.id), false);
+const expanded = from(table('s', { specs: col.Array(col.Tuple({ name: col.Nullable(col.String) })), ids: col.Array(col.UInt64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).final().leftArrayJoin(r => r.specs, 'pair');
+assert.match(expanded.toSQL().sql, /FINAL/);
+assert.match(expanded.toSQL().sql, /LEFT ARRAY JOIN/);
+assert.equal('final' in expanded, false);
+const expansionType = Object.entries(expanded.toSQL().columns).map(([k, t]) => JSON.stringify(k) + ': ' + toTypeScript(t)).join('; ');
+assert.equal(readFileSync('array-join.d.ts', 'utf8'), 'export type ArrayJoinSnapshot = { ' + expansionType + ' };\\n');
 await createClient().close();
 `);
   run(process.execPath, ['smoke.mjs'], directory);

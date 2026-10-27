@@ -14,6 +14,22 @@ Only ordered queries expose `.thenBy()`; another `.orderBy()` replaces the keys.
 Other operators drop `.thenBy()`. Sort and limit retain their written order:
 `q.orderBy(r => r.id).limit(10)` selects the first ten sorted rows, whereas
 `q.limit(10).orderBy(r => r.id)` sorts only the selected ten.
+`from(table)` returns a descriptor-preserving `TableQuery` with chainable
+`.final()` and `.sample(fraction)`; other operators drop these scan-only methods.
+SAMPLE accepts finite fractions in `(0, 1]` and emits inline after FINAL, without
+expression parameters. The fixture has no sampling key, so SAMPLE is SQL-only.
+Use FINAL on a suitable engine (e.g. ReplacingMergeTree) to deduplicate on reads.
+`q.arrayJoin(r => r.ids, 'item')` keeps original columns and emits one row per
+array element, including duplicates. `.leftArrayJoin(...)` also keeps empty-array
+rows, using ClickHouse child defaults (`''`, `0n`, `null` for nullable children,
+recursive tuple defaults), **not** nullable widening. Aliases cannot overwrite
+existing columns. Sequential expansions are nested operations; limit before
+expansion selects input rows, whereas limit after expansion selects expanded rows.
+Literal aliases retain exact child types. Union and template-pattern aliases expose
+optional additional fields (only one exists at runtime); patterned indexes also admit
+matching source values. Widened `string` aliases retain known source
+fields and expose possibly absent dynamic keys whose values include source and
+child types. Narrow/check dynamic keys before use; runtime collisions still fail.
 Grouped and global aggregation execute `count`, `sum`, `max` and their `If`
 forms: `q.groupBy(r => r.category).aggregate(() => count())` or
 `q.aggregate(g => ({ total: sum(g.amount) }))`. Keys precede aggregate outputs;
