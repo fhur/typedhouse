@@ -23,6 +23,17 @@ try {
     .limit(10);
   console.log(q.toSQL());
   console.log(await client.run(q));
+  const structural = from(db.entity_ots_component)
+    .where(c => c.tenantId.eq('acme').and(c.matched_part_ids.notEmpty()))
+    .map(c => ({
+      id: c.entityId,
+      category: c.category.ifNull('uncategorised'),
+      matched: c.matched_part_ids.length(),
+      mpns: c.part_specifications.element('mpn'),
+      firstDescription: c.part_specifications.arrayElement(1).element('description'),
+    })).limit(10);
+  console.log(structural.toSQL());
+  console.log(await client.run(structural));
 } finally {
   await client.close();
 }

@@ -1,5 +1,6 @@
 import { print, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
 import { parameterWireType, serializeParameter } from './parameters.js';
+import { resolveCall } from './resolve.js';
 
 export class ValidationError extends Error {
   constructor(readonly code: string, readonly node: unknown, readonly path: string, detail = '') {
@@ -15,13 +16,20 @@ function base(t: CHType): CHType { return t.kind === 'Nullable' || t.kind === 'L
 /** Permanent one-subquery-per-node reference backend. Unsupported IR is rejected. */
 export function emitNaive(root: Rel): CompiledQuery {
   const params: Record<string, string> = Object.create(null) as Record<string, string>;
+  const parameterTypes: Record<string, CHType> = Object.create(null) as Record<string, CHType>;
   const nodes: Record<string, Rel> = Object.create(null) as Record<string, Rel>;
   const assigned = new Map<ExprNode, { name: string; type: CHType }>();
   const active = new Set<Rel>();
   // Each derived input owns this local SQL scope; ColumnRefs never bind SELECT aliases.
   const inputAlias = quoteIdentifier('__chql_input');
   function fail(code: string, node: unknown, path: string, detail = ''): never { throw new ValidationError(code, node, path, detail); }
-  function expression(e: ExprNode, input: Rel, path: string, expected?: CHType): string {
+  function resolvedType(e: ExprNode, expected?: CHType): CHType {
+    if (e.kind === 'Call') return resolveCall(e, resolvedType).result;
+    const type = e.type ?? expected;
+    if (!type) throw new Error('param_untyped');
+    return e.kind === 'Param' && e.value === null && type.kind !== 'Nullable' ? { kind: 'Nullable', inner: type } : type;
+  }
+  function expression(e: ExprNode, input: Rel, path: string, expected?: CHType, index = false): string {
     if (!e || typeof e !== 'object') return fail('invalid_expression', e, path);
     switch (e.kind) {
       case 'ColumnRef': {
@@ -35,22 +43,21 @@ export function emitNaive(root: Rel): CompiledQuery {
         if (!type) return fail('param_untyped', e, path);
         if (expected && !same(base(type), base(expected))) return fail('param_incompatible', e, path);
         let value: string;
-        try { value = serializeParameter(e.value, type); } catch (error) { return fail('param_incompatible', e, path, String(error)); }
+        try { value = serializeParameter(index && typeof e.value === 'number' && Number.isSafeInteger(e.value) ? BigInt(e.value) : e.value, type); } catch (error) { return fail('param_incompatible', e, path, String(error)); }
         const previous = assigned.get(e);
         if (previous && !same(previous.type, type)) return fail('param_incompatible', e, path, 'same Param used with different types');
-        if (e.value === null) return 'NULL';
+        // Bare NULL is Nullable(Nothing), losing the operand's common-type evidence.
+        if (e.value === null) return `CAST(NULL AS ${print(type)})`;
         const name = previous?.name ?? `p${assigned.size}`;
-        assigned.set(e, { name, type }); params[name] = value;
+        assigned.set(e, { name, type }); params[name] = value; parameterTypes[name] = parameterWireType(type);
         return `{${name}:${print(parameterWireType(type))}}`;
       }
       case 'Call': {
-        if (e.fn.name !== 'eq' || e.fn.sqlName !== 'equals' || e.fn.origin !== 'typed' || e.args.length !== 2) return fail('unsupported_expression', e, path, e.fn.name);
-        const left = e.args[0]!; const right = e.args[1]!;
-        const type = left.type ?? right.type;
-        if (!type) return fail('param_untyped', e, path);
-        if (left.type && right.type && !same(base(left.type), base(right.type))) return fail('incompatible_operands', e, path);
-        if (base(e.type).kind !== 'scalar' || (base(e.type) as { name?: string }).name !== 'Bool') return fail('invalid_expression_type', e, path);
-        return `(${expression(left, input, `${path}.args[0]`, type)} = ${expression(right, input, `${path}.args[1]`, type)})`;
+        let resolved: ReturnType<typeof resolveCall>;
+        try { resolved = resolveCall(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_call', e, path); }
+        const args = e.args.map((arg, i) => expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null));
+        // Retain the established equality SQL contract; all other names come from the catalog.
+        return e.fn.name === 'eq' ? `(${args[0]} = ${args[1]})` : `${resolved.sqlName}(${args.join(', ')})`;
       }
       default: return fail('unsupported_expression', e, path, e.kind);
     }
@@ -99,6 +106,6 @@ export function emitNaive(root: Rel): CompiledQuery {
   }
   const sql = emit(root, 'root');
   if (root.output.shape !== 'flat') throw new ValidationError('unsupported_output', root, 'root');
-  return Object.freeze({ sql, params: Object.freeze(params), columns: root.output.columns, nodes: Object.freeze(nodes) });
+  return Object.freeze({ sql, params: Object.freeze(params), parameterTypes: Object.freeze(parameterTypes), columns: root.output.columns, nodes: Object.freeze(nodes) });
 }
 export const compile = emitNaive;

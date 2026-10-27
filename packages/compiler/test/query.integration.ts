@@ -103,6 +103,70 @@ it('keeps internal-alias-shaped and dotted column names scoped through compositi
     .map(r => ({ original: r.p0, dotted: r['a.b'], alias: r.__chql_input }));
   expect(await client.run(q)).toEqual([{ original: 'one', dotted: 'three', alias: 'two' }]);
 });
+it('executes structural filters and composed projections through the catalog', async () => {
+  await sql('CREATE TABLE structural_probe (id String, category Nullable(String), ids Array(String), path Array(Int64), specs Array(Tuple(mpn Nullable(String), description Nullable(String))), n UInt32) ENGINE=Memory');
+  await sql("INSERT INTO structural_probe VALUES ('a','Passives/Capacitors',['CN','TW'],[1042], [('M1','first'),(NULL,NULL)],4), ('b',NULL,[],[],[],0)");
+  const t = table('structural_probe', { id: col.String, category: col.Nullable(col.String), ids: col.Array(col.String), path: col.Array(col.Int64), specs: col.Array(col.Tuple({ mpn: col.Nullable(col.String), description: col.Nullable(col.String) })), n: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+  const q = from(t).where(r => r.category.startsWith('Passives').and(r.ids.notEmpty()).and(r.ids.has('CN')).and(r.ids.hasAny(['TW'])).and(r.path.has(1042n)).and(r.n.gt(2)))
+    .map(r => ({ id: r.id, mpns: r.specs.element('mpn'), first: r.specs.arrayElement(1).element('description'), last: r.specs.arrayElement(-1).element('description'), outside: r.specs.arrayElement(99).element('mpn'), count: r.ids.length(), category: r.category.ifNull('none'), total: r.n.plus(2), ratio: r.n.divide(2), flag: r.n.ge(4).or(r.n.lt(0)).not().not() }))
+    .where(r => r.count.eq(2n)).limit(1).map(r => ({ ...r, total: r.total.multiply(2n).minus(1n), present: r.first.isNotNull(), absent: r.last.isNull() }));
+  expect(await client.run(q)).toEqual([{ id: 'a', mpns: ['M1', null], first: 'first', last: null, outside: null, count: 2n, category: 'Passives/Capacitors', total: 11n, ratio: 2, flag: true, present: true, absent: true }]);
+  expect(await client.run(from(t).where(r => r.ids.empty()).map(r => ({ name: r.category.ifNull('none'), first: r.specs.arrayElement(1).element('description'), any: r.ids.hasAny([]), unequal: r.n.ne(1), below: r.n.le(0) })))).toEqual([{ name: 'none', first: null, any: false, unequal: true, below: true }]);
+});
+it('encodes hostile recursive array parameters and named tuple fields without interpolation', async () => {
+  const hostile = "a'\\\n\0";
+  const tuple = col.Tuple({ ['__proto__']: col.UInt64, 'a.b': col.Nullable(col.String), '0': col.Int32 });
+  const q = from(db.entity_ots_component).limit(1).map(() => ({ strings: val([hostile, ''], col.Array(col.String)), nested: val([[1n, null], []], col.Array(col.Array(col.Nullable(col.Int64)))), dates: val([new Date('2026-10-27T12:00:00.123Z')], col.Array(col.DateTime64(3, 'Asia/Tokyo'))), mixed: val(2, col.UInt8).lt(val(3, col.UInt32)), denormal: val(0).divide(0) }));
+  expect(await client.run(q)).toEqual([{ strings: [hostile, ''], nested: [[1n, null], []], dates: [new Date('2026-10-27T12:00:00.123Z')], mixed: true, denormal: NaN }]);
+  await sql('CREATE TABLE tuple_probe (t Tuple(`__proto__` UInt64, `a.b` Nullable(String), `0` Int32)) ENGINE=Memory');
+  await sql("INSERT INTO tuple_probe VALUES ((7, 'safe', -3))");
+  const t = table('tuple_probe', { t: tuple }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+  expect(await client.run(from(t).map(r => ({ whole: r.t, proto: r.t.element('__proto__'), dotted: r.t.element('a.b'), numeric: r.t.element('0') })))).toEqual([{ whole: { ['__proto__']: 7n, 'a.b': 'safe', '0': -3 }, proto: 7n, dotted: 'safe', numeric: -3 }]);
+});
+it('adversarial: preserves nested structural composition and nullable membership', async () => {
+  await sql('CREATE TABLE adversarial_nested (groups Array(Array(Tuple(label Nullable(String)))), nullable_ids Array(Nullable(Int64))) ENGINE=Memory');
+  await sql("INSERT INTO adversarial_nested VALUES ([[('x'),(NULL)],[]],[NULL,7])");
+  const t = table('adversarial_nested', { groups: col.Array(col.Array(col.Tuple({ label: col.Nullable(col.String) }))), nullable_ids: col.Array(col.Nullable(col.Int64)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+  const q = from(t).map(r => ({ labels: r.groups.element('label'), hit: r.nullable_ids.has(null), any: r.nullable_ids.hasAny([null]), absent: r.nullable_ids.has(8n) }))
+    .where(r => r.hit.and(r.any).and(r.absent.not())).limit(1).map(r => ({ labels: r.labels }));
+  expect(await client.run(q)).toEqual([{ labels: [['x', null], []] }]);
+});
+it('adversarial: array wire literals preserve all controls, Unicode, booleans and denormals', async () => {
+  const strings = Array.from({ length: 32 }, (_, i) => `before${String.fromCharCode(i)}after`).concat(['\\\\N', "'); SELECT 1 --", 'é😀', '\\uFEFF']);
+  const q = from(db.entity_ots_component).limit(1).map(() => ({ strings: val(strings, col.Array(col.String)), floats: val([NaN, Infinity, -Infinity, 1.25], col.Array(col.Float64)) }));
+  expect(await client.run(q)).toEqual([{ strings, floats: [NaN, Infinity, -Infinity, 1.25] }]);
+});
+it('adversarial: nullable Bool array parameters use server-readable literals', async () => {
+  const q = from(db.entity_ots_component).limit(1).map(() => ({ flags: val([true, false, null], col.Array(col.Nullable(col.Bool))) }));
+  expect(await client.run(q)).toEqual([{ flags: [true, false, null] }]);
+  const nested = from(db.entity_ots_component).limit(1).map(() => ({ flags: val([[true, false, null], []], col.Array(col.Array(col.Nullable(col.Bool)))), yes: val(true), no: val(false) }));
+  expect(await client.run(nested)).toEqual([{ flags: [[true, false, null], []], yes: true, no: false }]);
+});
+it('adversarial: mixed-width arithmetic agrees with native decoding after reprojection', async () => {
+  const q = from(db.entity_ots_component).limit(1).map(() => ({ product: val(2, col.Float32).multiply(val(3, col.Float32)), difference: val(0, col.UInt32).minus(val(1, col.UInt32)), fallback: val(null, col.Nullable(col.Int32)).ifNull(val(4294967295, col.UInt32)) }))
+    .map(r => ({ ...r, compared: r.fallback.gt(0n) }));
+  expect((await sql("SELECT toTypeName(ifNull(CAST(NULL AS Nullable(Int32)), toUInt32(4294967295)))")).trim()).toBe('Int64');
+  expect((await sql("SELECT toTypeName(ifNull(NULL, toUInt32(4294967295)))")).trim()).toBe('UInt32');
+  expect(await client.run(q)).toEqual([{ product: 6, difference: -1n, fallback: 4294967295n, compared: true }]);
+});
+it('adversarial repair: composes nullable Bool arrays with membership, indexing and fallback', async () => {
+  const flags = val([null, false, true], col.Array(col.Nullable(col.Bool)));
+  const q = from(db.entity_ots_component).limit(1)
+    .map(() => ({ flags, absent: val(null, col.Nullable(col.Bool)), missing: flags.arrayElement(9) }))
+    .where(r => r.flags.has(null).and(r.flags.hasAny([false])).and(r.missing.isNull()))
+    .map(r => ({ flags: r.flags, first: r.flags.arrayElement(1), last: r.flags.arrayElement(-1), fallback: r.absent.ifNull(true), missing: r.missing.ifNull(false) }));
+  expect(await client.run(q)).toEqual([{ flags: [null, false, true], first: null, last: true, fallback: true, missing: false }]);
+});
+it('adversarial repair: typed NULL preserves nested common-type arithmetic and shared identity', async () => {
+  const absent = val(null, col.Nullable(col.Int32));
+  const replacement = val(4294967295, col.UInt32);
+  const q = from(db.entity_ots_component).limit(1)
+    .map(() => ({ a: absent.ifNull(replacement), b: absent.ifNull(replacement), missing: absent }))
+    .where(r => r.missing.isNull().and(r.a.eq(r.b)))
+    .map(r => ({ result: r.a.plus(r.b), nullComparison: r.missing.eq(0), fallback: r.missing.ifNull(-1) }));
+  expect(await client.run(q)).toEqual([{ result: 8589934590n, nullComparison: null, fallback: -1 }]);
+  expect(Object.values(q.toSQL().params).filter(v => v === '4294967295')).toHaveLength(1);
+});
 it('runs the documented executable generated-schema example', async () => {
   const { stdout } = await promisify(execFile)('pnpm', ['example:first-query'], { env: { ...process.env, CLICKHOUSE_URL: url, CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'fixture' }, timeout: 120000 });
   expect(stdout).toContain('18446744073709551615n');

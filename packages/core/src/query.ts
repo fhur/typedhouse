@@ -8,6 +8,8 @@ export interface Caps { readonly live: boolean }
 export interface CompiledQuery {
   readonly sql: string;
   readonly params: Readonly<Record<string, string>>;
+  /** Resolved placeholder descriptors, used to transport pre-serialized containers verbatim. */
+  readonly parameterTypes?: Readonly<Record<string, CHType>>;
   readonly columns: FlatColumns;
   readonly nodes: Readonly<Record<string, Rel>>;
 }

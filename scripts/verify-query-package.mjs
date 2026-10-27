@@ -24,6 +24,11 @@ assert.throws(() => q.toSQL(), /compiler_not_registered/);
 registerCompiler(emitNaive);
 assert.deepEqual({...q.toSQL().params}, {p0: '2'});
 assert.equal(decoder(col.UInt64.type)('2'), 2n);
+const structural = from(table('s', { specs: col.Array(col.Tuple({ name: col.Nullable(col.String) })), ids: col.Array(col.UInt64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }))
+  .where(r => r.ids.hasAny([2n])).map(r => ({ names: r.specs.element('name'), first: r.specs.arrayElement(-1).element('name'), size: r.ids.length(), empty: r.ids.empty() }));
+assert.deepEqual({...structural.toSQL().params}, { p0: 'name', p1: '-1', p2: 'name', p3: '[2]' });
+assert.deepEqual(decoder(structural.toSQL().columns.names)(['a', null]), ['a', null]);
+assert.equal(decoder(structural.toSQL().columns.empty)(0), false);
 await createClient().close();
 `);
   run(process.execPath, ['smoke.mjs'], directory);

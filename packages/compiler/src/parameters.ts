@@ -5,16 +5,32 @@ import { print as printType, type CHType } from '@chql/core';
  * wire placeholder differs. This also preserves DateTime64 precision and wrappers.
  */
 export function parameterWireType(type: CHType): CHType {
-  if (type.kind === 'Nullable' || type.kind === 'LowCardinality') return { ...type, inner: parameterWireType(type.inner) };
+  if (type.kind === 'Nullable' || type.kind === 'LowCardinality' || type.kind === 'Array') return { ...type, inner: parameterWireType(type.inner) };
   if (type.kind === 'DateTime64' && type.precision <= 3) return { ...type, tz: 'UTC' };
   return type;
 }
 
+function arrayLiteral(value: unknown, type: CHType): string {
+  if (type.kind === 'LowCardinality') return arrayLiteral(value, type.inner);
+  if (type.kind === 'Nullable') return value === null ? 'NULL' : arrayLiteral(value, type.inner);
+  const encoded = serializeParameter(value, type);
+  // Array text uses Bool words, unlike scalar HTTP parameters (1/0).
+  if (type.kind === 'scalar' && type.name === 'Bool') return value ? 'true' : 'false';
+  if (type.kind === 'FixedString' || type.kind === 'DateTime64' || (type.kind === 'scalar' && type.name === 'String')) {
+    return "'" + encoded.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t').replaceAll('\0', '\\0') + "'";
+  }
+  return encoded;
+}
+
 /** Values are serialized here, never delegated to the driver's inferred formatter. */
 export function serializeParameter(value: unknown, type: CHType): string {
+  if (type.kind === 'Array') {
+    if (!Array.isArray(value)) throw new Error(`param_incompatible: ${printType(type)}`);
+    return '[' + value.map(v => arrayLiteral(v, type.inner)).join(',') + ']';
+  }
   if (type.kind === 'LowCardinality') return serializeParameter(value, type.inner);
   if (type.kind === 'Nullable') return value === null ? '\\N' : serializeParameter(value, type.inner);
-  if (type.kind === 'scalar' && type.name === 'String') {
+  if (type.kind === 'FixedString' || (type.kind === 'scalar' && type.name === 'String')) {
     if (typeof value === 'string') return value;
   } else if (type.kind === 'scalar' && /^(U?Int)(8|16|32|64|128|256)$/.test(type.name)) {
     const bits = Number(type.name.match(/\d+/)![0]);

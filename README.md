@@ -6,12 +6,16 @@ Progress and current tasks: [TODO.md](TODO.md).
 ## First runnable query (bounded preview)
 
 `from(table).where(...).map(...).limit(n, offset?)` now runs through the permanent
-naive compiler and `client.run`. This is not full v1: only column/parameter/equality
-expressions compile in this checkpoint. Other expressions/operators fail explicitly.
-The client currently decodes String, UInt64, DateTime64(0–3), Nullable and
-LowCardinality wrappers; all other mappings are explicitly unsupported (not passed
-through as typed values). Full catalog, joins, optimizations, streaming, other
-mappings and Part 4 backend plugins remain backlog.
+naive compiler and `client.run`. All 24 existing catalog methods execute: six
+comparisons, and/or/not, plus/minus/multiply/divide, isNull/isNotNull/ifNull,
+length/empty/notEmpty/startsWith, has/hasAny/arrayElement/element. No additional
+operators or catalog families are implied; unsupported forms fail explicitly.
+The client decodes String/FixedString, Bool, integer widths, floats (including
+non-finite values), DateTime64(0–3), recursive Array and named/unnamed Tuple,
+Nullable and LowCardinality. Decimal, other dates/high-precision timestamps,
+Map, Enum, addresses, opaque states and unknown descriptors remain explicitly
+unsupported. Full catalog, joins, optimizations, streaming and Part 4 backend
+plugins remain backlog.
 
 Against a ClickHouse database with the fixture's `entity_ots_component` schema:
 
@@ -42,15 +46,26 @@ memoizes plans/decoders by IR identity. `run` forces ISO date output, quoted 64-
 integers and quoted non-finite floats; errors retain SQL, params, cause and the root
 node (fine-grained server attribution remains backlog). Always `await client.close()`.
 Rows and graph nodes are immutable. Named Tuple descriptors survive projections;
-selecting such tuples currently requires a later decoder checkpoint.
+named/unnamed tuples and arrays decode recursively. The executable example also
+shows structural filtering, tuple-field extraction and array lengths. Array indices
+follow ClickHouse's 1-based/negative-index semantics; non-integer indices are rejected.
+Arrays are serialized by the library, including nested nullable/bigint values.
+The client transports those preformatted literals via HTTP `param_*` fields rather
+than letting the driver's string formatter escape their quotes a second time;
+scalar parameters still use `query_params`. No values are interpolated into SQL.
 
 Date parameters are instants, not local wall times. The library serializes supported
 DateTime64(0–3) values as UTC text, truncating to the descriptor's precision, and
 uses an explicitly UTC-typed placeholder (including Nullable wrappers). The sibling
 column descriptor and Param identity remain unchanged. This deliberately resolves
 the spec tension between sibling-timezone placeholders and mandated UTC strings:
-parsing UTC text in the sibling/server timezone would change the instant. NULL
-still emits SQL NULL; equality with NULL retains SQL's unknown/drop behavior.
+parsing UTC text in the sibling/server timezone would change the instant.
+
+Typed NULL emits `CAST(NULL AS <resolved type>)`; equality with NULL retains SQL's
+unknown/drop behavior. This minimally qualifies the spec's NULL-rendering rule:
+bare NULL has type Nullable(Nothing), so `ifNull(NULL, UInt32)` returns UInt32,
+whereas an explicitly Nullable(Int32) operand requires Int64 (decoded as bigint).
+The cast preserves descriptor evidence without binding or interpolating a value.
 
 ## Development
 
