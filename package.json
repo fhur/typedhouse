@@ -12,7 +12,7 @@
     "generate:expr-surface": "tsup scripts/gen-expr-methods.ts --format esm --out-dir node_modules/.cache/chql-expr && node node_modules/.cache/chql-expr/gen-expr-methods.js",
     "verify:expr-surface": "pnpm generate:expr-surface --check && node scripts/verify-expr-surface.mjs && node scripts/check-type-diagnostics.mjs",
     "build": "pnpm -r build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/chql/typecheck.tsbuildinfo",
     "test": "vitest run",
     "verify:type-corpus": "pnpm capture:type-corpus --check",
     "verify:core-package": "node scripts/verify-core-package.mjs",
