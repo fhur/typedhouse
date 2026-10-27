@@ -1,7 +1,7 @@
-import type { Query, Caps } from './query.js';
+import type { Rel } from './ir.js';
 import type { CHType, ScalarName } from './ch-type.js';
 import type { TableDef } from './table.js';
-import type { DescribedExpr, Expr } from './expr.js';
+import type { DescribedExpr, Expr, ExprValue } from './expr.js';
 export type Mode = 'row' | 'grouped' | 'agg';
 export type Grouped<T, N extends string = never> = Expr<T, N, 'grouped'>;
 export type AggExpr<T, N extends string = never> = Expr<T, N, 'agg'>;
@@ -31,9 +31,9 @@ export interface Column<T = unknown, StringKey extends boolean = boolean, D exte
 /** Object.entries stringifies numeric keys and omits symbol keys. */
 export type EnumNames<V> = `${Extract<keyof V, string | number>}`;
 export type Value<C> = C extends Column<infer T> ? T : never;
-export type Infer<O> = O extends Query<infer R, Caps> ? R : O extends TableDef<infer R> ? R : O extends Column<infer T> ? T :
-  O extends Expr<infer T, infer N, Mode> ? { [K in N]: T } :
-  { -readonly [K in keyof O]: O[K] extends Expr<infer T, string, Mode> ? T : never };
+export type Infer<O> = O extends { readonly _rowType: infer R; readonly ir: Rel } ? R : O extends TableDef<infer R> ? R : O extends Column<infer T> ? T :
+  O extends Expr<unknown, string, Mode> ? { [K in O['name']]: ExprValue<O> } :
+  { -readonly [K in keyof O]: O[K] extends Expr<unknown, string, Mode> ? ExprValue<O[K]> : never };
 export type ScalarValue<N extends ScalarName> =
   N extends 'UInt8' | 'UInt16' | 'UInt32' | 'Int8' | 'Int16' | 'Int32' | 'Float32' | 'Float64' ? number :
   N extends 'UInt64' | 'UInt128' | 'UInt256' | 'Int64' | 'Int128' | 'Int256' ? bigint :

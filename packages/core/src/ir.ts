@@ -6,7 +6,7 @@ export type FlatColumns = Readonly<Record<string, CHType>>;
 /** Entries, not object enumeration, are authoritative for SQL ordering (including numeric aliases). */
 export type OutputSchema =
   | { readonly shape: 'flat'; readonly columns: FlatColumns; readonly order: readonly string[] }
-  | { readonly shape: 'nested'; readonly inputs: readonly (readonly [string, OutputSchema])[] }
+  | { readonly shape: 'nested'; readonly inputs: readonly (readonly [string, OutputSchema])[]; readonly fields?: Extract<OutputSchema, { shape: 'flat' }> }
   | { readonly shape: 'deferred'; readonly reason: 'raw'; readonly declaredNames: readonly string[] };
 export type ArgumentPolicy = 'sibling' | 'arrayElement' | 'array' | 'numericIndex' | 'constantSelector';
 export interface FunctionMetadata {
@@ -41,8 +41,8 @@ export type RawRel = RelBase & { readonly kind: 'RawRel'; readonly opaque: true;
 export type Filter = RelBase & { readonly kind: 'Filter'; readonly input: Rel; readonly pred: ExprNode };
 export type Project = FlatRel & { readonly kind: 'Project'; readonly input: Rel; readonly exprs: Readonly<Record<string, ExprNode>> };
 export type Aggregate = FlatRel & { readonly kind: 'Aggregate'; readonly input: Rel; readonly keys: Readonly<Record<string, ExprNode>>; readonly aggs: Readonly<Record<string, ExprNode>> };
-export type Join = Node & { readonly kind: 'Join'; readonly output: Extract<OutputSchema, { shape: 'nested' }>; readonly joinKind: 'inner' | 'left' | 'right' | 'full' | 'cross'; readonly inputs: readonly (readonly [string, Rel])[]; readonly on: readonly ExprNode[] };
-export type ArrayJoin = FlatRel & { readonly kind: 'ArrayJoin'; readonly input: Rel; readonly expr: ExprNode; readonly alias: string; readonly left: boolean };
+export type Join = Node & { readonly kind: 'Join'; readonly output: Extract<OutputSchema, { shape: 'nested' }>; readonly joinKind: 'inner' | 'left' | 'right' | 'full' | 'cross'; readonly scope?: NodeId; readonly inputs: readonly (readonly [string, Rel])[]; readonly on: readonly ExprNode[] };
+export type ArrayJoin = RelBase & { readonly columns: FlatColumns } & { readonly kind: 'ArrayJoin'; readonly input: Rel; readonly expr: ExprNode; readonly alias: string; readonly left: boolean };
 export interface SortKey { readonly expr: ExprNode; readonly dir: 'asc' | 'desc'; readonly nulls?: 'first' | 'last' }
 export type Sort = RelBase & { readonly kind: 'Sort'; readonly input: Rel; readonly keys: readonly SortKey[] };
 export type Limit = RelBase & { readonly kind: 'Limit'; readonly input: Rel; readonly n: number; readonly offset?: number };

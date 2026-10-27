@@ -1,4 +1,4 @@
-import { print, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
+import { print, outputLeaves, expandedOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
 import { parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall } from './resolve.js';
 
@@ -38,10 +38,17 @@ export function emitNaive(root: Rel): CompiledQuery {
     switch (e.kind) {
       case 'ColumnRef': {
         if (scope === 'aggregate' || (e.mode === 'grouped' && scope !== 'operand') || (e.mode === 'row' && scope === 'operand')) return fail('invalid_expression_mode', e, path);
-        if (e.rel !== input.id || e.path.length !== 1 || input.output.shape !== 'flat') return fail('unbound_column', e, path, `reference ${e.rel}, input ${input.id}`);
-        const name = e.path[0]!;
-        if (!Object.hasOwn(input.output.columns, name) || !same(e.type, input.output.columns[name]!)) return fail('unbound_column', e, path, name);
-        return `${qualifier}.${quoteIdentifier(name)}`;
+        const scopeId = qualifier === '' && input.kind === 'Join' ? input.scope ?? input.id : input.id;
+        if (e.rel !== scopeId) return fail('unbound_column', e, path, `reference ${e.rel}, input ${scopeId}`);
+        const leaf = outputLeaves(input.output).find(l => JSON.stringify(l.path) === JSON.stringify(e.path));
+        if (!leaf || !same(e.type, leaf.type)) return fail('unbound_column', e, path, JSON.stringify(e.path));
+        if (qualifier === '' && input.kind === 'Join') {
+          const side = input.inputs.find(([alias]) => alias === e.path[0]);
+          const child = side && outputLeaves(side[1].output).find(l => JSON.stringify(l.path) === JSON.stringify(e.path.slice(1)));
+          if (!side || !child) return fail('unbound_column', e, path);
+          return `${quoteIdentifier(side[0])}.${quoteIdentifier(child.name)}`;
+        }
+        return `${qualifier}.${quoteIdentifier(leaf.name)}`;
       }
       case 'Param': {
         const type = e.type ?? expected;
@@ -78,13 +85,65 @@ export function emitNaive(root: Rel): CompiledQuery {
     if (active.has(rel)) return fail('cyclic_ir', rel, path);
     active.add(rel);
     try {
-      if (rel.output.shape !== 'flat' || !rel.output.order.length) return fail('unsupported_output', rel, path);
-      const { columns, order } = rel.output;
+      if (rel.output.shape === 'deferred') return fail('unsupported_output', rel, path);
+      const leaves = outputLeaves(rel.output);
+      const columns = Object.fromEntries(leaves.map(l => [l.name, l.type]));
+      const order = leaves.map(l => l.name);
       if (new Set(order).size !== order.length || order.length !== Object.keys(columns).length || order.some(k => !Object.hasOwn(columns, k))) return fail('invalid_output', rel, path);
       if (order.some(k => base(columns[k]!).kind === 'AggregateFunction')) return fail('aggregate_state_selection', rel, path);
       nodes[path] = rel;
       const list = order.map(quoteIdentifier).join(', ');
       switch (rel.kind) {
+        case 'Join': {
+          if (rel.joinKind !== 'inner') return fail('unsupported_join', rel, path);
+          if (!Array.isArray(rel.inputs) || rel.inputs.length < 2 || new Set(rel.inputs.map(([a]) => a)).size !== rel.inputs.length) return fail('join_input_count', rel, `${path}.inputs`);
+          const expected = { shape: 'nested', inputs: rel.inputs.map(([a, r]) => [a, r.output]) };
+          if (JSON.stringify(expected) !== JSON.stringify(rel.output)) return fail('invalid_output', rel, path);
+          const clauses = rel.inputs.map(() => [] as { e: ExprNode; path: string }[]);
+          const residuals: { e: ExprNode; path: string }[] = [];
+          const join = rel;
+          function sides(e: ExprNode, p: string): Set<number> {
+            if (e.kind === 'ColumnRef') {
+              if (e.rel !== (join.scope ?? join.id)) return fail('unbound_column', e, p);
+              const index = join.inputs.findIndex(([a]) => a === e.path[0]);
+              if (index < 0) return fail('unbound_column', e, p);
+              return new Set([index]);
+            }
+            if (e.kind === 'Call') return new Set(e.args.flatMap((a, i) => [...sides(a, `${p}.args[${i}]`)]));
+            if (e.kind === 'Param') return new Set();
+            return fail('join_condition_arity', e, p);
+          }
+          function conjuncts(e: ExprNode, p: string): { e: ExprNode; path: string }[] {
+            if (e.kind !== 'Call' || e.fn.name !== 'and') return [{ e, path: p }];
+            // Validate the removed parent too, without assigning Params before SQL emission.
+            try { resolvedType(e); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_call', e, p); }
+            return e.args.flatMap((child, i) => conjuncts(child, `${p}.args[${i}]`));
+          }
+          for (const { e, path: p } of rel.on.flatMap((e, i) => conjuncts(e, `${path}.on[${i}]`))) {
+            if (e.kind !== 'Call' || e.fn.name !== 'eq') {
+              const type = e.type && base(e.type);
+              if (!type || type.kind !== 'scalar' || type.name !== 'Bool') return fail('invalid_predicate', e, p);
+              residuals.push({ e, path: p });
+              continue;
+            }
+            if (e.args.length !== 2) return fail('join_condition_arity', e, p);
+            const left = [...sides(e.args[0]!, `${p}.args[0]`)], right = [...sides(e.args[1]!, `${p}.args[1]`)];
+            if (left.length !== 1 || right.length !== 1 || left[0] === right[0]) return fail('join_condition_arity', e, p);
+            clauses[Math.max(left[0]!, right[0]!)]!.push({ e, path: p });
+          }
+          for (let i = 1; i < clauses.length; i++) if (!clauses[i]!.length) return fail('join_condition_arity', rel, `${path}.inputs[${i}]`, 'no equality connects this input to an earlier input');
+          const items = leaves.map(l => {
+            const side = rel.inputs.find(([a]) => a === l.path[0])!;
+            const child = outputLeaves(side[1].output).find(c => JSON.stringify(c.path) === JSON.stringify(l.path.slice(1)))!;
+            return `${quoteIdentifier(side[0])}.${quoteIdentifier(child.name)} AS ${quoteIdentifier(l.name)}`;
+          });
+          let source = '';
+          for (const [i, [alias, child]] of rel.inputs.entries()) {
+            source += `${i ? ' INNER ALL JOIN ' : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${quoteIdentifier(alias)}`;
+            if (i) source += ` ON ${clauses[i]!.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}`;
+          }
+          return `SELECT ${items.join(', ')} FROM ${source}${residuals.length ? ` WHERE ${residuals.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}` : ''}`;
+        }
         case 'Scan':
           if (rel.final !== undefined && typeof rel.final !== 'boolean') return fail('invalid_scan_hint', rel, `${path}.final`);
           if (rel.sample !== undefined && (typeof rel.sample !== 'number' || !Number.isFinite(rel.sample) || rel.sample <= 0 || rel.sample > 1)) return fail('invalid_scan_hint', rel, `${path}.sample`, 'expected fraction in (0, 1]');
@@ -94,21 +153,26 @@ export function emitNaive(root: Rel): CompiledQuery {
           if (typeof rel.alias !== 'string' || rel.alias.includes('\0')) return fail('invalid_array_join_alias', rel, `${path}.alias`);
           if (typeof rel.left !== 'boolean') return fail('invalid_array_join', rel, `${path}.left`);
           const input = rel.input.output;
-          if (input.shape !== 'flat') return fail('unsupported_output', rel, path);
-          if (Object.hasOwn(input.columns, rel.alias)) return fail('duplicate_column', rel, `${path}.alias`);
+          if (input.shape === 'deferred') return fail('unsupported_output', rel, path);
+          const inputLeaves = outputLeaves(input);
+          if (inputLeaves.some(l => l.path[0] === rel.alias)) return fail('duplicate_column', rel, `${path}.alias`);
           let type: CHType;
           try { type = resolvedType(rel.expr); } catch (error) { return fail('invalid_array_join_expression', rel, `${path}.expr`, String(error)); }
           if (type.kind !== 'Array') return fail('invalid_array_join_expression', rel, `${path}.expr`);
-          const expected = [...input.order, rel.alias];
-          if (JSON.stringify(order) !== JSON.stringify(expected) || order.some(k => !same(columns[k]!, k === rel.alias ? type.inner : input.columns[k]!)) || Object.keys(rel.columns).length !== order.length || order.some(k => !Object.hasOwn(rel.columns, k) || !same(rel.columns[k]!, columns[k]!))) return fail('invalid_output', rel, path);
+          const expected = outputLeaves(expandedOutput(input, rel.alias, type.inner));
+          if (JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(expected.map(l => [l.path, print(l.type)])) || Object.keys(rel.columns).length !== order.length || order.some(k => !Object.hasOwn(rel.columns, k) || !same(rel.columns[k]!, columns[k]!))) return fail('invalid_output', rel, path);
           // Internal element aliases cannot capture a user column or the input table alias.
           let element = '__chql_element';
-          while (Object.hasOwn(columns, element)) element += '_';
+          while (Object.hasOwn(columns, element) || inputLeaves.some(l => l.name === element)) element += '_';
           const quotedElement = quoteIdentifier(element);
           let sourceAlias = '__chql_input';
-          while (Object.hasOwn(columns, sourceAlias)) sourceAlias += '_';
+          while (Object.hasOwn(columns, sourceAlias) || inputLeaves.some(l => l.name === sourceAlias)) sourceAlias += '_';
           const qualifier = quoteIdentifier(sourceAlias);
-          const items = [...input.order.map(k => `${qualifier}.${quoteIdentifier(k)}`), `${quotedElement} AS ${quoteIdentifier(rel.alias)}`];
+          const items = leaves.map(leaf => {
+            if (leaf.path.length === 1 && leaf.path[0] === rel.alias) return `${quotedElement} AS ${quoteIdentifier(leaf.name)}`;
+            const source = inputLeaves.find(l => JSON.stringify(l.path) === JSON.stringify(leaf.path))!;
+            return `${qualifier}.${quoteIdentifier(source.name)} AS ${quoteIdentifier(leaf.name)}`;
+          });
           // FROM precedes ARRAY JOIN in emitted text, hence its Params are assigned first.
           const source = emit(rel.input, `${path}.input`);
           const expr = expression(rel.expr, rel.input, `${path}.expr`, undefined, false, 'row', qualifier);
@@ -138,7 +202,8 @@ export function emitNaive(root: Rel): CompiledQuery {
           return `SELECT ${items.join(', ')} FROM (${emit(rel.input, `${path}.input`)}) AS ${inputAlias}`;
         }
         case 'Filter': case 'Limit': case 'Sort': case 'Distinct': {
-          if (rel.input.output.shape !== 'flat' || JSON.stringify(order) !== JSON.stringify(rel.input.output.order) || order.some(k => !same(columns[k]!, rel.input.output.shape === 'flat' ? rel.input.output.columns[k]! : columns[k]!))) return fail('invalid_output', rel, path);
+          const inputLeaves = outputLeaves(rel.input.output);
+          if (JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(inputLeaves.map(l => [l.path, print(l.type)]))) return fail('invalid_output', rel, path);
           const source = emit(rel.input, `${path}.input`);
           if (rel.kind === 'Distinct') return `SELECT DISTINCT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias}`;
           if (rel.kind === 'Sort') {
@@ -166,7 +231,7 @@ export function emitNaive(root: Rel): CompiledQuery {
     } finally { active.delete(rel); }
   }
   const sql = emit(root, 'root');
-  if (root.output.shape !== 'flat') throw new ValidationError('unsupported_output', root, 'root');
-  return Object.freeze({ sql, params: Object.freeze(params), parameterTypes: Object.freeze(parameterTypes), columns: root.output.columns, nodes: Object.freeze(nodes) });
+  const leaves = outputLeaves(root.output);
+  return Object.freeze({ sql, params: Object.freeze(params), parameterTypes: Object.freeze(parameterTypes), columns: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, l.type]))), ...(root.output.shape === 'nested' ? { columnPaths: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, Object.freeze(l.path)]))) } : {}), nodes: Object.freeze(nodes) });
 }
 export const compile = emitNaive;

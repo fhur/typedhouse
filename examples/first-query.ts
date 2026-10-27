@@ -1,4 +1,4 @@
-import { count, max, from, registerCompiler } from "@chql/core";
+import { count, max, from, registerCompiler, join } from "@chql/core";
 import { emitNaive } from "@chql/compiler";
 import { createClient } from "@chql/client";
 // Checked-in output of the real codegen integration fixture. For your database,
@@ -47,6 +47,11 @@ try {
     .orderBy(r => r.id).thenBy(r => r.partId).limit(10);
   console.log(componentParts.toSQL());
   console.log(await client.run(componentParts));
+  const sharedParts = join({ a: componentParts, b: componentParts })
+    .on(r => [r.a.partId.eq(r.b.partId), r.a.id.lt(r.b.id)])
+    .map(r => ({ a: r.a.id, b: r.b.id, partId: r.a.partId }));
+  console.log(sharedParts.toSQL());
+  console.log(await client.run(sharedParts));
   // Fixture tables have no sampling key: demonstrate SQL only, not execution.
   console.log(from(db.entity_ots_component).sample(0.1).toSQL());
 } finally {

@@ -49,13 +49,21 @@ export function decoder(type: CHType): (value: unknown) => unknown {
   };
   throw new Error(`decode_unsupported: ${print(type)}`);
 }
-export function rowDecoder(columns: FlatColumns): (row: unknown) => Record<string, unknown> {
+export function rowDecoder(columns: FlatColumns, paths?: Readonly<Record<string, readonly string[]>>): (row: unknown) => Record<string, unknown> {
   const entries = Object.entries(columns).map(([name, type]) => [name, decoder(type)] as const);
   return row => {
     if (row === null || typeof row !== 'object' || Array.isArray(row)) throw new Error('decode_invalid_row');
-    return Object.fromEntries(entries.map(([name, decode]) => {
+    const result: Record<string, unknown> = {};
+    for (const [name, decode] of entries) {
       if (!Object.hasOwn(row, name)) throw new Error(`decode_missing_column: ${name}`);
-      return [name, decode((row as Record<string, unknown>)[name])];
-    }));
+      const path = paths?.[name] ?? [name];
+      let target = result;
+      for (const key of path.slice(0, -1)) {
+        if (!Object.hasOwn(target, key)) Object.defineProperty(target, key, { value: {}, enumerable: true });
+        target = target[key] as Record<string, unknown>;
+      }
+      Object.defineProperty(target, path[path.length - 1]!, { value: decode((row as Record<string, unknown>)[name]), enumerable: true, writable: true, configurable: true });
+    }
+    return result;
   };
 }

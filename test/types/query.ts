@@ -169,6 +169,62 @@ expectTypeOf<Awaited<ReturnType<typeof structuralRun>>>().not.toBeAny();
 const run = () => client.run(q);
 expectTypeOf<Awaited<ReturnType<typeof run>>>().toEqualTypeOf<{ id: bigint; updatedAt: Date; category: string | null }[]>();
 expectTypeOf<Awaited<ReturnType<typeof run>>>().not.toBeAny();
+import { join } from '@chql/core';
+const joined = join({ a: q, b: q }).on(r => r.a.id.eq(r.b.id));
+expectTypeOf<Infer<typeof joined>>().toEqualTypeOf<{ a: Infer<typeof q>; b: Infer<typeof q> }>();
+expectTypeOf<Infer<typeof joined>>().not.toBeAny();
+const joinedRun = () => client.run(joined);
+expectTypeOf<Awaited<ReturnType<typeof joinedRun>>>().toEqualTypeOf<{ a: Infer<typeof q>; b: Infer<typeof q> }[]>();
+expectTypeOf<Awaited<ReturnType<typeof joinedRun>>>().not.toBeAny();
+const nestedJoined = join({ ab: joined, c: q }).on(r => r.ab.a.id.eq(r.c.id)).where(r => r.ab.b.id.gt(0n)).orderBy(r => r.c.id).limit(1);
+expectTypeOf<Infer<typeof nestedJoined>>().toEqualTypeOf<{ ab: { a: Infer<typeof q>; b: Infer<typeof q> }; c: Infer<typeof q> }>();
+expectTypeOf<Infer<typeof nestedJoined>>().not.toBeAny();
+const nestedRollup = nestedJoined.groupBy(r => r.c.category).aggregate(g => ({ n: max(g.ab.a.id) }));
+expectTypeOf<Infer<typeof nestedRollup>>().toEqualTypeOf<{ category: string | null; n: bigint }>();
+expectTypeOf<Infer<typeof nestedRollup>>().not.toBeAny();
+type Versioned = { tenantId: string; entityId: string; version: number };
+const latest = <R extends Versioned>(q: Query<R>) => {
+  const newest = q.groupBy(m => ({ tenantId: m.tenantId, entityId: m.entityId })).aggregate(g => ({ version: max(g.version) }));
+  return join({ m: q, v: newest }).on(r => [r.m.tenantId.eq(r.v.tenantId), r.m.entityId.eq(r.v.entityId), r.m.version.eq(r.v.version)]).map(r => ({ ...r.m }));
+};
+const metric = from(table('metric', { tenantId: col.String, entityId: col.String, version: col.UInt32, stock: col.Float64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const latestMetric = latest(metric);
+expectTypeOf<Infer<typeof latestMetric>>().toEqualTypeOf<{ tenantId: string; entityId: string; version: number; stock: number }>();
+expectTypeOf<Infer<typeof latestMetric>>().not.toBeAny();
+const priceMetric = metric.map(r => ({ tenantId: r.tenantId, entityId: r.entityId, version: r.version, prices: val([1, 2], col.Array(col.Float64)) }));
+const latestPrices = latest(priceMetric);
+expectTypeOf<Infer<typeof latestPrices>>().toEqualTypeOf<{ tenantId: string; entityId: string; version: number; prices: number[] }>();
+expectTypeOf<Infer<typeof latestPrices>>().not.toBeAny();
+// Accepted composition must execute as well as infer an exact nested row.
+const structuralJoin = join({ a: from(structuralTable), b: from(structuralTable) }).on(r => r.a.n.eq(r.b.n));
+const joinedExpansion = structuralJoin.arrayJoin(r => r.a.names, 'item');
+const joinedLeftExpansion = structuralJoin.leftArrayJoin(r => r.a.names, 'item');
+type JoinedExpansionRow = { a: Infer<typeof structuralTable>; b: Infer<typeof structuralTable>; item: string };
+expectTypeOf<Infer<typeof joinedExpansion>>().toEqualTypeOf<JoinedExpansionRow>();
+expectTypeOf<Infer<typeof joinedLeftExpansion>>().toEqualTypeOf<JoinedExpansionRow>();
+expectTypeOf<Infer<typeof joinedExpansion>>().not.toBeAny();
+expectTypeOf<Infer<typeof joinedLeftExpansion>>().not.toBeAny();
+const expandedGrouped = joinedExpansion.where(r => r.a.n.gt(0)).orderBy(r => r.item).limit(2).distinct()
+  .groupBy(r => r.item).aggregate(g => ({ n: max(g.a.n), count: count() }));
+expectTypeOf<Infer<typeof expandedGrouped>>().toEqualTypeOf<{ item: string; n: number; count: bigint }>();
+expectTypeOf<Infer<typeof expandedGrouped>>().not.toBeAny();
+expectTypeOf(joinedExpansion.row.a.n).toEqualTypeOf<typeof structuralJoin.row.a.n>();
+expectTypeOf(joinedExpansion.row.item.ir.type.name).toEqualTypeOf<'String'>();
+expectTypeOf(joinedExpansion.row.item.ir.type.kind).toEqualTypeOf<'scalar'>();
+const nullableArrays = q.map(r => ({ id: r.id, values: val([null, 7], col.Array(col.Nullable(col.Int32))) }));
+const nullableExpanded = join({ a: nullableArrays, b: nullableArrays }).on(r => r.a.id.eq(r.b.id))
+  .leftArrayJoin(r => r.a.values, 'one').arrayJoin(r => r.b.values, 'two');
+expectTypeOf<Infer<typeof nullableExpanded>>().toEqualTypeOf<{ a: { id: bigint; values: (number | null)[] }; b: { id: bigint; values: (number | null)[] }; one: number | null; two: number | null }>();
+expectTypeOf<Infer<typeof nullableExpanded>>().not.toBeAny();
+expectTypeOf(nullableExpanded.row.one.ir.type.kind).toEqualTypeOf<'Nullable'>();
+expectTypeOf(nullableExpanded.row.one.ir.type.inner.name).toEqualTypeOf<'Int32'>();
+const conjunctionJoin = join({ a: q, b: q }).on(r => r.a.id.eq(r.b.id).and(r.a.id.gt(0n)));
+expectTypeOf<Infer<typeof conjunctionJoin>>().toEqualTypeOf<{ a: Infer<typeof q>; b: Infer<typeof q> }>();
+expectTypeOf<Infer<typeof conjunctionJoin>>().not.toBeAny();
+const dynamicJoinAlias: string = ['side'].join('');
+const dynamicJoin = join({ [dynamicJoinAlias]: q, fixed: q }).on(r => r[dynamicJoinAlias]!.id.eq(r.fixed.id));
+expectTypeOf<Infer<typeof dynamicJoin>['absent']>().toEqualTypeOf<Infer<typeof q> | undefined>();
+expectTypeOf<typeof dynamicJoin.row.absent>().toEqualTypeOf<typeof q.row | undefined>();
 // @ts-expect-error predicate must be boolean
 from(t).where(r => r.id);
 // @ts-expect-error flat expression projection only

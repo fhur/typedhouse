@@ -9,9 +9,9 @@ export function createClient(options: ClickHouseClientConfigOptions = {}) {
   const driver = createDriver(options);
   const plans = new WeakMap<Rel, { compiled: CompiledQuery; decode: ReturnType<typeof rowDecoder> }>();
   return {
-    async run<R, C extends Caps>(query: Query<R, C>): Promise<R[]> {
+    async run<R, C extends Caps>(query: Pick<Query<R, C>, 'ir' | '_rowType' | 'caps'>): Promise<R[]> {
       let plan = plans.get(query.ir);
-      if (!plan) { const compiled = compile(query.ir); plan = { compiled, decode: rowDecoder(compiled.columns) }; plans.set(query.ir, plan); }
+      if (!plan) { const compiled = compile(query.ir); plan = { compiled, decode: rowDecoder(compiled.columns, compiled.columnPaths) }; plans.set(query.ir, plan); }
       const { compiled, decode } = plan;
       try {
         // Driver string formatting would escape the quotes in an already serialized Array.

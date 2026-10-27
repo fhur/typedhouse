@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler } from '@chql/core';
+import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, type Query } from '@chql/core';
 import { emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -24,6 +24,129 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('executes inner ALL self/three-way/nested joins with residuals, nullable keys and empty inputs', async () => {
+  await sql('CREATE TABLE inner_probe (tenantId String, id UInt32, key Nullable(UInt32), labels Array(String)) ENGINE=Memory');
+  await sql("INSERT INTO inner_probe VALUES ('acme',1,7,['a']),('acme',2,7,['b']),('acme',3,NULL,[]),('other',4,7,['secret'])");
+  const source = from(table('inner_probe', { tenantId: col.String, id: col.UInt32, key: col.Nullable(col.UInt32), labels: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const q = source.where(r => r.tenantId.eq('acme'));
+  const both = join({ a: q, b: q }).on(r => r.a.key.eq(r.b.key));
+  const rows = await client.run(both.orderBy(r => r.a.id).thenBy(r => r.b.id));
+  expect(rows).toEqual([1, 2].flatMap(a => [1, 2].map(b => ({ a: { tenantId: 'acme', id: a, key: 7, labels: [a === 1 ? 'a' : 'b'] }, b: { tenantId: 'acme', id: b, key: 7, labels: [b === 1 ? 'a' : 'b'] } }))));
+  const flat = both.map(r => ({ a: r.a.id, b: r.b.id })).orderBy(r => r.a).thenBy(r => r.b);
+  const baseline = (await sql("SELECT a.id AS a,b.id AS b FROM inner_probe a INNER ALL JOIN inner_probe b ON a.key=b.key WHERE a.tenantId='acme' AND b.tenantId='acme' ORDER BY a,b FORMAT JSONEachRow")).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(await client.run(flat)).toEqual(baseline);
+  const residual = join({ a: q, b: q }).on(r => [r.a.key.eq(r.b.key), r.a.id.lt(r.b.id)]);
+  expect(await client.run(residual.map(r => ({ a: r.a.id, b: r.b.id })))).toEqual([{ a: 1, b: 2 }]);
+  expect(await client.run(residual.groupBy(r => r.a.key).aggregate(g => ({ sum: sum(g.b.id) })))).toEqual([{ key: 7, sum: 2n }]);
+  expect(await client.run(join({ a: q, b: q, c: q }).on(r => [r.a.key.eq(r.b.key), r.b.id.eq(r.c.id)]).aggregate(() => count()))).toEqual([{ count: 4n }]);
+  const nested = join({ ab: residual, c: q }).on(r => r.ab.b.id.eq(r.c.id));
+  expect(await client.run(nested.map(r => ({ a: r.ab.a.id, c: r.c.id })))).toEqual([{ a: 1, c: 2 }]);
+  expect((await client.run(nested))[0]?.ab.a.id).toBe(1);
+  expect(await client.run(both.where(r => r.a.id.eq(1)).distinct().limit(1).map(r => r.a.labels.arrayElement(1)))).toEqual([{ labels: 'a' }]);
+  expect(await client.run(join({ a: q.limit(0), b: q }).on(r => r.a.id.eq(r.b.id)))).toEqual([]);
+  expect(await client.run(join({ a: q, b: q.limit(0) }).on(r => r.a.id.eq(r.b.id)))).toEqual([]);
+  for (const alias of ['__proto__', 'constructor', 'a.b', '42', '__chql_leaf_0', 'x`\\\\ hostile']) {
+    const hostile = join({ [alias]: q, other: q }).on(r => r[alias]!.id.eq(r.other!.id)).map(r => ({ id: r[alias]!.id }));
+    expect(await client.run(hostile.orderBy(r => r.id))).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
+  }
+});
+it('preserves reversed multi-input keys and an indivisible OR residual inside nested conjunctions', async () => {
+  const q = from(db.entity_ots_component);
+  const query = join({ a: q, b: q, c: q }).on(r =>
+    r.c.entityId.eq(r.b.entityId).and(r.b.tenantId.eq(r.a.tenantId).and(
+      r.a.entityId.lt(r.b.entityId).or(r.c.entityId.eq('b')),
+    )),
+  ).map(r => ({ a: r.a.entityId, b: r.b.entityId, c: r.c.entityId })).orderBy(r => r.a);
+  const baseline = (await sql("SELECT a.entityId AS a,b.entityId AS b,c.entityId AS c FROM entity_ots_component a INNER ALL JOIN entity_ots_component b ON b.tenantId=a.tenantId INNER ALL JOIN entity_ots_component c ON c.entityId=b.entityId WHERE a.entityId<b.entityId OR c.entityId='b' ORDER BY a FORMAT JSONEachRow")).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(baseline).toEqual([{ a: 'a', b: 'c', c: 'c' }, { a: 'b', b: 'b', c: 'b' }]);
+  expect(await client.run(query)).toEqual(baseline);
+});
+it('retains nested nullable arrays and Cartesian multiplicity through repeated LEFT expansion', async () => {
+  const source = from(db.entity_ots_component).where(r => r.entityId.eq('a')).map(r => ({ id: r.entityId, values: val([null, 7, 7], col.Array(col.Nullable(col.Int32))) }));
+  const empty = source.map(r => ({ id: r.id, values: val([], col.Array(col.Nullable(col.Int32))) }));
+  const joined = join({ a: source, b: empty }).on(r => r.a.id.eq(r.b.id));
+  const expanded = joined.leftArrayJoin(r => r.b.values, 'empty').arrayJoin(r => r.a.values, 'one').leftArrayJoin(r => r.a.values, 'two');
+  const rows = await client.run(expanded);
+  expect(rows).toHaveLength(9);
+  expect(rows).toEqual([null, 7, 7].flatMap(one => [null, 7, 7].map(two => ({ a: { id: 'a', values: [null, 7, 7] }, b: { id: 'a', values: [] }, empty: null, one, two }))));
+  expect(await client.run(expanded.distinct().aggregate(() => count()))).toEqual([{ count: 4n }]);
+  expect(await client.run(expanded.groupBy(r => r.empty).aggregate(g => ({ n: count(), total: sum(g.one) })))).toEqual([{ empty: null, n: 9n, total: 42n }]);
+  expect(await client.run(joined.arrayJoin(r => r.b.values, 'missing'))).toEqual([]);
+});
+it('treats a single conjunction as the same inner join keys and residuals as an array', async () => {
+  const q = from(db.entity_ots_component);
+  const baseline = (await sql("SELECT a.entityId AS a,b.entityId AS b FROM entity_ots_component a INNER ALL JOIN entity_ots_component b ON a.tenantId=b.tenantId WHERE a.entityId<b.entityId ORDER BY a,b FORMAT JSONEachRow")).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(baseline).toEqual([{ a: 'a', b: 'c' }]);
+  const array = join({ a: q, b: q }).on(r => [r.a.tenantId.eq(r.b.tenantId), r.a.entityId.lt(r.b.entityId)]).map(r => ({ a: r.a.entityId, b: r.b.entityId }));
+  expect(await client.run(array)).toEqual(baseline);
+  const conjunction = join({ a: q, b: q }).on(r => r.a.tenantId.eq(r.b.tenantId).and(r.a.entityId.lt(r.b.entityId))).map(r => ({ a: r.a.entityId, b: r.b.entityId }));
+  expect(await client.run(conjunction)).toEqual(baseline);
+});
+it.each(['arrayJoin', 'leftArrayJoin'] as const)('composes nested join rows with %s', async method => {
+  const q = from(db.entity_ots_component).where(r => r.entityId.eq('a')).map(r => ({ id: r.entityId, labels: val(['x', 'x'], col.Array(col.String)) }));
+  const joined = join({ a: q, b: q }).on(r => r.a.id.eq(r.b.id));
+  const baseline = JSON.parse(await sql("SELECT 'a' AS id, arrayJoin(['x','x']) AS item FORMAT JSON")).data as unknown;
+  expect(baseline).toEqual([{ id: 'a', item: 'x' }, { id: 'a', item: 'x' }]);
+  const expanded = joined[method](r => r.a.labels, 'item');
+  expect(await client.run(expanded.map(r => ({ id: r.a.id, item: r.item })))).toEqual(baseline);
+  expect(await client.run(expanded)).toEqual(['x', 'x'].map(item => ({ a: { id: 'a', labels: ['x', 'x'] }, b: { id: 'a', labels: ['x', 'x'] }, item })));
+  const empty = q.map(r => ({ id: r.id, labels: val([], col.Array(col.String)) }));
+  const left = join({ a: empty, b: q }).on(r => r.a.id.eq(r.b.id)).leftArrayJoin(r => r.a.labels, 'item');
+  expect(await client.run(left.map(r => ({ id: r.a.id, item: r.item })))).toEqual([{ id: 'a', item: '' }]);
+});
+it('retains nested expansion descriptors, remaps transport aliases, and composes grouping and another join', async () => {
+  const pair = col.Tuple({ n: col.UInt64, labels: col.Array(col.String) });
+  await sql('CREATE TABLE nested_expansion_probe (id String, pairs Array(Tuple(n UInt64, labels Array(String)))) ENGINE=Memory');
+  await sql("INSERT INTO nested_expansion_probe VALUES ('a',[(7,['x','x'])])");
+  const q = from(table('nested_expansion_probe', { id: col.String, pairs: col.Array(pair) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const joined = join({ a: q, b: q }).on(r => r.a.id.eq(r.b.id));
+  const expanded = joined.arrayJoin(r => r.a.pairs, '__chql_leaf_0').leftArrayJoin(r => r.__chql_leaf_0.element('labels'), '__proto__');
+  const row = { a: { id: 'a', pairs: [{ n: 7n, labels: ['x', 'x'] }] }, b: { id: 'a', pairs: [{ n: 7n, labels: ['x', 'x'] }] }, __chql_leaf_0: { n: 7n, labels: ['x', 'x'] }, ['__proto__']: 'x' };
+  expect(await client.run(expanded.where(r => r.a.id.eq('a')).orderBy(r => r.__proto__).limit(2))).toEqual([row, row]);
+  expect(await client.run(expanded.distinct())).toEqual([row]);
+  expect(await client.run(expanded.groupBy(r => r.a.id).aggregate(g => ({ n: max(g.__chql_leaf_0.element('n')), count: count() }))))
+    .toEqual([{ id: 'a', n: 7n, count: 2n }]);
+  const again = join({ expanded, q }).on(r => r.expanded.a.id.eq(r.q.id));
+  expect(await client.run(again.map(r => ({ n: r.expanded.__chql_leaf_0.element('n'), label: r.expanded.__proto__ })))).toEqual([{ n: 7n, label: 'x' }, { n: 7n, label: 'x' }]);
+});
+it('normalizes nullable keys and preserves nested transport collisions through residual and sort scopes', async () => {
+  const q = from(db.entity_ots_component).where(r => r.tenantId.eq('acme')).map(r => ({ id: r.entityId, key: r.category, ['__chql_leaf_0']: r.countOfParts }));
+  const inner = join({ ['__chql_leaf_0']: q, b: q }).on(r => [
+    r.__chql_leaf_0.key.ifNull('missing').eq(r.b.key.ifNull('missing')),
+    r.__chql_leaf_0.id.le(r.b.id), r.b.id.ge('a'),
+  ]);
+  const nested = join({ ['__chql_leaf__0']: inner, c: q }).on(r => r.__chql_leaf__0.b.id.eq(r.c.id));
+  const ordered = nested.orderBy(r => r.c.id.desc()).thenBy(r => r.__chql_leaf__0.b.id).orderBy(r => r.c.id).distinct().limit(2);
+  const rows = await client.run(ordered);
+  expect(rows).toEqual([
+    { __chql_leaf__0: { __chql_leaf_0: { id: 'a', key: null, __chql_leaf_0: 18446744073709551615n }, b: { id: 'a', key: null, __chql_leaf_0: 18446744073709551615n } }, c: { id: 'a', key: null, __chql_leaf_0: 18446744073709551615n } },
+    { __chql_leaf__0: { __chql_leaf_0: { id: 'c', key: 'visible', __chql_leaf_0: 0n }, b: { id: 'c', key: 'visible', __chql_leaf_0: 0n } }, c: { id: 'c', key: 'visible', __chql_leaf_0: 0n } },
+  ]);
+  expect(await client.run(ordered.groupBy(r => r.c.key).aggregate(g => ({ n: count(), total: sum(g.__chql_leaf__0.b.__chql_leaf_0) })).orderBy(r => r.key.asc().nullsFirst()))).toEqual([{ key: null, n: 1n, total: 18446744073709551615n }, { key: 'visible', n: 1n, total: 0n }]);
+});
+it('runs the unchanged generic latest helper on FINAL and joins expanded component parts', async () => {
+  type Versioned = { tenantId: string; entityId: string; version: number };
+  const latest = <R extends Versioned>(q: Query<R>) => {
+    const newest = q.groupBy(m => ({ tenantId: m.tenantId, entityId: m.entityId })).aggregate(g => ({ version: max(g.version) }));
+    return join({ m: q, v: newest }).on(r => [r.m.tenantId.eq(r.v.tenantId), r.m.entityId.eq(r.v.entityId), r.m.version.eq(r.v.version)]).map(r => ({ ...r.m }));
+  };
+  await sql('CREATE TABLE latest_probe (tenantId String, entityId String, version UInt32, inserted UInt32, stock Float64) ENGINE=ReplacingMergeTree(inserted) ORDER BY (tenantId,entityId,version)');
+  await sql('SYSTEM STOP MERGES latest_probe');
+  await sql("INSERT INTO latest_probe VALUES ('acme','p1',1,1,10),('acme','p1',2,1,20),('other','p1',9,1,999)");
+  await sql("INSERT INTO latest_probe VALUES ('acme','p1',2,2,25)");
+  const q = from(table('latest_probe', { tenantId: col.String, entityId: col.String, version: col.UInt32, inserted: col.UInt32, stock: col.Float64 }, { engine: 'ReplacingMergeTree', sortingKey: ['tenantId','entityId','version'], partitionKey: [] }));
+  expect(await client.run(latest(q.final().where(r => r.tenantId.eq('acme'))))).toEqual([{ tenantId: 'acme', entityId: 'p1', version: 2, inserted: 2, stock: 25 }]);
+  const componentParts = from(db.entity_ots_component).where(r => r.entityId.eq('a')).map(r => ({ tenantId: r.tenantId, entityId: r.entityId, matched_part_ids: val(['p1','p1'], col.Array(col.String)) })).arrayJoin(r => r.matched_part_ids, 'partId');
+  const joined = join({ c: componentParts, p: latest(q.final()) }).on(r => [r.c.tenantId.eq(r.p.tenantId), r.c.partId.eq(r.p.entityId)]).map(r => ({ component: r.c.entityId, stock: r.p.stock }));
+  expect(await client.run(joined)).toEqual([{ component: 'a', stock: 25 }, { component: 'a', stock: 25 }]);
+  await sql('CREATE TABLE parts_probe (tenantId String, entityId String, mpn String, manufacturerName String) ENGINE=Memory');
+  await sql("INSERT INTO parts_probe VALUES ('acme','p1','GRM','Maker'),('other','p1','hidden','Secret')");
+  const parts = from(table('parts_probe', { tenantId: col.String, entityId: col.String, mpn: col.String, manufacturerName: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const withParts = join({ c: componentParts, p: parts }).on(r => [r.c.tenantId.eq(r.p.tenantId), r.c.partId.eq(r.p.entityId)]).map(r => ({ component: r.c.entityId, mpn: r.p.mpn, manufacturer: r.p.manufacturerName }));
+  expect(await client.run(withParts)).toEqual([{ component: 'a', mpn: 'GRM', manufacturer: 'Maker' }, { component: 'a', mpn: 'GRM', manufacturer: 'Maker' }]);
+  const direct = (await sql("SELECT 'a' AS component, p.mpn AS mpn, p.manufacturerName AS manufacturer FROM (SELECT 'acme' AS tenantId, arrayJoin(['p1','p1']) AS partId) c INNER ALL JOIN parts_probe p ON c.tenantId=p.tenantId AND c.partId=p.entityId FORMAT JSONEachRow")).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(await client.run(withParts)).toEqual(direct);
+});
 it('executes supported SAMPLE fractions on a sampling-key fixture', async () => {
   await sql('CREATE TABLE sampling_probe (id UInt32, hash UInt64) ENGINE=MergeTree ORDER BY hash SAMPLE BY hash');
   await sql('INSERT INTO sampling_probe SELECT number, cityHash64(number) FROM numbers(32)');

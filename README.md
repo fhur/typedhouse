@@ -30,6 +30,21 @@ optional additional fields (only one exists at runtime); patterned indexes also 
 matching source values. Widened `string` aliases retain known source
 fields and expose possibly absent dynamic keys whose values include source and
 child types. Narrow/check dynamic keys before use; runtime collisions still fail.
+`join({ a: queryA, b: queryB, ... }).on(r => r.a.id.eq(r.b.id))` executes
+inner **ALL** joins (duplicates retained). An array of predicates supplies multiple
+keys; additional non-equality predicates become Filters above the join. Include
+tenant keys unless both sides are already tenant-scoped. Each input after the first
+must have an equality connecting it to an earlier input: disconnected input-order
+graphs fail with `join_condition_arity`, never silently become cross joins.
+Callbacks expose frozen nested rows; `map(r => ({ ...r.a }))` flattens a side and
+retains leaf descriptors. Direct `client.run(joined)` returns nested decoded rows,
+including when a join is itself another join's input. Tuple-valued columns remain
+expressions, not relational side objects. Filters/order/limit/distinct and grouped
+callbacks preserve nested structure. Transport names are collision-free internal
+ordinals, never dotted paths. Shared inputs retain IR identity; the naive emitter
+repeats them rather than extracting CTEs. ON references use an explicit occurrence
+scope (`Join.scope`) so same-input self-joins cannot accidentally bind both sides
+to one alias. Outer/cross joins are not implemented by this bounded preview.
 Grouped and global aggregation execute `count`, `sum`, `max` and their `If`
 forms: `q.groupBy(r => r.category).aggregate(() => count())` or
 `q.aggregate(g => ({ total: sum(g.amount) }))`. Keys precede aggregate outputs;
@@ -49,7 +64,7 @@ The client decodes String/FixedString, Bool, integer widths, floats (including
 non-finite values), DateTime64(0–3), recursive Array and named/unnamed Tuple,
 Nullable and LowCardinality. Decimal, other dates/high-precision timestamps,
 Map, Enum, addresses, opaque states and unknown descriptors remain explicitly
-unsupported. Full catalog, joins, optimizations, streaming and Part 4 backend
+unsupported. Full catalog, outer/cross joins, optimizations, streaming and Part 4 backend
 plugins remain backlog.
 
 Against a ClickHouse database with the fixture's `entity_ots_component` schema:

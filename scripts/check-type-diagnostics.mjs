@@ -48,7 +48,10 @@ try {
     const source = readFileSync(join('test/types/negative/expressions', file), 'utf8');
     writeFileSync(join(directory, file), source);
     source.split('\n').forEach((line, index) => {
-      const m = line.match(/\/\/ expect: TS(\d+) (.+)$/);
+      // TS7 reports some argument failures as property diagnostics and prints
+      // only the final overload. Each compiler still has one exact expectation.
+      const annotation = !api?.createProgram && line.includes('// expect-ts7:') ? line.slice(line.indexOf('// expect-ts7:')).replace('// expect-ts7:', '// expect:') : line.split(' // expect-ts7:')[0];
+      const m = annotation.match(/\/\/ expect: TS(\d+) (.+)$/);
       if (m) expected.push({ file, line: index + 1, code: Number(m[1]), message: m[2] });
     });
   }

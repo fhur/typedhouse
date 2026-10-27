@@ -15,6 +15,7 @@ export function columnExpr<C extends Column, N extends string, M extends Mode>(d
 declare const exprValue: unique symbol;
 declare const exprName: unique symbol;
 declare const exprMode: unique symbol;
+export type ExprValue<E extends Expr<unknown, string, Mode>> = E[typeof exprValue];
 /** The only expression wrapper. The graph owns values; this wrapper owns no mutable state. */
 export class Expr<T, N extends string = never, M extends Mode = 'row'> {
   declare private readonly brand: void;
