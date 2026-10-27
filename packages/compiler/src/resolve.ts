@@ -1,4 +1,25 @@
-import { methodCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
+import { aggregateDefinitions, methodCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
+
+export function resolveAggregate(e: Extract<ExprNode, { kind: 'Agg' }>, resolve: (e: ExprNode, expected?: CHType) => CHType): { result: CHType; sqlName: string } {
+  const def = aggregateDefinitions.find(d => d.name === e.fn.name);
+  if (!def || e.fn.origin !== 'typed') throw new Error('unsupported_aggregate');
+  if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || e.fn.linear !== def.linear || e.fn.argumentPolicies !== undefined) throw new Error('invalid_function_metadata');
+  if (e.params.length || e.combinators.length > 1 || e.combinators.some(c => c !== 'If')) throw new Error('unsupported_aggregate_combinator');
+  const conditional = e.combinators[0] === 'If';
+  if (e.args.length !== def.args.length + Number(conditional)) throw new Error('invalid_argument_arity');
+  const types = e.args.map(a => resolve(a));
+  for (let i = 0; i < def.args.length; i++) {
+    const matcher = def.args[i]!;
+    if (!('match' in matcher ? matcher.match(types[i]!) : print(matcher.type) === print(types[i]!))) throw new Error('incompatible_operands');
+  }
+  if (conditional) { const t = unwrap(types[types.length - 1]!); if (t.kind !== 'scalar' || t.name !== 'Bool') throw new Error('invalid_predicate'); }
+  const args = types.slice(0, def.args.length);
+  const returns = def.returns;
+  let result = typeof returns === 'function' ? returns(args, []) : returns === 'arg0' ? args[0]! : returns.type;
+  if (def.nullable !== 'never' && args.some(isNullable)) result = nullable(result);
+  if (print(result) !== print(e.type)) throw new Error('invalid_expression_type');
+  return { result, sqlName: (def.sqlName ?? def.name) + (conditional ? 'If' : '') };
+}
 
 function compatible(a: CHType, b: CHType): boolean {
   const left = unwrap(a), right = unwrap(b);

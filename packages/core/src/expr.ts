@@ -9,7 +9,7 @@ export type DescribedConstant<C extends Column> = Constant<Value<C>> & { readonl
 
 /** Descriptor-backed construction retains SQL identity even when decoded types coincide. */
 export function columnExpr<C extends Column, N extends string, M extends Mode>(descriptor: C, rel: NodeId, path: readonly string[], name: N, mode: M): DescribedExpr<Value<C>, N, M, C['type']> {
-  return new Expr(exprNode({ kind: 'ColumnRef', rel, path, type: descriptor.type }), name, mode) as DescribedExpr<Value<C>, N, M, C['type']>;
+  return new Expr(exprNode({ kind: 'ColumnRef', rel, path, type: descriptor.type, ...(mode === 'grouped' || mode === 'row' ? { mode } : {}) }), name, mode) as DescribedExpr<Value<C>, N, M, C['type']>;
 }
 
 declare const exprValue: unique symbol;

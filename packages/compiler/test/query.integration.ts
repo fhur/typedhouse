@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { from, col, table, val, registerCompiler } from '@chql/core';
+import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler } from '@chql/core';
 import { emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -24,6 +24,47 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('executes grouped/global aggregates with nullable and empty inputs', async () => {
+  await sql('CREATE TABLE aggregation_probe (k Nullable(String), n UInt32, f Float64, v Nullable(Int32)) ENGINE=Memory');
+  await sql("INSERT INTO aggregation_probe VALUES ('a',2,1.5,4),('a',3,2.5,NULL),(NULL,7,3,NULL)");
+  const t = table('aggregation_probe', { k: col.Nullable(col.String), n: col.UInt32, f: col.Float64, v: col.Nullable(col.Int32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+  const q = from(t);
+  expect(await client.run(q.groupBy(r => r.k).aggregate(g => ({ count: count(), n: sum(g.n), f: sum(g.f), v: max(g.v), s: sum(g.v), c: countIf(g.n.gt(2)), si: sumIf(g.n, g.n.gt(2)), mi: maxIf(g.n, g.n.gt(2)) })).orderBy(r => r.k.asc().nullsFirst()))).toEqual([
+    { k: null, count: 1n, n: 7n, f: 3, v: null, s: null, c: 1n, si: 7n, mi: 7 },
+    { k: 'a', count: 2n, n: 5n, f: 4, v: 4, s: 4n, c: 1n, si: 3n, mi: 3 },
+  ]);
+  expect(await client.run(q.where(r => r.n.eq(999)).aggregate(g => ({ count: count(), n: sum(g.n), v: max(g.v), s: sum(g.v), m: max(g.n) })))).toEqual([{ count: 0n, n: 0n, v: null, s: null, m: 0 }]);
+  expect(await client.run(q.aggregate(g => sum(g.n)))).toEqual([{ n: 12n }]);
+  expect(await client.run(q.aggregate(g => ({ c: countIf(g.n.lt(0)), s: sumIf(g.v, g.n.lt(0)), m: maxIf(g.v, g.n.lt(0)), n: sumIf(g.n, g.n.lt(0)) })))).toEqual([{ c: 0n, s: null, m: null, n: 0n }]);
+  const fallback = val('missing');
+  const grouped = q.groupBy(r => ({ ['__proto__']: r.k.ifNull(fallback) })).aggregate(g => ({ ratio: sum(g.n).divide(count()), total: count() }));
+  expect(grouped.toSQL().params).toEqual({ p0: 'missing' });
+  expect(grouped.toSQL().sql.match(/\{p0:String\}/g)).toHaveLength(2);
+  expect(await client.run(grouped.where(r => r.total.gt(1n)).orderBy(r => r.ratio).limit(1).map(r => ({ key: r.__proto__, ratio: r.ratio })))).toEqual([{ key: 'a', ratio: 2.5 }]);
+  expect((await sql('SELECT toTypeName(sum(v)), toTypeName(max(v)), toTypeName(sum(n)) FROM aggregation_probe')).trim()).toBe('Nullable(Int64)\tNullable(Int32)\tUInt64');
+});
+it('keeps nullable If predicates consistent with actual server result descriptors', async () => {
+  await sql('CREATE TABLE agg_nullable_predicate (n UInt32, p Nullable(Bool)) ENGINE=Memory');
+  await sql('INSERT INTO agg_nullable_predicate VALUES (2,true),(3,false),(7,NULL)');
+  const q = from(table('agg_nullable_predicate', { n: col.UInt32, p: col.Nullable(col.Bool) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  expect((await sql('SELECT toTypeName(sumIf(n,p)), toTypeName(maxIf(n,p)), toTypeName(countIf(p)) FROM agg_nullable_predicate')).trim()).toBe('UInt64\tUInt32\tUInt64');
+  expect(await client.run(q.aggregate(g => ({ s: sumIf(g.n, g.p), m: maxIf(g.n, g.p), c: countIf(g.p) })))).toEqual([{ s: 2n, m: 2, c: 1n }]);
+  expect(await client.run(q.where(r => r.p.isNull()).aggregate(g => ({ s: sumIf(g.n, g.p), m: maxIf(g.n, g.p), c: countIf(g.p) })))).toEqual([{ s: 0n, m: 0, c: 0n }]);
+});
+it('composes repeated aggregates with renamed keys, structural maxima and constant keys', async () => {
+  await sql('CREATE TABLE agg_composition (k String, n UInt32, pair Tuple(label String, value UInt32)) ENGINE=Memory');
+  await sql("INSERT INTO agg_composition VALUES ('a',2,('x',2)),('a',3,('y',3)),('b',7,('z',7))");
+  const q = from(table('agg_composition', { k: col.String, n: col.UInt32, pair: col.Tuple({ label: col.String, value: col.UInt32 }) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const shared = val('a');
+  const grouped = q.where(r => r.k.eq(val('a'))).groupBy(r => ({ n: r.k.eq(shared) }))
+    .aggregate(g => ({ k: sum(g.n), pair: max(g.pair), c: count() }));
+  expect(grouped.toSQL().params).toEqual({ p0: 'a', p1: 'a' });
+  expect(grouped.toSQL().sql.match(/\{p0:String\}/g)).toHaveLength(2);
+  expect(await client.run(grouped.orderBy(r => r.k).thenBy(r => r.c).limit(1).map(r => ({ key: r.n, n: r.k, label: r.pair.element('label') })))).toEqual([{ key: true, n: 5n, label: 'y' }]);
+  expect(await client.run(grouped.where(r => r.c.gt(1n)).aggregate(g => ({ total: sum(g.k), high: max(g.c), rows: count() })))).toEqual([{ total: 5n, high: 2n, rows: 1n }]);
+  expect(await client.run(q.groupBy(() => ({ fixed: val(1, col.UInt8) })).aggregate(() => count()))).toEqual([{ fixed: 1, count: 3n }]);
+  expect(await client.run(q.where(r => r.n.eq(99)).groupBy(() => ({ fixed: val(1, col.UInt8) })).aggregate(() => count()))).toEqual([]);
+});
 it('executes the generated-schema query and matches a direct SQL baseline', async () => {
   const q = from(db.entity_ots_component).where(c => c.tenantId.eq('acme')).map(c => ({ id: c.entityId, count: c.countOfParts, updatedAt: c.updatedAt, category: c.category })).limit(10);
   expect(q.toSQL().params).toEqual({ p0: 'acme' });

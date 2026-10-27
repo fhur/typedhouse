@@ -12,11 +12,13 @@ try {
   for (const name of ['core', 'compiler', 'client']) symlinkSync(resolve(`packages/${name}`), join(directory, `node_modules/@chql/${name}`), 'dir');
   for (const name of ['expect-type', '@types']) symlinkSync(resolve(`node_modules/${name}`), join(directory, `node_modules/${name}`), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
-  writeFileSync(join(directory, 'consumer.ts'), readFileSync('test/types/query.ts', 'utf8'));
+  writeFileSync(join(directory, 'consumer.ts'), readFileSync('test/types/query.ts', 'utf8') + '\nimport type { AggregationSnapshot } from "./aggregation.d.ts";\nconst snapshotQuery = q.groupBy(r => r.id).aggregate(g => ({ total: sum(g.id), count: count() }));\nexpectTypeOf<Infer<typeof snapshotQuery>>().toEqualTypeOf<AggregationSnapshot>();\nexpectTypeOf<Infer<typeof snapshotQuery>>().not.toBeAny();\n');
+  writeFileSync(join(directory, 'aggregation.d.ts'), readFileSync('test/types/snapshots/aggregation.d.ts', 'utf8'));
   writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, types: ['node'] }, include: ['consumer.ts'] }));
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
-import { col, table, from, registerCompiler } from '@chql/core';
+import { readFileSync } from 'node:fs';
+import { toTypeScript, count, sum, col, table, from, registerCompiler } from '@chql/core';
 import { emitNaive } from '@chql/compiler';
 import { createClient, decoder } from '@chql/client';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).where(r => r.id.eq(2n)).map(r => ({ id: r.id })).limit(10);
@@ -33,6 +35,12 @@ const ordered = structural.map(r => r.first).distinct().orderBy(r => r.first.des
 assert.match(ordered.toSQL().sql, /SELECT DISTINCT/);
 assert.match(ordered.toSQL().sql, /DESC NULLS LAST/);
 assert.equal('thenBy' in ordered, false);
+const rollup = q.groupBy(r => r.id).aggregate(g => ({ total: sum(g.id), count: count() }));
+assert.match(rollup.toSQL().sql, /GROUP BY/);
+const mapped = Object.entries(rollup.toSQL().columns).map(([k, t]) => JSON.stringify(k) + ': ' + toTypeScript(t)).join('; ');
+assert.equal(readFileSync('aggregation.d.ts', 'utf8'), 'export type AggregationSnapshot = { ' + mapped + ' };\\n');
+assert.equal(decoder(rollup.toSQL().columns.total)('4'), 4n);
+assert.equal('map' in q.groupBy(r => r.id), false);
 await createClient().close();
 `);
   run(process.execPath, ['smoke.mjs'], directory);

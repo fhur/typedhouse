@@ -31,6 +31,6 @@ it('rejects malformed sort keys, schema mismatch, aggregation and foreign bindin
     expect(() => emitNaive(build(keys as readonly SortKey[]))).toThrow(/invalid_sort_key at root.keys/);
   }
   expect(() => emitNaive(build([{ expr: other.row.id.ir, dir: 'asc' }]))).toThrow(/unbound_column at root.keys\[0\].expr/);
-  expect(() => emitNaive(build([{ expr: count().ir, dir: 'asc' }]))).toThrow(/unsupported_expression at root.keys\[0\].expr/);
+  expect(() => emitNaive(build([{ expr: count().ir, dir: 'asc' }]))).toThrow(/invalid_aggregate_placement at root.keys\[0\].expr/);
   for (const kind of ['Sort', 'Distinct'] as const) expect(() => emitNaive(relNode({ kind, input: q.ir, output: flatOutput([['wrong', col.String.type]]), keys: [] }))).toThrow(/invalid_output at root/);
 });

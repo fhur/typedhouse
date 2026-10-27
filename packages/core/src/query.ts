@@ -26,11 +26,46 @@ type ProjectRow<P extends Projection> = DescribedRow<Infer<P>, { [K in keyof P]:
 type NamedProjection<E extends Expr<unknown, string>> = { [K in E['name']]: E };
 type ValidProjection<P> = P extends Expr<unknown, string> ? [P['name']] extends [never] ? { readonly unnamed_expression: never } : unknown : unknown;
 type ProjectionRow<P extends Projection | Expr<unknown, string>> = P extends Expr<unknown, string> ? ProjectRow<NamedProjection<P>> : P extends Projection ? ProjectRow<P> : never;
+type AggregateProjection = Record<string, Expr<unknown, string, 'agg'>> | Expr<unknown, string, 'agg'>;
+type Named<P> = P extends Expr<unknown, infer N, infer _M> ? { [K in N]: P } : P;
+type GroupedInput<R> = { readonly [K in keyof R]: R[K] extends Expr<infer T, infer N> ? Expr<T, N, 'grouped'> & { readonly ir: R[K]['ir'] } : never };
+type AggregateRow<K, A> = { [P in keyof (Infer<K> & Infer<A>)]: (Infer<K> & Infer<A>)[P] };
+type OutputRow<K, A> = DescribedRow<AggregateRow<K, A>, { [P in keyof (Named<K> & Named<A>)]: (Named<K> & Named<A>)[P] extends { ir: { type: infer D } } ? D : CHType }>;
+type ValidNamed<P> = P extends { readonly name: infer N } ? [N] extends [never] ? { readonly unnamed_expression: never } : unknown : unknown;
+type Unique<K, A> = Extract<keyof Named<K>, keyof Named<A>> extends never ? unknown : { readonly duplicate_column: never };
+function expressions(value: unknown, mode: 'row' | 'agg'): [string, Expr<unknown, string, typeof mode>][] {
+  if (value instanceof Expr) {
+    if (value.name === undefined) throw new Error('unnamed_expression: use the object form');
+    value = { [value.name]: value };
+  }
+  if (!value || typeof value !== 'object' || Object.getOwnPropertySymbols(value).length) throw new Error('nested_projection');
+  return Object.entries(value).map(([name, e]) => {
+    if (!(e instanceof Expr) || e.mode !== mode || !e.ir.type) throw new Error(`invalid_expression_mode: ${name}`);
+    return [name, e];
+  });
+}
+export class GroupedQuery<R, K, C extends Caps = Caps> {
+  readonly keys: readonly (readonly [string, Expr<unknown, string>])[];
+  constructor(readonly input: Rel, keys: readonly (readonly [string, Expr<unknown, string>])[], readonly caps: C) {
+    this.keys = Object.freeze(keys.map(([name, e]) => Object.freeze([name, e] as const)));
+    Object.freeze(this.caps);
+    Object.freeze(this);
+  }
+  aggregate<A extends AggregateProjection>(f: (row: GroupedInput<R>) => A & ValidNamed<A> & Unique<K, A>): Query<AggregateRow<K, A>, ExpressionCaps<C>> & { readonly row: OutputRow<K, A> } {
+    const row = Object.freeze(Object.fromEntries(Object.entries(rowOf(this.input)).map(([name, e]) => [name, columnExpr({ type: e.ir.type! }, this.input.id, [name], name, 'grouped')])));
+    const aggs = expressions(f(row as GroupedInput<R>), 'agg');
+    const entries = [...this.keys, ...aggs];
+    const output = flatOutput(entries.map(([name, e]) => [name, e.ir.type!]));
+    const ir = relNode({ kind: 'Aggregate', input: this.input, keys: Object.fromEntries(this.keys.map(([k, e]) => [k, e.ir])), aggs: Object.fromEntries(aggs.map(([k, e]) => [k, e.ir])), columns: output.columns, output });
+    return new Query(ir, { live: this.caps.live && entries.every(([, e]) => deterministic(e.ir)) }) as Query<AggregateRow<K, A>, ExpressionCaps<C>> & { readonly row: OutputRow<K, A> };
+  }
+}
 type SortResult = Expr<unknown, string, 'row'> | Ordering<'row'>;
 type ExpressionCaps<C extends Caps> = { readonly live: C['live'] extends false ? false : boolean };
 function deterministic(e: ExprNode): boolean {
   switch (e.kind) {
     case 'ColumnRef': case 'Param': case 'Literal': return true;
+    case 'Agg': return e.fn.deterministic === true && e.args.every(deterministic) && e.params.every(deterministic);
     case 'Call': return e.fn.deterministic === true && e.args.every(deterministic);
     case 'Cast': return deterministic(e.expr);
     default: return false;
@@ -41,7 +76,7 @@ function rebindSort(e: ExprNode, from: Rel, to: Rel): ExprNode {
   if (from === to) return e;
   const visit = (child: ExprNode) => rebindSort(child, from, to);
   switch (e.kind) {
-    case 'ColumnRef': return e.rel === from.id ? exprNode({ kind: 'ColumnRef', rel: to.id, path: e.path, type: e.type }) : e;
+    case 'ColumnRef': return e.rel === from.id ? exprNode({ kind: 'ColumnRef', rel: to.id, path: e.path, type: e.type, ...(e.mode === undefined ? {} : { mode: e.mode }) }) : e;
     case 'Call': case 'Agg': case 'Raw': {
       const args = e.args.map(visit);
       if (args.every((arg, i) => arg === e.args[i])) return e;
@@ -89,6 +124,12 @@ export class Query<R, C extends Caps = Caps> {
     const output = flatOutput(entries.map(([name, e]) => [name, e.ir.type!]));
     const ir = relNode({ kind: 'Project', input: this.ir, exprs: Object.fromEntries(entries.map(([name, e]) => [name, e.ir])), columns: output.columns, output });
     return new Query(ir, { live: this.caps.live && entries.every(([, e]) => deterministic(e.ir)) }) as Query<Infer<P>, ExpressionCaps<C>> & { readonly row: ProjectionRow<P> };
+  }
+  groupBy<K extends Projection | Expr<unknown, string>>(f: (row: this['row']) => K & ValidProjection<K>): GroupedQuery<this['row'], K, C> {
+    return new GroupedQuery(this.ir, expressions(f(this.row), 'row') as [string, Expr<unknown, string>][], this.caps);
+  }
+  aggregate<A extends AggregateProjection>(f: (row: GroupedInput<this['row']>) => A & ValidNamed<A>): Query<AggregateRow<{}, A>, ExpressionCaps<C>> & { readonly row: OutputRow<{}, A> } {
+    return new GroupedQuery<this['row'], {}, C>(this.ir, [], this.caps).aggregate<A>(f);
   }
   limit(n: number, offset?: number): WithRow<Query<R, C>, this['row']> {
     return new Query(relNode({ kind: 'Limit', input: this.ir, n, ...(offset === undefined ? {} : { offset }), output: this.ir.output }), this.caps) as WithRow<Query<R, C>, this['row']>;

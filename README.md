@@ -14,6 +14,17 @@ Only ordered queries expose `.thenBy()`; another `.orderBy()` replaces the keys.
 Other operators drop `.thenBy()`. Sort and limit retain their written order:
 `q.orderBy(r => r.id).limit(10)` selects the first ten sorted rows, whereas
 `q.limit(10).orderBy(r => r.id)` sorts only the selected ten.
+Grouped and global aggregation execute `count`, `sum`, `max` and their `If`
+forms: `q.groupBy(r => r.category).aggregate(() => count())` or
+`q.aggregate(g => ({ total: sum(g.amount) }))`. Keys precede aggregate outputs;
+object forms choose names, single forms retain root names, and collisions fail.
+Grouped stages expose only `aggregate`; callbacks use grouped-mode operands.
+Integer sums decode as bigint, floating sums as number, and nullable aggregates
+retain null for all-null/empty inputs. `where` after aggregation is an outer
+naive filter. State/Merge construction remains available but execution and raw
+state selection remain explicitly unsupported. Builder ColumnRefs record row/grouped
+provenance; legacy low-level refs without a mode are checked in their contextual
+scope (their original wrapper mode cannot be recovered).
 All 24 existing scalar catalog methods execute: six
 comparisons, and/or/not, plus/minus/multiply/divide, isNull/isNotNull/ifNull,
 length/empty/notEmpty/startsWith, has/hasAny/arrayElement/element. No additional

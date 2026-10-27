@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, table, from, val, type Infer, type Row, type IsLive } from '@chql/core';
+import { count, countIf, sum, sumIf, max, maxIf, col, table, from, val, type Query, type Infer, type Row, type IsLive } from '@chql/core';
 import { createClient } from '@chql/client';
 const t = table('entity', { tenantId: col.String, id: col.UInt64, updatedAt: col.DateTime64(3), category: col.Nullable(col.String), tuple: col.Tuple({ name: col.String }) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 const forTenant = (tenantId: string) => <R extends { tenantId: string }>(r: Row<R>) => r.tenantId.eq(tenantId);
@@ -47,6 +47,34 @@ expectTypeOf<Infer<typeof computedSingle>>().not.toBeAny();
 const retainedTuple: typeof t.columns.tuple = renamedSingle.row.renamed.ir.type;
 void retainedTuple;
 expectTypeOf<'thenBy' extends keyof typeof named ? true : false>().toEqualTypeOf<false>();
+const grouped = from(structuralTable).groupBy(r => r.n).aggregate(g => ({ total: sum(g.n), names: max(g.specs), count: count() }));
+expectTypeOf<Infer<typeof grouped>>().toEqualTypeOf<{ n: number; total: bigint; names: { mpn: string | null; description: string | null }[]; count: bigint }>();
+expectTypeOf<Infer<typeof grouped>>().not.toBeAny();
+const genericGrouped = <R extends { id: bigint; category: string | null }>(input: Query<R>) => input.groupBy(r => r.category).aggregate(g => ({ newest: max(g.id) }));
+const genericResult = genericGrouped(from(t));
+expectTypeOf<Infer<typeof genericResult>>().toEqualTypeOf<{ category: string | null; newest: bigint }>();
+expectTypeOf<Infer<typeof genericResult>>().not.toBeAny();
+const global = from(structuralTable).aggregate(g => sum(g.n));
+expectTypeOf<Infer<typeof global>>().toEqualTypeOf<{ n: bigint }>();
+expectTypeOf<Infer<typeof global>>().not.toBeAny();
+const namedCount = from(t).groupBy(r => r.category).aggregate(() => count());
+expectTypeOf<Infer<typeof namedCount>>().toEqualTypeOf<{ category: string | null; count: bigint }>();
+expectTypeOf<Infer<typeof namedCount>>().not.toBeAny();
+const afterGroup = grouped.where(r => r.total.gt(1n)).orderBy(r => r.total).limit(2).map(r => r.names.arrayElement(1).element('mpn'));
+expectTypeOf<Infer<typeof afterGroup>>().toEqualTypeOf<{ names: string | null }>();
+expectTypeOf<Infer<typeof afterGroup>>().not.toBeAny();
+const nullablePredicate = from(table('predicate', { n: col.UInt32, p: col.Nullable(col.Bool) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }))
+  .aggregate(g => ({ s: sumIf(g.n, g.p), m: maxIf(g.n, g.p), c: countIf(g.p) }));
+expectTypeOf<Infer<typeof nullablePredicate>>().toEqualTypeOf<{ s: bigint; m: number; c: bigint }>();
+expectTypeOf<Infer<typeof nullablePredicate>>().not.toBeAny();
+const repeatedAggregation = grouped.where(r => r.count.gt(1n)).orderBy(r => r.total).limit(1)
+  .aggregate(g => ({ total: sum(g.total), high: max(g.count), rows: count() }));
+expectTypeOf<Infer<typeof repeatedAggregation>>().toEqualTypeOf<{ total: bigint; high: bigint; rows: bigint }>();
+expectTypeOf<Infer<typeof repeatedAggregation>>().not.toBeAny();
+const structuralMaximum = from(t).groupBy(r => ({ flag: r.category.isNull() })).aggregate(g => ({ pair: max(g.tuple) }))
+  .map(r => ({ flag: r.flag, label: r.pair.element('name') }));
+expectTypeOf<Infer<typeof structuralMaximum>>().toEqualTypeOf<{ flag: boolean; label: string }>();
+expectTypeOf<Infer<typeof structuralMaximum>>().not.toBeAny();
 const client = createClient();
 const structuralRun = () => client.run(structural);
 expectTypeOf<Awaited<ReturnType<typeof structuralRun>>>().toEqualTypeOf<{ mpns: (string | null)[]; first: string | null; size: bigint; total: bigint; empty: boolean }[]>();

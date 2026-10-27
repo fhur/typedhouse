@@ -1,4 +1,4 @@
-import { from, registerCompiler } from "@chql/core";
+import { count, max, from, registerCompiler } from "@chql/core";
 import { emitNaive } from "@chql/compiler";
 import { createClient } from "@chql/client";
 // Checked-in output of the real codegen integration fixture. For your database,
@@ -35,6 +35,12 @@ try {
     })).orderBy(r => r.id).limit(10);
   console.log(structural.toSQL());
   console.log(await client.run(structural));
+  const rollup = from(db.entity_ots_component).where(c => c.tenantId.eq('acme'))
+    .groupBy(c => ({ category: c.category.ifNull('uncategorised') }))
+    .aggregate(g => ({ components: count(), largest: max(g.countOfParts) }))
+    .orderBy(r => r.category);
+  console.log(rollup.toSQL());
+  console.log(await client.run(rollup));
 } finally {
   await client.close();
 }

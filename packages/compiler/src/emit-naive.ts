@@ -1,6 +1,6 @@
 import { print, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
 import { parameterWireType, serializeParameter } from './parameters.js';
-import { resolveCall } from './resolve.js';
+import { resolveAggregate, resolveCall } from './resolve.js';
 
 export class ValidationError extends Error {
   constructor(readonly code: string, readonly node: unknown, readonly path: string, detail = '') {
@@ -12,6 +12,9 @@ export function quoteIdentifier(name: string): string {
   return '`' + name.replaceAll('\\', '\\\\').replaceAll('`', '\\`') + '`';
 }
 const same = (a: CHType, b: CHType) => print(a) === print(b);
+function hasAggregate(e: ExprNode): boolean {
+  return e.kind === 'Agg' || (e.kind === 'Call' && e.args.some(hasAggregate));
+}
 function base(t: CHType): CHType { return t.kind === 'Nullable' || t.kind === 'LowCardinality' ? base(t.inner) : t; }
 /** Permanent one-subquery-per-node reference backend. Unsupported IR is rejected. */
 export function emitNaive(root: Rel): CompiledQuery {
@@ -24,15 +27,17 @@ export function emitNaive(root: Rel): CompiledQuery {
   const inputAlias = quoteIdentifier('__chql_input');
   function fail(code: string, node: unknown, path: string, detail = ''): never { throw new ValidationError(code, node, path, detail); }
   function resolvedType(e: ExprNode, expected?: CHType): CHType {
+    if (e.kind === 'Agg') return resolveAggregate(e, resolvedType).result;
     if (e.kind === 'Call') return resolveCall(e, resolvedType).result;
     const type = e.type ?? expected;
     if (!type) throw new Error('param_untyped');
     return e.kind === 'Param' && e.value === null && type.kind !== 'Nullable' ? { kind: 'Nullable', inner: type } : type;
   }
-  function expression(e: ExprNode, input: Rel, path: string, expected?: CHType, index = false): string {
+  function expression(e: ExprNode, input: Rel, path: string, expected?: CHType, index = false, scope: 'row' | 'aggregate' | 'operand' = 'row'): string {
     if (!e || typeof e !== 'object') return fail('invalid_expression', e, path);
     switch (e.kind) {
       case 'ColumnRef': {
+        if (scope === 'aggregate' || (e.mode === 'grouped' && scope !== 'operand') || (e.mode === 'row' && scope === 'operand')) return fail('invalid_expression_mode', e, path);
         if (e.rel !== input.id || e.path.length !== 1 || input.output.shape !== 'flat') return fail('unbound_column', e, path, `reference ${e.rel}, input ${input.id}`);
         const name = e.path[0]!;
         if (!Object.hasOwn(input.output.columns, name) || !same(e.type, input.output.columns[name]!)) return fail('unbound_column', e, path, name);
@@ -52,10 +57,16 @@ export function emitNaive(root: Rel): CompiledQuery {
         assigned.set(e, { name, type }); params[name] = value; parameterTypes[name] = parameterWireType(type);
         return `{${name}:${print(parameterWireType(type))}}`;
       }
+      case 'Agg': {
+        if (scope !== 'aggregate') return fail('invalid_aggregate_placement', e, path);
+        let resolved: ReturnType<typeof resolveAggregate>;
+        try { resolved = resolveAggregate(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_aggregate', e, path); }
+        return `${resolved.sqlName}(${e.args.map((a, i) => expression(a, input, `${path}.args[${i}]`, undefined, false, 'operand')).join(', ')})`;
+      }
       case 'Call': {
         let resolved: ReturnType<typeof resolveCall>;
         try { resolved = resolveCall(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_call', e, path); }
-        const args = e.args.map((arg, i) => expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null));
+        const args = e.args.map((arg, i) => expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope));
         // Retain the established equality SQL contract; all other names come from the catalog.
         return e.fn.name === 'eq' ? `(${args[0]} = ${args[1]})` : `${resolved.sqlName}(${args.join(', ')})`;
       }
@@ -70,6 +81,7 @@ export function emitNaive(root: Rel): CompiledQuery {
       if (rel.output.shape !== 'flat' || !rel.output.order.length) return fail('unsupported_output', rel, path);
       const { columns, order } = rel.output;
       if (new Set(order).size !== order.length || order.length !== Object.keys(columns).length || order.some(k => !Object.hasOwn(columns, k))) return fail('invalid_output', rel, path);
+      if (order.some(k => base(columns[k]!).kind === 'AggregateFunction')) return fail('aggregate_state_selection', rel, path);
       nodes[path] = rel;
       const list = order.map(quoteIdentifier).join(', ');
       switch (rel.kind) {
@@ -77,6 +89,20 @@ export function emitNaive(root: Rel): CompiledQuery {
           if (rel.final !== undefined || rel.sample !== undefined) return fail('unsupported_scan_hint', rel, path);
           if (order.some(k => !Object.hasOwn(rel.table.columns, k) || !same(columns[k]!, rel.table.columns[k]!))) return fail('invalid_output', rel, path);
           return `SELECT ${list} FROM ${quoteIdentifier(rel.table.name)}`;
+        case 'Aggregate': {
+          const keys = Object.entries(rel.keys), aggs = Object.entries(rel.aggs);
+          const entries = [...keys, ...aggs];
+          if (new Set(entries.map(([k]) => k)).size !== entries.length) return fail('duplicate_column', rel, path);
+          if (JSON.stringify(entries.map(([k]) => k)) !== JSON.stringify(order)) return fail('invalid_output', rel, path);
+          if (Object.keys(rel.columns).length !== order.length || order.some(k => !rel.columns[k] || !same(rel.columns[k]!, columns[k]!))) return fail('invalid_output', rel, path);
+          for (const [k, e] of aggs) if (!hasAggregate(e)) return fail('invalid_aggregate_placement', e, `${path}.aggs.${k}`);
+          const keySql = keys.map(([k, e]) => expression(e, rel.input, `${path}.keys.${k}`));
+          const items = entries.map(([k, e], i) => {
+            if (!e.type || !same(e.type, columns[k]!)) return fail('invalid_output', e, `${path}.${k}`);
+            return `${i < keys.length ? keySql[i] : expression(e, rel.input, `${path}.aggs.${k}`, undefined, false, 'aggregate')} AS ${quoteIdentifier(k)}`;
+          });
+          return `SELECT ${items.join(', ')} FROM (${emit(rel.input, `${path}.input`)}) AS ${inputAlias}${keys.length ? ` GROUP BY ${keySql.join(', ')}` : ''}`;
+        }
         case 'Project': {
           if (Object.keys(rel.exprs).length !== order.length) return fail('nested_projection', rel, path);
           const items = order.map(k => {

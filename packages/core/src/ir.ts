@@ -25,7 +25,7 @@ export interface RawProvenance {
 interface Node { readonly id: NodeId }
 interface TypedNode extends Node { readonly type: CHType }
 export type ExprNode =
-  | (TypedNode & { readonly kind: 'ColumnRef'; readonly rel: NodeId; readonly path: readonly string[] })
+  | (TypedNode & { readonly kind: 'ColumnRef'; readonly mode?: 'row' | 'grouped'; readonly rel: NodeId; readonly path: readonly string[] })
   | (TypedNode & { readonly kind: 'Literal'; readonly value: unknown })
   | (Node & { readonly kind: 'Param'; readonly type: CHType | null; readonly value: unknown })
   | (TypedNode & { readonly kind: 'Call'; readonly fn: FunctionMetadata; readonly args: readonly ExprNode[] })
