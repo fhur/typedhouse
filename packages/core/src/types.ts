@@ -1,3 +1,4 @@
+import type { Query, Caps } from './query.js';
 import type { CHType, ScalarName } from './ch-type.js';
 import type { TableDef } from './table.js';
 import type { DescribedExpr, Expr } from './expr.js';
@@ -29,7 +30,7 @@ export interface Column<T = unknown, StringKey extends boolean = boolean, D exte
 /** Object.entries stringifies numeric keys and omits symbol keys. */
 export type EnumNames<V> = `${Extract<keyof V, string | number>}`;
 export type Value<C> = C extends Column<infer T> ? T : never;
-export type Infer<O> = O extends TableDef<infer R> ? R : O extends Column<infer T> ? T :
+export type Infer<O> = O extends Query<infer R, Caps> ? R : O extends TableDef<infer R> ? R : O extends Column<infer T> ? T :
   O extends Expr<infer T, infer N, Mode> ? { [K in N]: T } :
   { -readonly [K in keyof O]: O[K] extends Expr<infer T, string, Mode> ? T : never };
 export type ScalarValue<N extends ScalarName> =

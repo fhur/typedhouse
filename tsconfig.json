@@ -20,6 +20,6 @@
       "@chql/codegen": ["./packages/codegen/src/index.ts"]
     }
   },
-  "include": ["packages/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
+  "include": ["packages/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "examples/**/*.ts", "vitest.config.ts"],
   "exclude": ["**/dist", "node_modules", "**/test/types/negative/**"]
 }
