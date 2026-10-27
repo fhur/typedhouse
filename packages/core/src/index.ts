@@ -2,6 +2,7 @@ export * from './ch-type.js';
 export * from './columns.js';
 export * from './table.js';
 export * from './query.js';
+export * from './ordering.js';
 export * from './types.js';
 export * from './ir.js';
 export * from './canonical-key.js';

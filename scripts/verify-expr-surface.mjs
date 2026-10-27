@@ -127,7 +127,7 @@ const cases = {
   count: 'count()', countIf: 'countIf(predicate)', sum: 'sum(grouped)', max: 'max(grouped)', sumIf: 'sumIf(grouped, predicate)',
   countState: 'countState()', sumState: 'sumState(grouped)', maxState: 'maxState(grouped)', countMerge: 'countMerge(state)',
 };
-assert.deepEqual(Object.getOwnPropertyNames(Expr.prototype).filter(n => !['constructor', 'as'].includes(n)).sort(), core.methodCatalog.map(d => d.name).sort());
+assert.deepEqual(Object.getOwnPropertyNames(Expr.prototype).filter(n => !['constructor', 'as'].includes(n)).sort(), [...core.methodCatalog, ...core.orderingCatalog].map(d => d.name).sort());
 const directory = mkdtempSync(join(tmpdir(), 'chql-expr-surface-'));
 function run(command, args) {
   const r = spawnSync(command, args, { encoding: 'utf8', timeout: 90000 });
@@ -142,6 +142,7 @@ try {
   assert.equal(declaration, readFileSync('test/types/snapshots/expr-methods.generated.d.ts', 'utf8'));
   writeFileSync(join(directory, 'surface.d.ts'), declaration);
   // Only published type re-exports, not core source or a fake expression implementation.
+  writeFileSync(join(directory, 'ordering.d.ts'), "export { Ordering } from '@chql/core';\n");
   writeFileSync(join(directory, 'expr.d.ts'), "export type { Expr, Constant } from '@chql/core';\n");
   writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@chql/core';\n");
   mkdirSync(join(directory, 'catalog'));
@@ -153,9 +154,12 @@ import type { GeneratedExprMethods } from './surface.js';
 type ExpressionPhantoms<E> = E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
 function column<C extends Column, N extends string, M extends Mode>(descriptor: C, name: N, mode: M) { return columnExpr(descriptor, 1 as NodeId, [name], name, mode); }
 const id = column(col.UInt64, 'id', 'row');
+expectTypeOf(id.asc()).toEqualTypeOf<import('@chql/core').Ordering<'row'>>();
+expectTypeOf(id.desc().nullsFirst().nullsLast()).not.toBeAny();
 const nullable = column(col.Nullable(col.UInt64), 'nullable', 'row');
 const predicate = column(col.Nullable(col.Bool), 'predicate', 'grouped');
 const grouped = column(col.UInt64, 'stock', 'grouped');
+expectTypeOf(grouped.desc()).toEqualTypeOf<import('@chql/core').Ordering<'grouped'>>();
 const state = column(col.AggregateFunction('count'), 'state', 'grouped');
 const distanceAdversarial = defineFunction({ name: 'editDistance', args: [stringLike, stringLike], returns: col.UInt64, deterministic: true });
 const identityAdversarial = defineFunction({ name: 'identity', args: [stringLike], returns: 'arg0', deterministic: true });

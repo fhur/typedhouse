@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { GenericContainer, Wait } from 'testcontainers';
-import { Expr, aggregateDefinitions, col, count, countIf, countState, defineAggregate, defineFunction, exprNode, extendExpr, max, maxMerge, methodCatalog, stringLike, sum, sumIf, sumMerge, sumState, val, parseCHType, type Column, type NodeId } from '../src/index.js';
+import { Expr, aggregateDefinitions, col, count, countIf, countState, defineAggregate, defineFunction, exprNode, extendExpr, max, maxMerge, methodCatalog, orderingCatalog, stringLike, sum, sumIf, sumMerge, sumState, val, parseCHType, type Column, type NodeId } from '../src/index.js';
 function grouped<T>(column: Column<T>) { return new Expr<T, 'value', 'grouped'>(exprNode({ kind: 'ColumnRef', rel: 1 as NodeId, path: ['value'], type: column.type }), 'value', 'grouped'); }
 describe('catalog slice', () => {
   it('installs exactly its generated method surface', () => {
-    expect(Object.getOwnPropertyNames(Expr.prototype).filter(n => !['constructor', 'as'].includes(n)).sort()).toEqual(methodCatalog.map(d => d.name).sort());
+    expect(Object.getOwnPropertyNames(Expr.prototype).filter(n => !['constructor', 'as'].includes(n)).sort()).toEqual([...methodCatalog, ...orderingCatalog].map(d => d.name).sort());
+    expect(orderingCatalog.map(d => d.name)).toEqual(['asc', 'desc']);
     expect(methodCatalog).toHaveLength(24);
     for (const definition of [...methodCatalog, ...aggregateDefinitions]) {
       expect(definition.deterministic).toBe(true);

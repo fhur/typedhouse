@@ -31,6 +31,6 @@ it('rejects wrong binding, predicate, limits, parameter values and unsupported n
   expect(() => emitNaive(a.map(() => ({ bad })).ir)).toThrow(/param_incompatible/);
   const unsupported = new Expr<bigint, 'bad'>(exprNode({ kind: 'Call', fn: { name: 'unknown_function', origin: 'typed', deterministic: true }, args: [], type: col.UInt64.type }), 'bad', 'row');
   expect(() => emitNaive(a.map(() => ({ bad: unsupported })).ir)).toThrow(/unsupported_expression.*root.exprs.bad/);
-  expect(() => emitNaive(relNode({ kind: 'Distinct', input: a.ir, output: a.ir.output }))).toThrow(/unsupported_node/);
+  expect(() => emitNaive(relNode({ kind: 'Materialize', input: a.ir, output: a.ir.output }))).toThrow(/unsupported_node/);
   for (const malformed of [null, {}, { kind: 'Filter', output: flatOutput([['x', col.String.type]]) }]) expect(() => emitNaive(malformed as Rel)).toThrow(ValidationError);
 });

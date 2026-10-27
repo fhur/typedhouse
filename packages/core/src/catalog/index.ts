@@ -5,6 +5,7 @@ import { nullHandling } from './null-handling.js';
 import { strings } from './string.js';
 import { arrays } from './array.js';
 export const methodCatalog = Object.freeze([...comparison, ...booleans, ...arithmetic, ...nullHandling, ...strings, ...arrays]);
+export { orderingCatalog } from './ordering.js';
 export * from './define.js';
 export * from './matchers.js';
 export * from './aggregate.js';

@@ -29,6 +29,10 @@ const structural = from(table('s', { specs: col.Array(col.Tuple({ name: col.Null
 assert.deepEqual({...structural.toSQL().params}, { p0: 'name', p1: '-1', p2: 'name', p3: '[2]' });
 assert.deepEqual(decoder(structural.toSQL().columns.names)(['a', null]), ['a', null]);
 assert.equal(decoder(structural.toSQL().columns.empty)(0), false);
+const ordered = structural.map(r => r.first).distinct().orderBy(r => r.first.desc().nullsLast()).thenBy(r => r.first).limit(2);
+assert.match(ordered.toSQL().sql, /SELECT DISTINCT/);
+assert.match(ordered.toSQL().sql, /DESC NULLS LAST/);
+assert.equal('thenBy' in ordered, false);
 await createClient().close();
 `);
   run(process.execPath, ['smoke.mjs'], directory);

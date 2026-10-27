@@ -6,7 +6,15 @@ Progress and current tasks: [TODO.md](TODO.md).
 ## First runnable query (bounded preview)
 
 `from(table).where(...).map(...).limit(n, offset?)` now runs through the permanent
-naive compiler and `client.run`. All 24 existing catalog methods execute: six
+naive compiler and `client.run`. Single-expression `map(r => r.column)` keeps
+the root column name; unnamed constants require the object form. `.distinct()`
+removes duplicate output rows. `.orderBy(r => r.column)` defaults to ascending;
+generated `.asc()`/`.desc()` support immutable `.nullsFirst()`/`.nullsLast()`.
+Only ordered queries expose `.thenBy()`; another `.orderBy()` replaces the keys.
+Other operators drop `.thenBy()`. Sort and limit retain their written order:
+`q.orderBy(r => r.id).limit(10)` selects the first ten sorted rows, whereas
+`q.limit(10).orderBy(r => r.id)` sorts only the selected ten.
+All 24 existing scalar catalog methods execute: six
 comparisons, and/or/not, plus/minus/multiply/divide, isNull/isNotNull/ifNull,
 length/empty/notEmpty/startsWith, has/hasAny/arrayElement/element. No additional
 operators or catalog families are implied; unsupported forms fail explicitly.

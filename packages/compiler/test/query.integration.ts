@@ -33,6 +33,40 @@ it('executes the generated-schema query and matches a direct SQL baseline', asyn
   expect(actual).toEqual([{ id: 'a', count: 18446744073709551615n, updatedAt: new Date('2026-10-27T12:00:00.123Z'), category: null }, { id: 'c', count: 0n, updatedAt: new Date(0), category: 'visible' }]);
   expect(await client.run(q)).toEqual(actual);
 });
+it('orders mixed keys, null placement and replacement ordering after filter/projection', async () => {
+  await sql('CREATE TABLE ordering_probe (id String, n UInt32, label Nullable(String), specs Array(Tuple(name Nullable(String)))) ENGINE=Memory');
+  await sql("INSERT INTO ordering_probe VALUES ('a',2,NULL,[('x')]),('b',1,'z',[(NULL)]),('c',2,'a',[('x')]),('d',1,NULL,[(NULL)]),('e',2,'a',[('x')])");
+  const t = table('ordering_probe', { id: col.String, n: col.UInt32, label: col.Nullable(col.String), specs: col.Array(col.Tuple({ name: col.Nullable(col.String) })) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+  const q = from(t).where(r => r.n.gt(0)).map(r => ({ renamed: r.id, n: r.n, label: r.label, specs: r.specs }));
+  const ids = async (query: { ir: import('@chql/core').Rel } & import('@chql/core').Query<import('@chql/core').Infer<typeof q>>) => (await client.run(query)).map(r => r.renamed);
+  expect(await ids(q.orderBy(r => r.n.desc()).thenBy(r => r.renamed))).toEqual(['a','c','e','b','d']);
+  expect(await ids(q.orderBy(r => r.label.asc().nullsFirst()).thenBy(r => r.renamed.desc()))).toEqual(['d','a','e','c','b']);
+  expect(await ids(q.orderBy(r => r.label.asc().nullsLast()).thenBy(r => r.renamed))).toEqual(['c','e','b','a','d']);
+  expect(await ids(q.orderBy(r => r.n).thenBy(r => r.renamed).orderBy(r => r.renamed.desc()))).toEqual(['e','d','c','b','a']);
+  expect(await ids(q.orderBy(r => r.renamed.desc()).limit(2))).toEqual(['e','d']);
+  expect(await ids(q.orderBy(r => r.renamed).limit(2).orderBy(r => r.renamed.desc()))).toEqual(['b','a']);
+  expect(await client.run(q.map(r => r.label).distinct().orderBy(r => r.label.asc().nullsFirst()))).toEqual([{ label: null }, { label: 'a' }, { label: 'z' }]);
+  expect(await client.run(q.map(r => ({ label: r.label, specs: r.specs })).distinct().where(r => r.label.isNotNull()).map(r => r.specs.arrayElement(1).element('name')).distinct().orderBy(r => r.specs.asc().nullsLast()).limit(2))).toEqual([{ specs: 'x' }, { specs: null }]);
+});
+it('preserves swapped aliases, shared computed sort keys and offset boundaries', async () => {
+  await sql('CREATE TABLE adversarial_order (id UInt32, rank UInt32, label Nullable(String)) ENGINE=Memory');
+  await sql("INSERT INTO adversarial_order VALUES (1,30,NULL),(2,20,'b'),(3,10,'a'),(4,40,'b'),(5,50,NULL)");
+  const t = table('adversarial_order', { id: col.UInt32, rank: col.UInt32, label: col.Nullable(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+  const shared = val(2, col.UInt32);
+  const q = from(t).map(r => ({ rank: r.id, id: r.rank, label: r.label }));
+  const ordered = q.orderBy(r => r.rank.plus(shared).desc()).thenBy(r => r.id.plus(shared));
+  expect(ordered.toSQL().params).toEqual({ p0: '2' });
+  expect(await client.run(ordered.limit(2, 1).map(r => r.rank))).toEqual([{ rank: 4 }, { rank: 3 }]);
+  expect(await client.run(ordered.orderBy(r => r.label.desc().nullsFirst()).thenBy(r => r.rank).limit(3, 1).map(r => r.rank))).toEqual([{ rank: 5 }, { rank: 2 }, { rank: 4 }]);
+  expect(await client.run(q.orderBy(() => val(1)).thenBy(r => r.rank.desc()).limit(2).map(r => r.rank))).toEqual([{ rank: 5 }, { rank: 4 }]);
+  expect(await client.run(q.map(r => r.label).distinct().orderBy(r => r.label.desc().nullsLast()).limit(2, 1))).toEqual([{ label: 'a' }, { label: null }]);
+  expect(await client.run(q.orderBy(r => r.rank).limit(2).map(r => r.label).distinct().orderBy(r => r.label.desc().nullsLast()))).toEqual([{ label: 'b' }, { label: null }]);
+});
+it('keeps prototype-like single-expression names through distinct and ordering', async () => {
+  const q = from(db.entity_ots_component).map(r => ({ ['__proto__']: r.category })).map(r => r.__proto__).distinct()
+    .orderBy(r => r.__proto__.desc().nullsLast()).thenBy(r => r.__proto__).limit(3);
+  expect(await client.run(q)).toEqual([{ ['__proto__']: 'visible' }, { ['__proto__']: 'hidden' }, { ['__proto__']: null }]);
+});
 it('executes hostile quoted table/column names without changing their identity', async () => {
   const name = 'odd`\\\\; --\nname';
   const key = 'column`\\\\; --';

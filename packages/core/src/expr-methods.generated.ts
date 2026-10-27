@@ -3,6 +3,8 @@ import type { Expr, Constant } from './expr.js';
 import type { Mode, Decimal } from './types.js';
 import { invoke } from './catalog/define.js';
 import { methodCatalog } from './catalog/index.js';
+import { orderingCatalog } from './catalog/ordering.js';
+import { Ordering } from './ordering.js';
 import type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 type NullResult<T, R> = null extends T ? R | null : R;
 type NumericResult<T> = T extends bigint ? bigint : T extends Decimal ? Decimal : number | bigint;
@@ -63,7 +65,12 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
   hasAny<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, other: Operand<NoInfer<V>, NoInfer<M>>): StructuralResult<never, N, M, 'Bool'>;
   arrayElement<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, index: Operand<number | bigint, NoInfer<M>>): ArrayElementResult<V, N, M, D>;
   element<D, V, const K extends ElementKeys<D>>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } }, key: K & (string extends K ? never : unknown)): ElementResult<N, M, D, K>;
+  asc(): Ordering<M>;
+  desc(): Ordering<M>;
 }
 export function installMethods(extend: (methods: Record<string, (this: Expr<unknown, string, Mode>, ...args: never[]) => unknown>) => void): void {
-  extend(Object.fromEntries(methodCatalog.map(def => [def.name, function(this: Expr<unknown, string, Mode>, ...args: unknown[]) { return invoke(def, [this, ...args]); }])));
+  extend(Object.fromEntries([
+    ...methodCatalog.map(def => [def.name, function(this: Expr<unknown, string, Mode>, ...args: unknown[]) { return invoke(def, [this, ...args]); }]),
+    ...orderingCatalog.map(def => [def.name, function(this: Expr<unknown, string, Mode>) { return new Ordering(this, def.direction); }]),
+  ]));
 }

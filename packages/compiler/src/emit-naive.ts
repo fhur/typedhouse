@@ -86,9 +86,19 @@ export function emitNaive(root: Rel): CompiledQuery {
           });
           return `SELECT ${items.join(', ')} FROM (${emit(rel.input, `${path}.input`)}) AS ${inputAlias}`;
         }
-        case 'Filter': case 'Limit': {
+        case 'Filter': case 'Limit': case 'Sort': case 'Distinct': {
           if (rel.input.output.shape !== 'flat' || JSON.stringify(order) !== JSON.stringify(rel.input.output.order) || order.some(k => !same(columns[k]!, rel.input.output.shape === 'flat' ? rel.input.output.columns[k]! : columns[k]!))) return fail('invalid_output', rel, path);
           const source = emit(rel.input, `${path}.input`);
+          if (rel.kind === 'Distinct') return `SELECT DISTINCT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias}`;
+          if (rel.kind === 'Sort') {
+            if (!Array.isArray(rel.keys) || rel.keys.length === 0) return fail('invalid_sort_key', rel, `${path}.keys`);
+            const keys = rel.keys.map((key, i) => {
+              const keyPath = `${path}.keys[${i}]`;
+              if (!key || (key.dir !== 'asc' && key.dir !== 'desc') || (key.nulls !== undefined && key.nulls !== 'first' && key.nulls !== 'last')) return fail('invalid_sort_key', rel, keyPath);
+              return `${expression(key.expr, rel.input, `${keyPath}.expr`)} ${key.dir.toUpperCase()}${key.nulls === undefined ? '' : ` NULLS ${key.nulls.toUpperCase()}`}`;
+            });
+            return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias} ORDER BY ${keys.join(', ')}`;
+          }
           if (rel.kind === 'Filter') {
             const type = rel.pred?.type && base(rel.pred.type);
             if (!type || type.kind !== 'scalar' || type.name !== 'Bool') return fail('invalid_predicate', rel, path);

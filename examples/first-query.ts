@@ -20,6 +20,7 @@ try {
       updatedAt: c.updatedAt,
       category: c.category,
     }))
+    .orderBy(r => r.id)
     .limit(10);
   console.log(q.toSQL());
   console.log(await client.run(q));
@@ -31,7 +32,7 @@ try {
       matched: c.matched_part_ids.length(),
       mpns: c.part_specifications.element('mpn'),
       firstDescription: c.part_specifications.arrayElement(1).element('description'),
-    })).limit(10);
+    })).orderBy(r => r.id).limit(10);
   console.log(structural.toSQL());
   console.log(await client.run(structural));
 } finally {
