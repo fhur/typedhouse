@@ -20,6 +20,40 @@ const noArgAggregate = core.defineAggregate({ name: 'customCount', args: [], ret
 const parametricCount = core.defineAggregate({ name: 'customParamCount', params: [col.Float64], args: [], returns: col.UInt64, deterministic: true, linear: true });
 const parametricSum = core.defineAggregate({ name: 'customParamSum', params: [col.Float64], args: [core.numeric], returns: col.UInt64, deterministic: true, linear: true });
 const cases = {
+  structuralRecursiveChild: "column(col.Array(col.Array(col.Tuple({ child: col.Array(col.Tuple({ 'a.b': col.Nullable(col.UInt64) })) }))), 'root', 'grouped').element('child').element('a.b')",
+  structuralRecursiveChildDefault: "column(col.Array(col.Array(col.Tuple({ child: col.Array(col.Tuple({ 'a.b': col.Nullable(col.UInt64) })) }))), 'root', 'agg').element('child').element('a.b').arrayElement(-1).arrayElement(1).arrayElement(99)",
+  structuralFixedPrefix: "column(col.String, 's', 'grouped').startsWith(column(col.FixedString(2), 'p', 'grouped'))",
+  structuralWrappedPrefix: "column(col.FixedString(3), 's', 'agg').startsWith(column(col.LowCardinality(col.Nullable(col.String)), 'p', 'agg'))",
+  structuralConstantPrefix: "column(col.String, 's', 'grouped').startsWith(val('ab', col.FixedString(2)))",
+  structuralExtractedPrefix: "column(col.String, 's', 'row').startsWith(column(col.Array(col.Tuple({ p: col.Nullable(col.String) })), 'a', 'row').arrayElement(-1).element('p')).isNull()",
+  structuralEmptyTupleDefault: "column(col.Array(col.Tuple({ p: col.Nullable(col.String), n: col.UInt64 })), 'a', 'agg').arrayElement(99).element('n').plus(1n)",
+  structuralNullablePrefix: "column(col.String, 's', 'row').startsWith(column(col.Nullable(col.String), 'prefix', 'row'))",
+  structuralNullPrefix: "column(col.String, 's', 'agg').startsWith(null)",
+  structuralNestedArrays: "column(col.Array(col.Array(col.Tuple({ n: col.UInt64 }))), 'a', 'grouped').element('n').arrayElement(-1).arrayElement(1)",
+  structuralWrappedChild: "column(col.Array(col.LowCardinality(col.Nullable(col.String))), 'a', 'row').arrayElement(-1).startsWith('x')",
+  structuralTupleAggregate: "sum(column(col.Array(col.Tuple({ n: col.UInt32 })), 'a', 'grouped').arrayElement(-1).element('n'))",
+  ...Object.fromEntries(['row', 'grouped', 'agg'].flatMap(mode => Object.entries({
+    length: `column(col.Array(col.UInt64), 'a.b', '${mode}').length()`,
+    empty: `column(col.Nullable(col.String), '__proto__', '${mode}').empty()`,
+    notEmpty: `column(col.Array(col.String), 'a.b', '${mode}').notEmpty()`,
+    startsWith: `column(col.LowCardinality(col.Nullable(col.String)), 's', '${mode}').startsWith('a')`,
+    has: `column(col.Array(col.UInt64), 'a.b', '${mode}').has(val(1n))`,
+    hasAny: `column(col.Array(col.UInt64), 'a.b', '${mode}').hasAny([1n])`,
+    arrayElement: `column(col.Array(col.DateTime64(9)), 'a.b', '${mode}').arrayElement(-1)`,
+    element: `column(col.NamedTuple([['42', col.Array(col.Nullable(col.String))], ['0', col.UInt64]]), 't', '${mode}').element('42')`,
+  }).map(([name, expression]) => [`structural_${mode}_${name}`, expression]))),
+  arrayLengthSum: "sum(column(col.Array(col.UInt64), 'a', 'grouped').length()).plus(1n)",
+  stringLength: "column(col.Nullable(col.String), 's', 'row').length()",
+  stringEmpty: "column(col.FixedString(3), 's', 'row').empty()",
+  arrayNotEmpty: "column(col.Array(col.String), 'a', 'grouped').notEmpty()",
+  startsWith: "column(col.Nullable(col.String), 's', 'agg').startsWith(val('x'))",
+  arrayHas: "column(col.Array(col.Nullable(col.UInt64)), 'a', 'grouped').has(null)",
+  arrayHasAny: "column(col.Array(col.UInt64), 'a', 'row').hasAny([1n])",
+  arrayElement: "column(col.Array(col.Decimal64(2)), 'a', 'agg').arrayElement(-1)",
+  tupleElement: "column(col.Tuple({ 'a.b': col.Nullable(col.String) }), 't', 'row').element('a.b')",
+  arrayTupleElement: "column(col.Array(col.Tuple({ mpn: col.Nullable(col.String) })), 'a', 'grouped').element('mpn')",
+  composedTupleElement: "column(col.Array(col.Tuple({ description: col.Nullable(col.String) })), 'a', 'agg').arrayElement(1).element('description')",
+  nestedMapElement: "column(col.Array(col.Tuple({ m: col.Map(col.UInt64, col.DateTime64(9)) })), 'a', 'row').arrayElement(1).element('m')",
   decimalSubtractAsymmetric: "column(col.Decimal(10, 1), 'd', 'grouped').minus(column(col.Decimal(19, 3), 'e', 'grouped'))",
   decimalMultiplyBoundary: "column(col.Decimal(38, 2), 'd', 'grouped').multiply(column(col.Decimal(39, 3), 'e', 'grouped'))",
   decimalDivideAsymmetric: "column(col.Decimal64(3), 'd', 'grouped').divide(column(col.Decimal32(2), 'e', 'grouped'))",
@@ -111,7 +145,7 @@ try {
   writeFileSync(join(directory, 'expr.d.ts'), "export type { Expr, Constant } from '@chql/core';\n");
   writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@chql/core';\n");
   mkdirSync(join(directory, 'catalog'));
-  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { IfNullResult, FallbackDescriptor } from '@chql/core';\n");
+  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");
   let source = `import { expectTypeOf } from 'expect-type';
 import { Expr, columnExpr, col, exprNode, count, countIf, sum, max, sumIf, sumState, countState, maxState, countMerge, val, cast, defineFunction, defineAggregate, numeric, extendExpr, stringLike, type Mode, type Column, type NodeId, type AggregateState, type Decimal, type DescribedExpr, sumMerge, maxMerge } from '@chql/core';
 import type { GeneratedExprMethods } from './surface.js';

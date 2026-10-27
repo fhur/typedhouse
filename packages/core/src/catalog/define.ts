@@ -1,15 +1,16 @@
 import type { CHType } from '../ch-type.js';
 import { Expr, defaultType, operand, type Constant } from '../expr.js';
-import { exprNode, type FunctionMetadata, type AggregateMetadata } from '../ir.js';
+import { exprNode, type FunctionMetadata, type AggregateMetadata, type ArgumentPolicy } from '../ir.js';
 import type { Column, Mode } from '../types.js';
-import { isNullable, nullable, type Argument, type Matched } from './matchers.js';
+import { isNullable, nullable, type Argument, type Matched, unwrap } from './matchers.js';
 
-export type Surface = 'comparison' | 'boolean' | 'not' | 'arithmetic' | 'divide' | 'nullTest' | 'ifNull';
+export type Surface = 'comparison' | 'boolean' | 'not' | 'arithmetic' | 'divide' | 'nullTest' | 'ifNull' | 'length' | 'empty' | 'startsWith' | 'has' | 'hasAny' | 'arrayElement' | 'element';
 export interface Definition<A extends readonly Argument[] = readonly Argument[], R = unknown> {
   readonly name: string;
   readonly sqlName?: string;
   readonly args: A;
-  readonly returns: Column<R> | 'arg0' | ((args: readonly CHType[]) => CHType);
+  readonly argumentPolicies?: readonly ArgumentPolicy[];
+  readonly returns: Column<R> | 'arg0' | ((args: readonly CHType[], values: readonly unknown[]) => CHType);
   readonly tsReturns?: string;
   readonly nullable?: 'propagate' | 'never';
   readonly deterministic: boolean;
@@ -36,18 +37,28 @@ export interface DefinedFunction<A extends readonly Argument[], R, P extends 'pr
 }
 /** Metadata is copied explicitly: executable matchers/resolvers never enter the owned IR snapshot. */
 export function metadata(def: Definition): FunctionMetadata {
-  return { name: def.name, ...(def.sqlName === undefined ? {} : { sqlName: def.sqlName }), deterministic: def.deterministic, origin: def.origin ?? 'user' };
+  return { name: def.name, ...(def.sqlName === undefined ? {} : { sqlName: def.sqlName }), deterministic: def.deterministic, origin: def.origin ?? 'user', ...(def.argumentPolicies ? { argumentPolicies: Object.freeze([...def.argumentPolicies]) } : {}) };
 }
 const unknownType: CHType = { kind: 'Unknown', raw: 'unresolved' };
 export function resolveReturn(def: Definition, args: readonly unknown[]): CHType {
   // JS sibling operands inherit the first typed argument for return calculation only.
   // Their actual Param nodes remain unresolved and distinct.
   const sibling = args.find((a): a is Expr<unknown, string, Mode> => a instanceof Expr && a.ir.type !== null)?.ir.type;
-  const resolved = args.map(a => a instanceof Expr ? a.ir.type ?? (a.ir.kind === 'Param' && a.ir.value === null ? nullable(sibling ?? unknownType) : unknownType) : a === null
+  const resolved = args.map((a, index) => {
+    const policy = def.argumentPolicies?.[index];
+    if (!(a instanceof Expr) && policy && policy !== 'sibling') {
+      const receiver = sibling ? unwrap(sibling) : unknownType;
+      if (policy === 'constantSelector') return { kind: 'scalar', name: 'String' } as const;
+      if (policy === 'numericIndex') return { kind: 'scalar', name: 'Int64' } as const;
+      if (policy === 'array') return receiver;
+      if (policy === 'arrayElement' && receiver.kind === 'Array') return receiver.inner;
+    }
+    return a instanceof Expr ? a.ir.type ?? (a.ir.kind === 'Param' && a.ir.value === null ? nullable(sibling ?? unknownType) : unknownType) : a === null
     ? nullable(sibling ?? unknownType)
-    : sibling ? (sibling.kind === 'Nullable' ? sibling.inner : sibling) : defaultType(a) ?? unknownType);
+    : sibling ? (sibling.kind === 'Nullable' ? sibling.inner : sibling) : defaultType(a) ?? unknownType;
+  });
   const returns = def.returns;
-  let type = typeof returns === 'function' ? returns(resolved) : returns === 'arg0' ? resolved[0] ?? unknownType : returns.type;
+  let type = typeof returns === 'function' ? returns(resolved, args.map(a => a instanceof Expr ? undefined : a)) : returns === 'arg0' ? resolved[0] ?? unknownType : returns.type;
   if (def.nullable !== 'never' && resolved.some(isNullable)) type = nullable(type);
   return type;
 }
@@ -56,7 +67,7 @@ export function invoke(def: Definition, args: readonly unknown[]): Expr<unknown,
   return new Expr(exprNode({ kind: 'Call', fn: metadata(def), args: args.map(operand), type: resolveReturn(def, args) }), first?.name as string, first?.mode ?? 'row');
 }
 export function defineFunction<const A extends readonly Argument[], R, const S extends Definition<A, R>['returns'], P extends 'propagate' | 'never' = 'propagate'>(definition: Definition<A, R> & { readonly returns: S; readonly nullable?: P }): DefinedFunction<A, R, P, S> {
-  const def = Object.freeze({ ...definition, args: Object.freeze([...definition.args]) as unknown as A });
+  const def = Object.freeze({ ...definition, args: Object.freeze([...definition.args]) as unknown as A, ...(definition.argumentPolicies ? { argumentPolicies: Object.freeze([...definition.argumentPolicies]) } : {}) });
   if (typeof def.returns === 'function' && !def.tsReturns) throw new Error(`tsReturns required: ${def.name}`);
   return Object.freeze(Object.assign((...args: readonly unknown[]) => invoke(def, args), { definition: def })) as unknown as DefinedFunction<A, R, P, S>;
 }

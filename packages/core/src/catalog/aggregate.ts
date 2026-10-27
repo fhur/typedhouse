@@ -59,7 +59,7 @@ export function deriveAggregate(def: AggregateDefinition) {
       if (state?.kind !== 'AggregateFunction') return result;
       // Return resolution consumes the state's argument descriptors, not the opaque state descriptor.
       const returns = def.returns;
-      let type = typeof returns === 'function' ? returns(state.args) : returns === 'arg0' ? state.args[0]! : returns.type;
+      let type = typeof returns === 'function' ? returns(state.args, []) : returns === 'arg0' ? state.args[0]! : returns.type;
       if (def.nullable !== 'never' && state.args.some(isNullable)) type = nullable(type);
       return result.as({ type });
     },

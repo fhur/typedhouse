@@ -8,7 +8,9 @@ export type OutputSchema =
   | { readonly shape: 'flat'; readonly columns: FlatColumns; readonly order: readonly string[] }
   | { readonly shape: 'nested'; readonly inputs: readonly (readonly [string, OutputSchema])[] }
   | { readonly shape: 'deferred'; readonly reason: 'raw'; readonly declaredNames: readonly string[] };
+export type ArgumentPolicy = 'sibling' | 'arrayElement' | 'array' | 'numericIndex' | 'constantSelector';
 export interface FunctionMetadata {
+  readonly argumentPolicies?: readonly ArgumentPolicy[];
   readonly name: string;
   readonly sqlName?: string;
   readonly deterministic: boolean | null;

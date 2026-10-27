@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { methodCatalog, type Definition } from '../packages/core/src/catalog/index.js';
 
 const imports = `import type { Expr, Constant } from './expr.js';\nimport type { Mode, Decimal } from './types.js';\n`;
-const helpers = `import type { IfNullResult, FallbackDescriptor } from './catalog/descriptor-types.js';
+const helpers = `import type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 type NullResult<T, R> = null extends T ? R | null : R;
 type NumericResult<T> = T extends bigint ? bigint : T extends Decimal ? Decimal : number | bigint;
 type DivideResult<T> = T extends Decimal ? Decimal : number;
@@ -39,6 +39,13 @@ function signature(definition: Definition): string {
   const receiver = (allowed: string) => `this: Expr<${allowed} | null, string, M>`;
   const argument = 'other: Operand<U, NoInfer<M>>';
   switch (surface) {
+    case 'length': case 'empty': return `${name}<D, V extends string | readonly unknown[] | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'either'>): StructuralResult<V, N, M, '${surface === 'length' ? 'UInt64' : 'Bool'}'>;`;
+    // Keep primitives separate from descriptor-checked expressions: a broad Operand
+    // fallback would let unsupported decoded strings bypass the byte-string check.
+    case 'startsWith': return `${name}<D, B, V extends string | null, U extends string | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'string'>, other: U | ((Expr<U, string, NoInfer<M>> | Constant<U>) & { readonly ir: { readonly type: B } } & StructuralReceiver<B, 'string'>)): StructuralResult<V | U, N, M, 'Bool'>;`;
+    case 'has': case 'hasAny': return `${name}<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, other: Operand<${surface === 'has' ? 'NoInfer<V[number]>' : 'NoInfer<V>'}, NoInfer<M>>): StructuralResult<never, N, M, 'Bool'>;`;
+    case 'arrayElement': return `${name}<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, index: Operand<number | bigint, NoInfer<M>>): ${definition.tsReturns?.replace(/\bT\b/g, 'V')};`;
+    case 'element': return `${name}<D, V, const K extends ElementKeys<D>>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } }, key: K & (string extends K ? never : unknown)): ${definition.tsReturns};`;
     case 'comparison': return `${name}<U extends NonNullable<T> | null>(${receiver('string | number | bigint | boolean | Date')}, ${argument}): Expr<NullResult<T | U, boolean>, N, M>;`;
     case 'boolean': return `${name}<U extends boolean | null>(${receiver('boolean')}, ${argument}): Expr<NullResult<T | U, boolean>, N, M>;`;
     case 'not': return `${name}(${receiver('boolean')}): Expr<NullResult<T, boolean>, N, M>;`;

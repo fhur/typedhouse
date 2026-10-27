@@ -40,6 +40,18 @@ export type DescriptorValue<D> = CHType extends D ? unknown :
   D extends { kind: 'Tuple'; items: infer I extends readonly TupleItem[] } ? TupleDecoded<I> : unknown;
 export type ResolvedExpr<T, N extends string, M extends Mode, D> = CHType extends D ? Expr<T, N, M> : [D] extends [CHType] ? DescribedExpr<T, N, M, D> : Expr<T, N, M>;
 
+/** Structural access is driven by retained descriptors, never by decoded object/string shape. */
+export type StructuralReceiver<D, Family extends 'string' | 'array' | 'either'> = CHType extends D ? unknown :
+  Unwrapped<D> extends { kind: 'Array' } ? Family extends 'string' ? never : unknown :
+  Unwrapped<D> extends { kind: 'FixedString' } | { kind: 'scalar'; name: 'String' } ? Family extends 'array' ? never : unknown : never;
+type ArrayInner<D> = Unwrapped<D> extends { kind: 'Array'; inner: infer I } ? I : CHType;
+export type ArrayElementResult<T, N extends string, M extends Mode, D> = ResolvedExpr<CHType extends ArrayInner<D> ? T extends readonly (infer I)[] ? I : unknown : DescriptorValue<ArrayInner<D>>, N, M, ArrayInner<D>>;
+type TupleFields<D> = Unwrapped<D> extends { kind: 'Array'; inner: infer I } ? TupleFields<I> : Unwrapped<D> extends { kind: 'Tuple'; items: infer I extends readonly TupleItem[] } ? I[number] extends { name: string } ? I[number] : never : never;
+export type ElementKeys<D> = TupleFields<D> extends infer I ? I extends { name: infer K extends string } ? K : never : never;
+type FieldDescriptor<D, K> = Unwrapped<D> extends { kind: 'Array'; inner: infer I } ? { readonly kind: 'Array'; readonly inner: FieldDescriptor<I, K> } : Extract<TupleFields<D>, { name: K }> extends { type: infer F } ? F : never;
+export type ElementResult<N extends string, M extends Mode, D, K> = ResolvedExpr<DescriptorValue<FieldDescriptor<D, K>>, N, M, FieldDescriptor<D, K>>;
+export type StructuralResult<T, N extends string, M extends Mode, S extends 'UInt64' | 'Bool'> = ResolvedExpr<null extends T ? (S extends 'UInt64' ? bigint : boolean) | null : S extends 'UInt64' ? bigint : boolean, N, M, WithNull<{ readonly kind: 'scalar'; readonly name: S }, null extends T ? true : false>>;
+
 type Name<D> = D extends { kind: 'scalar'; name: infer N } ? N : never;
 type Bits<N> = N extends `${'UInt' | 'Int' | 'Float'}${infer W extends number}` ? W : never;
 type MaxBits<W> = 256 extends W ? 256 : 128 extends W ? 128 : 64 extends W ? 64 : 32 extends W ? 32 : 16 extends W ? 16 : 8;

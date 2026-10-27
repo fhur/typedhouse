@@ -7,7 +7,7 @@ export * from './canonical-key.js';
 export * from './type-mapping.js';
 export * from './expr.js';
 export * from './catalog/index.js';
-export type { IfNullResult, FallbackDescriptor } from './catalog/descriptor-types.js';
+export type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 import { extendExpr } from './expr.js';
 import { installMethods } from './expr-methods.generated.js';
 installMethods(extendExpr);
