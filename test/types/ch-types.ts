@@ -36,7 +36,7 @@ const metricMeta = { tenantId: col.String, entityId: col.String, version: col.UI
 export const fixture = table('fixture', { ...metricMeta, part_specifications: col.Array(partSpecification), 'nested.key': col.Array(col.String) }, { engine: 'ReplacingMergeTree', sortingKey: ['tenantId', 'entityId', 'version', 'effectiveAt'], partitionKey: [] });
 expectTypeOf<Infer<typeof fixture>>().toEqualTypeOf<{ tenantId: string; entityId: string; version: number; effectiveAt: Date; insertedAt: Date; part_specifications: Array<{ id: string; mpn: string | null; manufacturer: string | null; description: string | null; package: string | null; part_type: string | null }>; 'nested.key': string[] }>();
 expectTypeOf<Infer<typeof fixture>>().not.toBeAny();
-expectTypeOf(col.UInt64).toEqualTypeOf<Column<bigint, false>>();
+expectTypeOf(col.UInt64).toEqualTypeOf<Column<bigint, false, { readonly kind: 'scalar'; readonly name: 'UInt64' }>>();
 // @ts-expect-error UInt64 descriptors cannot masquerade as numbers.
 const invalid: Column<number> = col.UInt64;
 void invalid;

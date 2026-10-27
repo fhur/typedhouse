@@ -1,0 +1,28 @@
+import { expectTypeOf } from 'expect-type';
+import { col, columnExpr, sum, sumIf, sumMerge, maxMerge, val, type Expr, type NodeId, type Decimal } from '@chql/core';
+import type { SumPrecision } from '../../packages/core/src/catalog/descriptor-types.js';
+
+type HighPrecision = 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | 48 | 49 | 50 | 51 | 52 | 53 | 54 | 55 | 56 | 57 | 58 | 59 | 60 | 61 | 62 | 63 | 64 | 65 | 66 | 67 | 68 | 69 | 70 | 71 | 72 | 73 | 74 | 75 | 76;
+expectTypeOf<SumPrecision<HighPrecision>>().toEqualTypeOf<76>();
+expectTypeOf<SumPrecision<38 | 39>>().toEqualTypeOf<38 | 76>();
+expectTypeOf<SumPrecision<number>>().toEqualTypeOf<38 | 76>();
+type Phantoms<E> = E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
+declare function phantoms<E>(e: E): Phantoms<E>;
+const d = columnExpr(col.Nullable(col.Decimal(39, 2)), 1 as NodeId, ['d'], 'd', 'grouped');
+expectTypeOf(phantoms(sum(d))).toEqualTypeOf<Expr<Decimal<76, 2> | null, 'd', 'agg'>>();
+expectTypeOf(sum(d).ir.type.inner.precision).toEqualTypeOf<76>();
+expectTypeOf(phantoms(sumIf(d, val(true)))).toEqualTypeOf<Expr<Decimal<76, 2> | null, 'd', 'agg'>>();
+const unknownPrecision: number = 39;
+const generic = sum(columnExpr(col.Decimal(unknownPrecision, 2), 1 as NodeId, ['d'], 'd', 'grouped'));
+expectTypeOf(phantoms(generic)).toEqualTypeOf<Expr<Decimal<38 | 76, 2>, 'd', 'agg'>>();
+expectTypeOf(generic.ir.type.precision).toEqualTypeOf<38 | 76>();
+const merged = sumMerge(columnExpr(col.AggregateFunction('sum', col.Decimal(75, 2)), 1 as NodeId, ['s'], 's', 'grouped'));
+expectTypeOf(phantoms(merged)).toEqualTypeOf<Expr<Decimal<76, 2>, 's', 'agg'>>();
+expectTypeOf(merged).not.toBeAny();
+const dates = maxMerge(columnExpr(col.AggregateFunction('max', col.Array(col.Array(col.Nullable(col.DateTime64(3, 'UTC'))))), 1 as NodeId, ['s'], 's', 'grouped'));
+expectTypeOf(phantoms(dates)).toEqualTypeOf<Expr<(Date | null)[][], 's', 'agg'>>();
+expectTypeOf(dates).not.toBeAny();
+const precise = maxMerge(columnExpr(col.AggregateFunction('max', col.Array(col.DateTime64(9))), 1 as NodeId, ['s'], 's', 'grouped'));
+expectTypeOf(phantoms(precise)).toEqualTypeOf<Expr<string[], 's', 'agg'>>();
+const seconds = maxMerge(columnExpr(col.AggregateFunction('max', col.DateTime('UTC')), 1 as NodeId, ['s'], 's', 'grouped'));
+expectTypeOf(phantoms(seconds)).toEqualTypeOf<Expr<Date, 's', 'agg'>>();

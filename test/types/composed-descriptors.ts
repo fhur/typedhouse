@@ -1,0 +1,62 @@
+import { expectTypeOf } from 'expect-type';
+import { col, columnExpr, sum, sumIf, sumMerge, max, maxIf, maxMerge, sumState, maxState, val, type Expr, type NodeId, type Decimal } from '@chql/core';
+
+type Phantoms<E> = E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
+declare function phantoms<E>(value: E): Phantoms<E>;
+const f = columnExpr(col.Float64, 1 as NodeId, ['f'], 'f', 'grouped');
+const small = columnExpr(col.UInt8, 1 as NodeId, ['u'], 'u', 'grouped');
+const wide = columnExpr(col.UInt32, 1 as NodeId, ['w'], 'w', 'grouped');
+const product = f.multiply(2).plus(3);
+expectTypeOf<Phantoms<typeof product>>().toEqualTypeOf<Expr<number, 'f', 'grouped'>>();
+expectTypeOf(product.ir.type.kind).toEqualTypeOf<'scalar'>();
+expectTypeOf(product.ir.type.name).toEqualTypeOf<'Float64'>();
+expectTypeOf(phantoms(sum(product))).toEqualTypeOf<Expr<number, 'f', 'agg'>>();
+expectTypeOf(sum(product)).not.toBeAny();
+const grown = small.plus(1).multiply(2).plus(3);
+expectTypeOf(grown.ir.type.name).toEqualTypeOf<'UInt64'>();
+expectTypeOf<Phantoms<typeof grown>>().toEqualTypeOf<Expr<bigint, 'u', 'grouped'>>();
+const mixed = wide.plus(f);
+expectTypeOf(mixed.ir.type.name).toEqualTypeOf<'Float64'>();
+expectTypeOf<Phantoms<typeof mixed>>().toEqualTypeOf<Expr<number, 'w', 'grouped'>>();
+expectTypeOf(phantoms(f.ifNull(null))).toEqualTypeOf<Expr<number, 'f', 'grouped'>>();
+const decimal = columnExpr(col.Nullable(col.Decimal64(2)), 1 as NodeId, ['d'], 'd', 'grouped');
+expectTypeOf(phantoms(sum(decimal))).toEqualTypeOf<Expr<Decimal<38, 2> | null, 'd', 'agg'>>();
+expectTypeOf(phantoms(sumIf(decimal, val(true)))).toEqualTypeOf<Expr<Decimal<38, 2> | null, 'd', 'agg'>>();
+const decimal256 = columnExpr(col.Decimal256(4), 1 as NodeId, ['d'], 'd', 'grouped');
+expectTypeOf(phantoms(sum(decimal256))).toEqualTypeOf<Expr<Decimal<76, 4>, 'd', 'agg'>>();
+const state = col.AggregateFunction('sum', col.Nullable(col.Float64));
+expectTypeOf(state.type.args[0].inner.name).toEqualTypeOf<'Float64'>();
+expectTypeOf(phantoms(sumMerge(columnExpr(state, 1 as NodeId, ['s'], 's', 'grouped')))).toEqualTypeOf<Expr<number | null, 's', 'agg'>>();
+const builtState = sumState(f);
+expectTypeOf(builtState.ir.type.fn).toEqualTypeOf<'sum'>();
+expectTypeOf(builtState.ir.type.args[0].name).toEqualTypeOf<'Float64'>();
+// Aggregate output becomes grouped at the next relational boundary, preserving its descriptor.
+const regrouped = columnExpr({ type: builtState.ir.type } as import('@chql/core').Column<import('@chql/core').AggregateState<'sum'>, false, typeof builtState.ir.type>, 2 as NodeId, ['s'], 's', 'grouped');
+expectTypeOf(phantoms(sumMerge(regrouped))).toEqualTypeOf<Expr<number, 's', 'agg'>>();
+expectTypeOf(sumMerge(regrouped)).not.toBeAny();
+expectTypeOf(phantoms(maxMerge(columnExpr(col.AggregateFunction('max', col.Float64), 1 as NodeId, ['s'], 's', 'grouped')))).toEqualTypeOf<Expr<number, 's', 'agg'>>();
+expectTypeOf(maxState(f).ir.type.args[0].name).toEqualTypeOf<'Float64'>();
+// Resolved aggregate descriptors, not input descriptors, survive downstream arithmetic.
+expectTypeOf(sum(wide).ir.type.name).toEqualTypeOf<'UInt64'>();
+expectTypeOf(phantoms(sum(f).plus(1))).toEqualTypeOf<Expr<number, 'f', 'agg'>>();
+expectTypeOf(phantoms(max(wide).plus(1))).toEqualTypeOf<Expr<bigint, 'w', 'agg'>>();
+expectTypeOf(phantoms(sumIf(f, val(true)).plus(1))).toEqualTypeOf<Expr<number, 'f', 'agg'>>();
+expectTypeOf(phantoms(maxIf(wide, val(true)).plus(1))).toEqualTypeOf<Expr<bigint, 'w', 'agg'>>();
+expectTypeOf(phantoms(sumMerge(regrouped).plus(1))).toEqualTypeOf<Expr<number, 's', 'agg'>>();
+expectTypeOf(phantoms(sum(f.ifNull(null)))).toEqualTypeOf<Expr<number, 'f', 'agg'>>();
+expectTypeOf(f.ifNull(null).ir.type.name).toEqualTypeOf<'Float64'>();
+const nullableSmall = columnExpr(col.Nullable(col.UInt8), 1 as NodeId, ['n'], 'n', 'grouped');
+const common = nullableSmall.ifNull(wide);
+expectTypeOf(common.ir.type.name).toEqualTypeOf<'UInt32'>();
+expectTypeOf(phantoms(common.plus(1))).toEqualTypeOf<Expr<bigint, 'n', 'grouped'>>();
+const nullableWide = columnExpr(col.Nullable(col.UInt32), 1 as NodeId, ['w'], 'w', 'grouped');
+const nullableCommon = nullableSmall.ifNull(nullableWide);
+expectTypeOf(nullableCommon.ir.type.inner.name).toEqualTypeOf<'UInt32'>();
+expectTypeOf(phantoms(nullableCommon.plus(1))).toEqualTypeOf<Expr<bigint | null, 'n', 'grouped'>>();
+expectTypeOf(sum(decimal).ir.type.inner.precision).toEqualTypeOf<38>();
+expectTypeOf(sum(decimal).ir.type.inner.scale).toEqualTypeOf<2>();
+expectTypeOf(phantoms(maxMerge(columnExpr(col.AggregateFunction('max', col.Date), 1 as NodeId, ['date'], 'date', 'grouped')))).toEqualTypeOf<Expr<Date, 'date', 'agg'>>();
+// Same-mode evidence must not permit actual row/grouped mixing.
+const row = columnExpr(col.Float64, 1 as NodeId, ['r'], 'r', 'row');
+// @ts-expect-error descriptor-backed row operands cannot mix with grouped receivers
+f.plus(row);

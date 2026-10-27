@@ -1,5 +1,12 @@
 import type { CHType, ScalarName } from './ch-type.js';
 import type { TableDef } from './table.js';
+import type { DescribedExpr, Expr } from './expr.js';
+export type Mode = 'row' | 'grouped' | 'agg';
+export type Grouped<T, N extends string = never> = Expr<T, N, 'grouped'>;
+export type AggExpr<T, N extends string = never> = Expr<T, N, 'agg'>;
+export type Row<R, C extends Partial<Record<keyof R, Column>> = {}> = { readonly [K in keyof R]: C[K] extends Column ? DescribedExpr<R[K], K & string, 'row', C[K]['type']> : Expr<R[K], K & string> };
+export type GroupedRow<R, C extends Partial<Record<keyof R, Column>> = {}> = { readonly [K in keyof R]: C[K] extends Column ? DescribedExpr<R[K], K & string, 'grouped', C[K]['type']> : Grouped<R[K], K & string> };
+export type Nullable<R> = { [K in keyof R]: R[K] | null };
 
 declare const nodeIdBrand: unique symbol;
 /** Identity is allocated monotonically across expression and relational nodes. */
@@ -13,8 +20,8 @@ export type AggregateState<F extends string = string> = { readonly __aggregateSt
 declare const valueType: unique symbol;
 /** The phantom is never materialized; `type` is its runtime twin. */
 declare const stringKeyType: unique symbol;
-export interface Column<T = unknown, StringKey extends boolean = boolean> {
-  readonly type: CHType;
+export interface Column<T = unknown, StringKey extends boolean = boolean, D extends CHType = CHType> {
+  readonly type: D;
   readonly [valueType]?: T;
   /** CH string-likeness, independent of the decoded value (e.g. Decimal is a string). */
   readonly [stringKeyType]?: StringKey;
@@ -22,7 +29,9 @@ export interface Column<T = unknown, StringKey extends boolean = boolean> {
 /** Object.entries stringifies numeric keys and omits symbol keys. */
 export type EnumNames<V> = `${Extract<keyof V, string | number>}`;
 export type Value<C> = C extends Column<infer T> ? T : never;
-export type Infer<O> = O extends TableDef<infer R> ? R : O extends Column<infer T> ? T : never;
+export type Infer<O> = O extends TableDef<infer R> ? R : O extends Column<infer T> ? T :
+  O extends Expr<infer T, infer N, Mode> ? { [K in N]: T } :
+  { -readonly [K in keyof O]: O[K] extends Expr<infer T, string, Mode> ? T : never };
 export type ScalarValue<N extends ScalarName> =
   N extends 'UInt8' | 'UInt16' | 'UInt32' | 'Int8' | 'Int16' | 'Int32' | 'Float32' | 'Float64' ? number :
   N extends 'UInt64' | 'UInt128' | 'UInt256' | 'Int64' | 'Int128' | 'Int256' ? bigint :
