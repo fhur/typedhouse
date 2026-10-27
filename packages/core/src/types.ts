@@ -29,4 +29,7 @@ export type ScalarStringKey<N extends ScalarName> = N extends 'String' | 'UUID' 
 export type MapValue<K, V, StringKey extends boolean> = StringKey extends true ? Record<K & string, V> : Array<[K, V]>;
 export type TupleValue<C extends Readonly<Record<string, Column>> | readonly Column[]> =
   C extends readonly Column[] ? { readonly [K in keyof C]: Value<C[K]> } : keyof C extends never ? readonly [] : { -readonly [K in keyof C]: Value<C[K]> };
+/** Ordered entries retain SQL tuple positions while inferring a named decoded object. */
+export type NamedTupleValue<C extends readonly (readonly [string, Column])[]> =
+  C extends readonly [] ? readonly [] : { [E in C[number] as E[0]]: Value<E[1]> };
 export type ColumnsRow<C extends Record<string, Column>> = { -readonly [K in keyof C]: Value<C[K]> };

@@ -1,5 +1,5 @@
 import { scalarNames, type CHType, type ScalarName } from './ch-type.js';
-import type { AggregateState, Column, Decimal, EnumNames, MapValue, ScalarStringKey, ScalarValue, TupleValue, Value } from './types.js';
+import type { AggregateState, Column, Decimal, EnumNames, MapValue, NamedTupleValue, ScalarStringKey, ScalarValue, TupleValue, Value } from './types.js';
 
 /** Freeze runtime twins recursively so descriptors can safely be shared by IR nodes. */
 export function immutable<T>(value: T): T {
@@ -28,6 +28,8 @@ export const col = {
   Array: <T>(inner: Column<T>): Column<T[], false> => descriptor({ kind: 'Array', inner: inner.type }),
   Map: <K, V, S extends boolean>(key: Column<K, S>, value: Column<V>): Column<MapValue<K, V, S>, false> => descriptor({ kind: 'Map', key: key.type, value: value.type }),
   Tuple: <const C extends Readonly<Record<string, Column>> | readonly Column[]>(items: C): Column<TupleValue<C>, false> => descriptor({ kind: 'Tuple', items: Array.isArray(items) ? (items as readonly Column[]).map(c => ({ type: c.type })) : Object.entries(items).map(([name, c]: [string, Column]) => ({ name, type: c.type })) }),
+  /** Unlike object enumeration, entries preserve even integer-like field names in SQL order. */
+  NamedTuple: <const C extends readonly (readonly [string, Column])[]>(items: C): Column<NamedTupleValue<C>, false> => descriptor({ kind: 'Tuple', items: items.map(([name, c]) => ({ name, type: c.type })) }),
   Variant: (...items: Column[]): Column<unknown, false> => descriptor({ kind: 'Variant', items: items.map(c => c.type) }),
   Dynamic: descriptor<unknown>({ kind: 'Dynamic' }),
   Unknown: (raw: string): Column<unknown, false> => descriptor({ kind: 'Unknown', raw }),

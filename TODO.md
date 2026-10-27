@@ -1,6 +1,101 @@
 # v1 implementation coverage and next batch
 
-## Audit baseline
+## Owner authorization — local acceptance gates
+
+The owner explicitly approved **local checks for now** after the workflow paused for lack of a GitHub remote. This supersedes every historical hosted-CI prerequisite below. Do not require a remote, publishing, CI URLs, or hosted runs to advance milestones. Preserve CI configuration for later use; do not claim local runs are hosted CI.
+
+M1 is accepted locally at `c630bca` based on the independently verified `pnpm check:all` and local TypeScript 5.5/current results recorded below. Resume PM gap analysis at M2. For subsequent milestones require actual local acceptance tests, local TS matrix checks, independent adversarial testing, and green `pnpm check:all` before committing and advancing. All functional and testing requirements remain in scope; milestones 7–8 remain deferred.
+
+## M2 verification/commit acceptance — local gates passed
+
+- Verification/commit agent independently read all 870 spec lines and reviewed actual production changes, tests, fixture DDL, snapshots, built-consumer scripts and acceptance wiring. No tests disabled, focused or skipped; spec.md unchanged. Unrelated context.local.md remains preserved and excluded.
+- Independently ran `pnpm check:all`, `CHQL_TYPESCRIPT_VERSION=5.5.4 pnpm check:all`, and `CHQL_TYPESCRIPT_VERSION=latest pnpm check:all`: each passed **409 unit/runtime tests + 7 integration tests**, fresh genuine **216-record / 54-type** corpus verification on **ClickHouse 24.8.14.39**, four builds and both built-package consumer gates. Logs (not committed): `/tmp/chql-m2-commit-check.log`, `/tmp/chql-m2-commit-ts55.log`, `/tmp/chql-m2-commit-tslatest.log`.
+- Independently ran `pnpm --package typescript@5.5.4 dlx tsc --noEmit` and `pnpm --package typescript@latest dlx tsc --noEmit`: both passed; version commands reported **5.5.4 / 7.0.2**. `git diff --check` passed. These are authorized **local**, not hosted CI results; no snapshot refresh was performed during verification.
+- Bounded M2 is accepted locally for commit. Commit scope is codegen source/docs/tests/snapshots, ordered named-tuple core support and regression, fixture DDL, acceptance script/config and TODO. No production repairs were needed in this verification pass.
+- Next milestone is M3. Generated functions remain metadata pending M3 callable fn/agg/.as integration; M3–M6 and their acceptance gates remain outstanding. **v1 is not complete.** This current acceptance supersedes pending/blocked M2 statuses in historical sections below.
+
+## Independent M2 tuple-repair re-review results
+
+- Added executable generated-source property coverage (300 deterministic cases) in `packages/codegen/test/render.test.ts` and a real nested tuple positional regression in `packages/codegen/test/cli.integration.ts`. Prior failing numeric-order regression is unchanged and passes. No production repairs, snapshot refresh, commits, spec edits or unrelated context.local.md changes.
+- Independently passed `pnpm check:all`: **409 unit/runtime tests + 7 built-CLI integration tests**, no skips; four package builds, real **216-record / 54-type** corpus verification on **24.8.14.39**, built core and generated-package consumer gates. Log: `/tmp/chql-m2-rereview-check.log`.
+- Both full `CHQL_TYPESCRIPT_VERSION=5.5.4/latest pnpm check:all` runs passed (logs `/tmp/chql-m2-rereview-ts55.log`, `/tmp/chql-m2-rereview-tslatest.log`). Separately passed both generated-consumer matrix commands and both explicit root TypeScript CLI typechecks; `git diff --check` passed. These are authorized local checks, not hosted evidence.
+- No further demonstrated M2 defect or environmental blocker. Bounded M2 batch passes independent adversarial testing; final verification/commit-role approval remains separate. Callable fn/agg metadata integration and all M3–M6 requirements remain outstanding: v1 is not complete.
+
+## Independent M2 tuple-repair re-review plan
+
+- Re-read the entire spec, pending tracked diff and full codegen/core descriptor implementations, fixture and acceptance harnesses; do not rely on repair logs.
+- Add a deterministic adversarial generated-source property over ordered numeric, prototype, quote/control and SQL/JavaScript-looking tuple names, including nested arrays/maps. Execute the rendered descriptors and compare complete runtime ASTs; assert inputs remain unchanged.
+- Extend genuine built-CLI coverage to nested named tuples with numeric fields, asserting both imported built-core descriptors and server tupleElement positional values. Retain all previous safety/invalid CLI regressions and snapshots without refresh.
+- Run mandatory pnpm check:all and local TypeScript 5.5/current consumer and root checks. No production edits, commits, spec changes or context.local.md access.
+
+## M2 ordered named-tuple repair — local gates green, independent re-review pending
+
+- Read all 870 spec lines and the full TODO. Repaired only the tester's M2 tuple-order defect; no commits, later milestone implementation, spec edits or changes to unrelated context.local.md.
+- Added `col.NamedTuple` ordered-entry descriptors and `NamedTupleValue` exact object inference; retained both existing `col.Tuple` forms. Codegen now emits ordered entries for every named tuple, preserving SQL positions even for integer-like names and nested tuples. Core remains dependency-free, with recursively frozen CHType twins and copied entry arrays.
+- Kept the failing live built-CLI regression unchanged; it now passes against actual ClickHouse **24.8.14.39**, including the server INSERT/tupleElement positional check. Added exact/not-any core assertions, nested/empty/hostile-name and immutability checks, exact standalone generated-consumer types and built-package runtime assertions. Explicitly refreshed the schema snapshot from the real fixture container; functions metadata remains unchanged. Normal acceptance does not refresh snapshots.
+- `pnpm check:all`, `CHQL_TYPESCRIPT_VERSION=5.5.4 pnpm check:all`, and `CHQL_TYPESCRIPT_VERSION=latest pnpm check:all` each **passed: 408 unit/runtime tests + 6 built-CLI integration tests**, no skips; all four builds, fresh **216-record / 54-type** corpus verification, and both built-package consumer gates passed. Logs: `/tmp/chql-m2-tuple-check.log`, `/tmp/chql-m2-tuple-ts55.log`, `/tmp/chql-m2-tuple-tslatest.log`.
+- Explicit root matrix commands `pnpm --package typescript@5.5.4 dlx tsc --noEmit` and `pnpm --package typescript@latest dlx tsc --noEmit` passed; `git diff --check` passed. These are authorized local results, not hosted CI evidence.
+- No demonstrated blocker. Independent re-review/commit-role approval remains required before advancing M2. M3 callable fn/agg wrappers and M3–M6 work remain outstanding; v1 is not complete.
+
+## Independent M2 break-it plan
+
+- Read all 870 spec lines and the full pending M2 implementations/harnesses. Preserve M1 and unrelated context.local.md; no production repairs or commits.
+- Extend live built-CLI testing with SQL-looking database names, empty databases, failed authentication with unchanged output bytes, and missing output directories under check. Assert no side effects, redacted credentials and server parameter binding.
+- Probe generated descriptors against genuine system.columns types for numeric named tuple fields in non-JavaScript enumeration order. Import generated JavaScript against built core, not aliases, and demand runtime CHType preservation and exact inferred types where relevant.
+- Add malformed/duplicate CLI argument and hostile-source execution regressions; preserve all snapshot comparisons and mandatory Docker/build/consumer gates. Run pnpm check:all and report exact failures and production locations rather than repairing code.
+
+## Independent M2 adversarial results
+
+- Added three enabled integration regressions to `packages/codegen/test/cli.integration.ts`. No production changes, snapshot changes, commits, spec edits or context.local.md changes.
+- Final `pnpm check:all` **FAILED**: 406 unit/runtime tests passed; all four builds, genuine 216-record / 54-type corpus verification and built core consumer gate passed; codegen integration had **5 passed / 1 failed**, with no skips. Log: `/tmp/chql-m2-adversarial-final.log`. Server was genuinely **24.8.14.39**. Independently ran `pnpm verify:codegen-package` successfully because the integration failure short-circuits that final gate; `git diff --check` passed.
+- **Required fix: `packages/codegen/src/render.ts:21` (Tuple case), interacting with `packages/core/src/columns.ts:30` (col.Tuple Object.entries).** A real table containing `Tuple(\`42\` String, \`0\` UInt64, z UInt8)` introspects in server order 42,0,z. Built CLI output imports as 0,42,z because JavaScript enumerates integer-index property keys first. Thus the generated CHType changes the first positional member from String to UInt64. Actual INSERT and SELECT tupleElement(v,1) prove the server returns the String first; this is not cosmetic print ordering. Preserve ordered named tuple entries when generating descriptors (e.g. a narrowly scoped ordered-entry descriptor constructor/overload preserving exact named-object inference). Merely quoting/computing keys, sorting the expected AST, or replacing with Unknown does not fix the semantic loss. Add exact generated-consumer type assertions for the chosen representation and retain existing col.Tuple API.
+- New passing probes: SQL-looking database name actually created and bound safely, truly empty database generation, missing-output check without artifacts, authentication/invalid/duplicate/missing flag failures preserving both output files byte-for-byte and not exposing secrets. Prior fresh-container snapshots, default/skip-alias, stale/missing individual artifact checks and standalone generated-package checks remain intact.
+- No environmental blocker; local authorization is sufficient. M2 is **not accepted** until the enabled order regression and full check:all/matrix pass. No M3 advancement and no v1 completion claim.
+
+## Current M2 worker status — implemented, independent verification pending
+
+- Read all 870 spec lines and the complete TODO. Implemented only the bounded M2 batch; no M3 builder/catalog/compiler work, no commits, no edits to spec.md or unrelated context.local.md.
+- Added codegen introspection/model/key-expression splitting, deterministic descriptor rendering and complete function metadata, built ESM CLI, six-table fixture plus coverage tables/views/materialized view, real generated snapshots, unit/integration tests, isolated built-package/generated-type verification and mandatory post-build acceptance wiring. Core runtime code/dependencies are unchanged.
+- Artifacts preserve CHType constructors and table/column metadata, safely encode hostile names/comments, and use SHA-256 of the emitted body. Table row aliases use collision-free sorted `TableNRow` plus the three prescribed example aliases. Full behavior and staging are documented in `packages/codegen/README.md`.
+- Actual pinned server: **24.8.14.39**. Live snapshots contain **1,560 functions**, all with `deterministic: null` because the column is absent on this server. Controlled driver tests separately cover the column-present branch; they are not real-server evidence. M3 must turn this metadata into callable fn/agg/.as wrappers; metadata alone is not v1 API completion.
+- Initial fresh-container comparison correctly failed on random `.inner_id.<UUID>` tables created by an implicit materialized-view target. Fixed the fixture to use an explicit named target table; no metadata filtering or normalization hides server data. Explicitly recaptured snapshots, then all fresh-container comparisons passed.
+- Final `pnpm check:all`, `CHQL_TYPESCRIPT_VERSION=5.5.4 pnpm check:all`, and `CHQL_TYPESCRIPT_VERSION=latest pnpm check:all` all passed: **406 unit/runtime tests in 9 files plus 3 built-CLI/live integration tests**, no skips; genuine M1 corpus verification (**216 records / 54 distinct types**), four package builds, core consumer gate and generated-package exact type/runtime consumer gate. Logs: `/tmp/chql-m2-check.log`, `/tmp/chql-m2-ts55.log`, `/tmp/chql-m2-tslatest.log`.
+- Explicit root CLI checks `pnpm --package typescript@5.5.4 dlx tsc --noEmit` and `pnpm --package typescript@latest dlx tsc --noEmit` passed, as did `git diff --check`. Acceptance compares snapshots without rewriting; refresh requires explicit `CHQL_UPDATE_CODEGEN_SNAPSHOTS=1`.
+- **Independent adversarial M2 verification/commit-role review remains required.** No demonstrated environmental blocker. Seed data and M3–M6 acceptance remain unimplemented; v1 completion is false. Local checks satisfy the owner's environment authorization, not hosted-CI evidence.
+
+## Prior PM gap audit — M2 authorized, then unimplemented
+
+This active section and ledger supersede all historical CI-only blockers and M1 repair briefs below. **Current milestone: M2. M1 is accepted locally; no environmental blocker is established.** Do not reimplement M1 or begin M3 until real M2 acceptance is green.
+
+- This audit read all 870 spec lines (1–450 and 451–870), all of TODO, actual codegen/compiler/client entry points, core descriptors/table metadata, live corpus capture harness, package scripts and CI configuration. HEAD remains `c630bca`; all three non-core entry points still contain only `export {};`. Codegen has its driver dependency but no CLI bin or implementation.
+- Accepted M1 evidence is the independent verification/commit record below: 377 tests, genuine 216-record / 54-type live corpus, four builds, built ESM/consumer checks and local TS5.5/current checks. Prior PM also recorded `/tmp/chql-pm-gap-check.log`. This planning audit does **not** claim to have rerun those commands.
+- Only TODO is changed; unrelated untracked `context.local.md` remains unread, unmodified and excluded from commits. No commit made. Hosted CI is not required under owner authorization.
+
+### Active bounded worker batch — M2 codegen CLI/introspection
+
+Paths are relative to `/Users/fernandohur/personal/chql`. New API/file names below are proposed worker targets, not implemented exports. Complete these in sequence; stop for independent M2 verification before any builder/compiler work.
+
+1. **Live introspection and reusable schema model.** Targets: `packages/codegen/src/introspect.ts`, `packages/codegen/src/index.ts`, `packages/codegen/test/introspect.test.ts`, `packages/compiler/test/fixtures/schema.sql`.
+   - Proposed API: `introspect(client: ClickHouseClient, database: string, options?: { skipAlias?: boolean }): Promise<DatabaseSchema>`; `DatabaseSchema` holds tables, ordered columns (`name`, parsed CHType, `position`, `defaultKind`, `comment`), engine/key metadata and function records `{ name: string; isAggregate: boolean; deterministic: boolean | null; aliasTo: string }`. Use the existing `parseCHType`, not a second parser.
+   - Execute the spec's one schema query through `@clickhouse/client`, database bound via `{db:String}`. Include views/materialized views; default includes and marks ALIAS, skip only on flag. Preserve dotted Nested members. Probe `system.columns` for `system.functions.deterministic` before selecting it; absent means literal null metadata, never true. Keep is_aggregate/alias_to. Test missing-column branch with a controlled driver double as well as the actual pinned server; do not claim the double is real-server evidence.
+   - Create the six-table API DDL fixture, with ReplacingMergeTree(insertedAt) metric keys, plus isolated coverage objects for views/materialized views, aliases/default/materialized columns, dotted/quoted names, comments, high-precision time and complex key expressions. No DDL-text parsing in production. Server key fields are expression strings: split only top-level key lists respecting parentheses/quotes; preserve expressions, empty keys and primary keys, never naive comma-split. Existing `TableMetadata` uses readonly string arrays and columnMetadata; use it rather than dropping data. Deterministic seed remains an M3 task, not a requirement to invent M2 row results.
+   - Acceptance: `pnpm exec vitest run packages/codegen/test/introspect.test.ts`; real Docker errors fail, no skip-on-unavailable logic.
+
+2. **Deterministic generated artifacts, without building M3 early.** Targets: `packages/codegen/src/render.ts`, `packages/codegen/test/render.test.ts`, `packages/codegen/test/snapshots/{schema,functions}.ts`.
+   - Proposed pure API: `renderSchema(schema: DatabaseSchema): string`, `renderFunctions(schema: DatabaseSchema): string`. Emit complete `db` table descriptors using existing col constructors, `Infer` row exports, engine/sorting/partition/primary keys and column metadata; never set source. Sort tables/functions deterministically and columns by position. Version/hash headers must be content-derived without timestamps; define hash input precisely and test repeatability/change sensitivity.
+   - Preserve original database names/properties; robustly quote strings/identifiers and comments (quotes, Unicode, newlines, `*/`, `__proto__`, dotted and numeric names). Use computed property syntax where needed to prevent prototype mutation. Cover all CHType alternatives including Unknown, Decimal canonicalization, tuples/enums and aggregate states; DateTime64 >3 comment must explain precision/string mapping. Document row-export naming/collision policy; retain the API example's ComponentRow/PartRow/ComponentIndicesRow aliases without changing table keys.
+   - M2/M3 boundary: functions.ts must contain every introspected scalar/aggregate name and deterministic/alias metadata, and compile as a standalone generated artifact. Callable `fn.<name>(...Expr[]): Expr<unknown>` and `agg` wrappers depend on M3's Expr/catalog. Explicitly record the interim generated metadata shape and M3 wrapper integration task; do not claim metadata alone completes the v1 callable contract or fabricate an Expr implementation in this batch. See contradiction 12 below.
+   - Acceptance: `pnpm exec vitest run packages/codegen/test/render.test.ts`; generated schema/functions compile against built core and exact inferred fixture row assertions. Snapshot updates are explicit developer actions; acceptance compares without rewriting.
+
+3. **Ship and exercise the actual CLI; wire mandatory acceptance.** Targets: `packages/codegen/src/cli.ts`, `packages/codegen/package.json`, `packages/codegen/test/cli.integration.test.ts`, `scripts/verify-codegen-package.mjs`, `package.json` (and lockfile only for actual dependency changes).
+   - Build an ESM executable with shebang and `bin: { "chql": "./dist/cli.js" }`; preserve the library entry. CLI: `chql generate|check --url URL --database DATABASE --out-dir DIR [--skip-alias]`, with `--user`/`--password` credential overrides if exposed; absent URL/user/password flags fall back to CLICKHOUSE_URL/CLICKHOUSE_USER/CLICKHOUSE_PASSWORD. Specify defaults/errors, reject unknown/missing flags, never leak passwords in diagnostics. Close client in finally on success/failure.
+   - generate creates both files; check regenerates in memory and compares both, exiting nonzero for changed/missing schema **or** functions without writing either. Exercise from a temporary cwd via the built executable/package bin, not just imported functions. Test env/flag precedence, authentication failure, stale/missing individual artifacts, --skip-alias behavior, repeat generation and hostile names. Run against testcontainers `clickhouse/clickhouse-server:24.8` and checked-in actual generated snapshots; record server version. Empty successful package build is not CLI evidence.
+   - Introduce `verify:codegen-package` and, if integration needs built artifacts, `test:codegen-integration`; order build before those gates in `check:all` (avoid double-running build-dependent integration before build). Preserve existing M1 gates. Test generated files with TS5.5/current and the real built package resolution, not only Vitest aliases.
+   - Required final commands: `pnpm check:all`; `CHQL_TYPESCRIPT_VERSION=5.5.4 pnpm check:all`; `CHQL_TYPESCRIPT_VERSION=latest pnpm check:all`; `pnpm --package typescript@5.5.4 dlx tsc --noEmit`; `pnpm --package typescript@latest dlx tsc --noEmit`; `git diff --check`. Matrix environment alone does not switch root typecheck: retain the two explicit CLI commands and propagate selection to generated-file checks. Record actual results, then independent adversarial verification/commit-role review. No worker commits.
+
+**v1 done = false.** M2 gates are now accepted locally; M3–M6 gates remain absent, not blocked on remote/CI/publishing.
+
+## Historical scaffold audit baseline
 
 - Contract read in full: `spec.md`, lines 1–870. Do not modify it.
 - Audited scaffold commit: `e925313`. All four `packages/*/src/index.ts` files contain only `export {};`. No parser, descriptors, builder, generator, compiler or client exists yet.
@@ -9,27 +104,27 @@
 - `docker version --format '{{.Server.Version}}'` returned `29.1.5`. No ClickHouse container, real columns capture, integration, differential or performance gate has been run in this audit. No demonstrated environmental blocker.
 - An untracked `context.local.md` was present during inspection; it was neither read nor modified. It is not required. Preserve unrelated user files.
 
-**Current milestone: 1. Do not begin milestone 2 until milestone 1 acceptance is green, including CI.** Only this document is changed by the PM. Workers do not commit unless explicitly assigned verification/commit responsibility.
+**Historical status at scaffold time: milestone 1.** All historical CI-only advancement restrictions in the provenance sections are superseded by the owner's local-gate authorization above. Workers still do not commit unless explicitly assigned verification/commit responsibility.
 
 ## Milestone coverage ledger
 
 | Milestone | Status and required evidence still missing |
 | --- | --- |
-| 1 — CH types | **Independently confirmed locally, including added adversarial regressions and both TS matrix runs; actual CI pending.** Recursive parser/printer, frozen descriptors/table metadata, complete mapping assertions, 216 genuinely captured records / 54 distinct types, canonical round trips, live corpus verification and fuzz gates. See worker evidence below. Do not advance to M2 yet. |
-| 2 — codegen | **Blocked by M1.** Live introspection (tables/views/materialized views, metadata, aliases/dotted names), deterministic schema/functions snapshots and version/hash headers, known-function flags and missing-deterministic-column fallback; CLI flags/env credentials; both-file stale-check nonzero exit against pinned testcontainers fixture. |
-| 3 — builder/IR/naive emitter | **Blocked by M2.** All unchanged API examples and negative diagnostics; immutable identity-based IR, runtime columns, modes/names/promotions/nullability, full generated typed catalog and combinators/extensions, all joins/array joins/set/order/group/subquery/raw/hint operators, validation/parameter serialization; permanent `emitNaive()`; live execution and correct decoding of every executable example. All six type gates and all Part 4 constraints below are required. Deterministic six-table DDL/seed must include the specified two tenants, row counts, nulls, empty arrays, shared/orphan ids, versions, weekly history, later insertedAt duplicates and warnings. |
-| 4 — rewrites/flat emission | **Blocked by M3.** Independently tested validation/resolution, each of nine rewrite rules including negative preconditions, terminating fixpoint/50-iteration failure, one final source-order/shared-demand prune, table-driven block planning/fences; byte-exact lowStockCategories SQL and params; parameter identity, quoting, outer-join settings, CTE sharing/collision handling, no optimized `*`. Real 500-case CI differential with shrinking/both SQLs, 10k nightly, corpus EXPLAIN snapshots asserting allowed subqueries and read-column pruning. |
+| 1 — CH types | **Accepted locally at c630bca.** Independent verification, 377 tests, both TS versions, recursive parser/printer, frozen descriptors/table metadata, mapping assertions, 216 genuinely captured records / 54 distinct types, canonical round trips, fresh live verification and fuzz gates. Evidence below; hosted CI is not an active gate. |
+| 2 — codegen | **Accepted locally by verification/commit agent.** Live introspection, metadata/alias/dotted-name preservation, deterministic real schema/functions snapshots, built CLI/credential/stale checks and isolated generated-file compilation passed independent check:all and TS5.5.4/current matrix. Callable fn/agg wrappers intentionally staged to M3. See verification evidence above. |
+| 3 — builder/IR/naive emitter | **Next; not implemented.** All unchanged API examples and negative diagnostics; immutable identity-based IR, runtime columns, modes/names/promotions/nullability, full generated typed catalog and combinators/extensions, all joins/array joins/set/order/group/subquery/raw/hint operators, validation/parameter serialization; permanent `emitNaive()`; live execution and correct decoding of every executable example. All six type gates and all Part 4 constraints below are required. Deterministic six-table DDL/seed must include the specified two tenants, row counts, nulls, empty arrays, shared/orphan ids, versions, weekly history, later insertedAt duplicates and warnings. |
+| 4 — rewrites/flat emission | **Blocked by M3.** Independently tested validation/resolution, each of nine rewrite rules including negative preconditions, terminating fixpoint/50-iteration failure, one final source-order/shared-demand prune, table-driven block planning/fences; byte-exact lowStockCategories SQL and params; parameter identity, quoting, outer-join settings, CTE sharing/collision handling, no optimized `*`. Real 500-case local acceptance differential (also wired for CI) with shrinking/both SQLs, 10k nightly, corpus EXPLAIN snapshots asserting allowed subqueries and read-column pruning. |
 | 5 — client | **Blocked by M4.** Production run/stream with compile identity memoization, reused recursive decoders and execution settings, no more than one HTTP chunk buffered; actual 10M-row stream below 200 MB heap; server errors wrapped with SQL/params/cause and best-effort offending IR node/path without secondary exceptions. Basic execution/decoding already needed in M3, hardened here. |
 | 6 — hardening | **Blocked by M5.** Arbitrary valid and malformed IR property tests: compile or named-node validation error, never compiler TypeError; all earlier gates remain green, including integration, differential, performance and both TypeScript versions. |
 | 7 — deferred | Real temporary-table materialization in HTTP sessions; not v1. M3/M4 still require stable Materialize node/API, CTE behavior and warning. |
 | 8 — deferred | Incremental Z-set engine, JS evaluators, sources/transport, live()/changes(), insert/delete differential backend. Not v1; compatibility constraints below are v1. |
 
-### M3 compatibility constraints (all currently absent)
+### M3 compatibility constraints (only ChangeSource/table metadata implemented so far)
 
 - Catalog SQL name/sqlName, optional **unset** js, deterministic, aggregate linear metadata; now/rand/today non-deterministic. Spec lists this twice: preserve both descriptions as one implementation requirement.
 - Raw opacity (`opaque: true`) and validator tracking.
 - `Query<R, C extends Caps = Caps>`, `Caps = { live: boolean }`, exported `IsLive<Q>` and capability propagation; no live()/changes() declarations.
-- `table()` optional `source?: ChangeSource`, `ChangeSource = { readonly kind: string }`; generator never sets source.
+- **Implemented early in M1:** `packages/core/src/table.ts` accepts optional `source?: ChangeSource` metadata and exports `ChangeSource = { readonly kind: string }`. M2 generator never sets source; isolated generated-consumer runtime assertion verifies this.
 - Single decoded value model and core `canonicalKey(row, columns): string`, used by differential comparisons.
 - Client `Backend { name: string; compile(rel: Rel): Plan; run(plan: Plan): AsyncIterable<unknown[]> }`; clickhouse and clickhouse-naive plugins in harness.
 - Param retains distinct identity/node kind through compilation, never converted to Literal.
@@ -40,15 +135,15 @@ At the scaffold audit, `package.json` ran only `tsc --noEmit && vitest run && pn
 
 Extend `check:all` as gates are implemented, without skipping Docker-dependent checks or weakening assertions:
 
-1. M1: parser fixture/fuzz runtime suite and exact mapping/descriptor type assertions; corpus provenance/count checks; verify both TS CI versions.
+1. M1: implemented parser fixture/fuzz runtime suite, exact mapping/descriptor assertions, corpus provenance/count and built-consumer checks. Both TS versions accepted locally; root `check:all` itself does not run the entire matrix. Keep explicit local TS5.5/current CLI checks plus CHQL_TYPESCRIPT_VERSION-selected bridge checks.
 2. M2: real 24.8 codegen snapshot/check integration and generated-file compilation.
 3. M3 six gates: exact positive types plus not-any, per-statement diagnostic code/message harness (missing/extra/wrong error fails), runtime-columns-derived type snapshots, 200-query + 25-step-chain + 10-way-join extendedDiagnostics budget, readable declaration snapshots, deterministic generated method declaration snapshot and standalone compile. Set genuine measured instantiation/time budgets with 50% headroom, never fabricate or silently raise them.
 4. M3 onward: executable full example corpus, recursive decoder cases (big integers/decimals, time precision, denormal floats, nested collections, nullable types), Part 4 contract tests.
-5. M4: per-stage and EXPLAIN structural tests; 500 real differential cases mandatory in CI; add separate scheduled 10k workflow (not 10k on every local check).
+5. M4: per-stage and EXPLAIN structural tests; 500 real differential cases mandatory in local acceptance and wired for CI; add separate scheduled 10k workflow (not 10k on every local check).
 6. M5: measured 10M-row/<200 MB heap streaming gate and real error attribution.
 7. M6: arbitrary IR robustness. Keep all prior gates active; regeneration must compare, not silently overwrite expected output during acceptance.
 
-## First worker batch — milestone 1 only
+## Historical first worker batch — milestone 1 (completed; not active)
 
 Paths below are relative to `/Users/fernandohur/personal/chql`. Suggested new names are explicit worker targets, not claims of existing APIs. Run steps sequentially; no later-milestone implementation in this batch.
 
@@ -206,4 +301,7 @@ Targets: `scripts/capture-type-corpus.ts`, `packages/compiler/test/fixtures/type
 10. **Nothing mapping unspecified:** proposed never (and Nullable(Nothing) null) must be recorded/tested. Bare DateTime has two possible AST variants; choose one canonical parse output while printing both identically.
 11. **EXPLAIN fence language versus expected SQL:** example deliberately contains derived join-input/aggregate tables; classify fences and actual 24.8 EXPLAIN structure before assertions, without deleting mandatory structural checks or changing expected byte-exact SQL.
 
-Completion is false until milestones 1–6 and all their actual gates are implemented and verified. No later milestone is accepted by assumption.
+12. **M2 known functions depend on M3 Expr:** M2 requires generated functions.ts, but callable known-tier functions require the next milestone's expression/aggregate constructors. Minimal staged resolution: M2 emits and snapshots complete typed metadata without runtime core dependencies on compiler; M3 adds callable wrappers over that same generated catalog and asserts fn/agg/.as behavior. Metadata-only is an interim M2 artifact, never final v1 API acceptance. If integration requires a different format, document it before implementation rather than silently omitting functions.ts.
+13. **Nullable fixture syntax versus live server:** fixture includes Array(Tuple(nullable members)) and later outer joins nullable entire columns; validate actual server support at M3, not just a TS union. Do not alter the prescribed fixture or weaken decoding to accommodate an untested assumption.
+
+Completion is false until milestones 1–6 and all their actual local gates are implemented and verified. No later milestone is accepted by assumption. Historical missing-hosted-CI statements above are provenance only, not current blockers.

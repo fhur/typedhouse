@@ -11,7 +11,9 @@
     "test": "vitest run",
     "verify:type-corpus": "pnpm capture:type-corpus --check",
     "verify:core-package": "node scripts/verify-core-package.mjs",
-    "check:all": "pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package"
+    "test:codegen-integration": "vitest run --config vitest.codegen.config.ts",
+    "verify:codegen-package": "node scripts/verify-codegen-package.mjs",
+    "check:all": "pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm test:codegen-integration && pnpm verify:codegen-package"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
