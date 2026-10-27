@@ -1,0 +1,22 @@
+{
+  "name": "chql",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.11.0",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:all": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "expect-type": "^1.2.1",
+    "fast-check": "^4.1.1",
+    "testcontainers": "^10.25.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.3"
+  }
+}

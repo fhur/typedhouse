@@ -1,0 +1,22 @@
+{
+  "name": "@chql/client",
+  "version": "0.1.0",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean"
+  },
+  "dependencies": {
+    "@chql/compiler": "workspace:*",
+    "@chql/core": "workspace:*",
+    "@clickhouse/client": "^1.11.0"
+  }
+}
