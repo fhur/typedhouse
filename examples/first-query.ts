@@ -47,6 +47,11 @@ try {
     .orderBy(r => r.id).thenBy(r => r.partId).limit(10);
   console.log(componentParts.toSQL());
   console.log(await client.run(componentParts));
+  // Ordinary CTE hint only: compilation warns; this does not cache server results.
+  const fencedParts = componentParts.materialize().where(r => r.partId.notEmpty())
+    .groupBy(r => r.partId).aggregate(() => count()).orderBy(r => r.count.desc()).limit(10);
+  console.log(fencedParts.toSQL());
+  console.log(await client.run(fencedParts));
   const sharedParts = join({ a: componentParts, b: componentParts })
     .on(r => [r.a.partId.eq(r.b.partId), r.a.id.lt(r.b.id)])
     .map(r => ({ a: r.a.id, b: r.b.id, partId: r.a.partId }));

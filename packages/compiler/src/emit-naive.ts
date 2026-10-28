@@ -23,6 +23,8 @@ export function emitNaive(root: Rel): CompiledQuery {
   const nodes: Record<string, Rel> = Object.create(null) as Record<string, Rel>;
   const assigned = new Map<ExprNode, { name: string; type: CHType }>();
   const active = new Set<Rel>();
+  const materialized = new Set<Rel>();
+  let cteIndex = 0;
   // Each derived input owns this local SQL scope; ColumnRefs never bind SELECT aliases.
   const inputAlias = quoteIdentifier('__chql_input');
   function fail(code: string, node: unknown, path: string, detail = ''): never { throw new ValidationError(code, node, path, detail); }
@@ -241,10 +243,18 @@ export function emitNaive(root: Rel): CompiledQuery {
           });
           return `SELECT ${items.join(', ')} FROM (${emit(rel.input, `${path}.input`)}) AS ${inputAlias}`;
         }
-        case 'Filter': case 'Limit': case 'Sort': case 'Distinct': {
+        case 'Filter': case 'Limit': case 'Sort': case 'Distinct': case 'Materialize': {
           const inputLeaves = outputLeaves(rel.input.output);
           if (JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(inputLeaves.map(l => [l.path, print(l.type)]))) return fail('invalid_output', rel, path);
           const source = emit(rel.input, `${path}.input`);
+          if (rel.kind === 'Materialize') {
+            // The local WITH is visible throughout its input. Avoid every quoted
+            // identifier in that subtree, including physical tables and nested CTEs.
+            let name: string;
+            do { name = quoteIdentifier(`t${cteIndex++}`); } while (source.includes(name) || order.some(k => quoteIdentifier(k) === name));
+            materialized.add(rel);
+            return `WITH ${name} AS (${source}) SELECT ${order.map(k => `${name}.${quoteIdentifier(k)}`).join(', ')} FROM ${name}`;
+          }
           if (rel.kind === 'Distinct') return `SELECT DISTINCT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias}`;
           if (rel.kind === 'Sort') {
             if (!Array.isArray(rel.keys) || rel.keys.length === 0) return fail('invalid_sort_key', rel, `${path}.keys`);
@@ -271,6 +281,8 @@ export function emitNaive(root: Rel): CompiledQuery {
     } finally { active.delete(rel); }
   }
   const sql = emit(root, 'root');
+  // Warn only after successful validation, once per distinct hint per compile.
+  for (const _rel of materialized) console.warn('chql: materialization is not yet implemented; materialize() emits an ordinary CTE, which ClickHouse may inline and evaluate repeatedly.');
   const leaves = outputLeaves(root.output);
   return Object.freeze({ sql, params: Object.freeze(params), parameterTypes: Object.freeze(parameterTypes), columns: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, l.type]))), ...(root.output.shape === 'nested' ? { columnPaths: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, Object.freeze(l.path)]))) } : {}), nodes: Object.freeze(nodes) });
 }

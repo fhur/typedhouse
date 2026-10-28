@@ -61,6 +61,19 @@ with `union_descriptor_mismatch`. Common-type/coercion support remains backlog.
 The naive compiler also supports low-level `Union { all: false }` with explicit
 UNION DISTINCT; no public intersect/except APIs are implied.
 
+`componentParts.materialize()` is a composable v1 **ordinary CTE hint**. It retains
+nested/expanded rows, descriptors and capabilities, but drops scan/thenBy stages
+and direct-aggregate scalar evidence. Filters, projections, grouping, ordering,
+limits, unions and membership can compose around it. `emitNaive` (also `compile`)
+logs `materialization is not yet implemented` to `console.warn` once per distinct
+Materialize node per successful compilation, not per repeated occurrence. Invalid
+compilations do not warn. The client's existing identity memoization means repeated
+runs reuse compilation; explicit `toSQL()` calls compile and warn again. Local WITH
+boundaries preserve input operations; ClickHouse may inline and evaluate each use
+repeatedly. This does **not** promise cached rows, one evaluation, temporary tables,
+or automatic shared-parent CTE extraction (the latter remains M4; real materialization
+is deferred M7). See `examples/first-query.ts` for executable composition.
+
 `scalar(q.aggregate(g => sum(g.stock)))` now embeds a directly built keyless,
 exactly-one-column aggregate as a row-mode expression. Object-form names and
 single-expression root names are retained. Use it in projections, arithmetic
