@@ -1,4 +1,5 @@
-import type { Rel } from '@chql/core';
+import { outputLeaves, type Rel } from '@chql/core';
+import { safePredicate } from './rewrite-expressions.js';
 import type { ColumnDemand } from './prune-columns.js';
 import type { CtePlan } from './plan-ctes.js';
 
@@ -8,6 +9,8 @@ export interface SelectBlock {
     | { readonly kind: 'derived'; readonly rel: Rel };
   /** Original nodes retain their expression bindings and diagnostic paths. */
   readonly clauses: readonly SelectClause[];
+  readonly aggregate?: Extract<Rel, { kind: 'Aggregate' }>;
+  readonly where?: readonly SelectClause[];
 }
 export interface SqlPlan {
   readonly root: Rel;
@@ -40,13 +43,24 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       block = { source: Object.freeze({ kind: 'table', scan: rel }), clauses: Object.freeze([]) };
     } else if (rel.kind === 'Project' && isColumnSelection(rel)) {
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
-      if (!child || child.clauses.some(node => node.kind !== 'Filter')) return undefined;
+      if (!child || child.aggregate || child.clauses.some(node => node.kind !== 'Filter')) return undefined;
       block = { source: child.source, clauses: child.clauses };
+    } else if (rel.kind === 'Aggregate') {
+      const sourceNames = new Set(outputLeaves(rel.input.output).map(l => l.name));
+      // Alias substitution is server-setting-sensitive if an output shadows a
+      // different source expression. Keep the explicit scope in that case.
+      if ([...Object.entries(rel.keys), ...Object.entries(rel.aggs)].some(([name, e]) =>
+        sourceNames.has(name) && !(e.kind === 'ColumnRef' && e.path.length === 1 && e.path[0] === name))) return undefined;
+      const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
+      const fold = child && !child.aggregate && child.source.kind === 'table' && child.clauses.every(n => n.kind === 'Filter');
+      block = { source: fold ? child.source : Object.freeze({ kind: 'derived', rel: rel.input }),
+        aggregate: rel, where: fold ? child.clauses : Object.freeze([]), clauses: Object.freeze([]) };
     } else if (rel.kind === 'Filter' || rel.kind === 'Sort' || rel.kind === 'Limit') {
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
       const last = child?.clauses.at(-1);
-      block = child && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
-        ? { source: child.source, clauses: Object.freeze([...child.clauses, rel]) }
+      const safe = !child?.aggregate || (rel.kind === 'Filter' ? safePredicate(rel.pred) : rel.kind === 'Sort' ? rel.keys.every(k => k.expr.kind === 'ColumnRef') : true);
+      block = child && safe && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
+        ? { ...child, clauses: Object.freeze([...child.clauses, rel]) }
         : { source: Object.freeze({ kind: 'derived', rel: rel.input }), clauses: Object.freeze([rel]) };
     } else return undefined;
     blocks.set(rel, Object.freeze(block));

@@ -1,5 +1,5 @@
 import { exprNode as constructExpr, methodCatalog, print, type CHType, type ExprNode, type Rel } from '@chql/core';
-import { resolveCall } from './resolve.js';
+import { resolveAggregate, resolveCall } from './resolve.js';
 
 type Ref = Extract<ExprNode, { kind: 'ColumnRef' }>;
 /** Constructors snapshot unregistered manual graphs. Restore graph edges (not
@@ -75,6 +75,22 @@ export function safePredicate(e: ExprNode): boolean {
     return resolved.result;
   }
   try { return print(base(resolve(e))) === 'Bool'; } catch { return false; }
+}
+/** Whole-computation envelope, not merely determinism: direct non-null
+ * String/Bool/integer keys, count(), max of those direct columns and integer
+ * sum. No casts, combinators,
+ * nullable/decimal state, raw calls or hidden fallible outputs may be suppressed.
+ * Integer sum has ClickHouse's wrapping semantics, not checked overflow. */
+export function safeAggregate(rel: Extract<Rel, { kind: 'Aggregate' }>): boolean {
+  const direct = (e: ExprNode): boolean => e.kind === 'ColumnRef' && e.rel === rel.input.id && e.type.kind === 'scalar' && family(e.type) !== undefined;
+  if (!Object.getOwnPropertyNames(rel.keys).every(k => direct(rel.keys[k]!))) return false;
+  return Object.getOwnPropertyNames(rel.aggs).every(k => {
+    const e = rel.aggs[k]!;
+    if (e.kind !== 'Agg' || e.params.length || e.combinators.length) return false;
+    if (e.fn.name !== 'count' && e.fn.name !== 'max' && e.fn.name !== 'sum') return false;
+    if (!e.args.every(a => direct(a) && (e.fn.name !== 'sum' || family(a.type!) === 'integer'))) return false;
+    try { resolveAggregate(e, a => { if (!a.type) throw new Error('untyped'); return a.type; }); return true; } catch { return false; }
+  });
 }
 export function conjuncts(e: ExprNode): ExprNode[] {
   return e.kind === 'Call' && e.fn.name === 'and' ? e.args.flatMap(conjuncts) : [e];

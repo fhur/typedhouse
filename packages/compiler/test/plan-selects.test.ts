@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, from, table } from '@chql/core';
+import { col, count, from, table } from '@chql/core';
 import { validateRel } from '../src/emit-naive.js';
 import { planSelects } from '../src/plan-selects.js';
 
@@ -28,6 +28,19 @@ it('starts a derived block for an earlier clause, then folds later clauses', () 
   expect(result.blocks.get(outer.ir)?.clauses.map(n => n.kind)).toEqual(['Filter', 'Sort', 'Limit']);
 });
 
+it('plans aggregate HAVING/order/window together but keeps reversal boundaries', () => {
+  const source = from(t).where(r => r.id.gt(1n));
+  const aggregate = source.groupBy(r => ({ key: r.id })).aggregate(() => ({ n: count() }));
+  const filter = aggregate.where(r => r.n.gt(1n));
+  const sort = filter.orderBy(r => r.n);
+  const limit = sort.limit(2, 1);
+  const block = plan(limit.ir).blocks.get(limit.ir)!;
+  expect(block.aggregate).toBe(aggregate.ir);
+  expect(block.where).toEqual([source.ir]);
+  expect(block.clauses).toEqual([filter.ir, sort.ir, limit.ir]);
+  const reversed = sort.where(r => r.n.gt(2n));
+  expect(plan(reversed.ir).blocks.get(reversed.ir)?.source).toEqual({ kind: 'derived', rel: sort.ir });
+});
 it('plans expression subqueries without flattening across their scopes', () => {
   const inner = from(t).orderBy(r => r.id).limit(1);
   const outer = from(t).where(r => r.id.in(inner));

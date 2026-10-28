@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, crossJoin, exprNode, from, join, scalar, table, unionAll, val, type Rel } from '@chql/core';
+import { cast, col, count, max, sum, crossJoin, exprNode, from, join, scalar, table, unionAll, val, type Rel } from '@chql/core';
 import { compile, emitNaive } from '../src/index.js';
 import { validateRel } from '../src/emit-naive.js';
 import { rewriteRel } from '../src/rewrite-rel.js';
@@ -68,7 +68,7 @@ it.each([false, true])('pushes independent predicates below expansion (left=%s)'
   expect(rewrite(expanded.where(r => r.part.eq('x')).ir).hits.PushFilterArrayJoin).toBe(0);
 });
 it('keeps all explicit fences and unused fallible projections', () => {
-  const fences = [q.orderBy(r => r.id), q.limit(1), q.distinct(), unionAll(q, q), q.materialize()];
+  const fences = [q.orderBy(r => r.id), q.limit(1), q.distinct(), q.materialize()];
   for (const fence of fences) { const root = fence.where(r => r.id.gt(1)).ir; expect(rewriteRel(root).root).toBe(root); }
 });
 it('does not move across computed projections, casts, aggregates or unsafe filters', () => {
@@ -165,7 +165,68 @@ it('keeps diagnostic paths on original objects and equal-valued Params distinct 
   expect(compiled.parameterTypes).toEqual({ p0: col.UInt32.type, p1: col.UInt32.type });
   const rewritten = rewrite(query.ir);
   expect(rewritten.hits.PushFilterJoin).toBeGreaterThan(0);
-  expect(rewriteRel(rewritten.root).hits).toEqual({ MergeFilter: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0 });
+  expect(rewriteRel(rewritten.root).hits).toEqual({ MergeFilter: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 });
+});
+it('pushes direct aggregate keys, splitting AND but retaining aggregate/mixed OR predicates', () => {
+  const a = q.groupBy(r => ({ key: r.id })).aggregate(g => ({ n: count(), highest: max(g.id), total: sum(g.id) }));
+  const result = rewrite(a.where(r => r.key.gt(1).and(r.n.gt(1n)).and(r.key.eq(2).or(r.highest.eq(3)))).ir);
+  expect(result.hits.PushFilterAggKey).toBe(1);
+  if (result.root.kind !== 'Filter' || result.root.input.kind !== 'Aggregate') throw new Error('shape');
+  expect(result.root.input.input.kind).toBe('Filter');
+  expect(references(result.root.pred).map(r => r.path[0])).toEqual(['n', 'key', 'highest']);
+  const nullable = q.groupBy(r => ({ key: r.text })).aggregate(() => ({ n: count() })).where(r => r.key.isNull());
+  expect(rewrite(nullable.ir).hits.PushFilterAggKey).toBe(0);
+  const fallible = q.groupBy(r => ({ key: r.id })).aggregate(g => ({ n: sum(cast(g.text, col.Nullable(col.UInt32))) })).where(r => r.key.gt(1));
+  expect(rewrite(fallible.ir).hits.PushFilterAggKey).toBe(0);
+  const global = q.limit(0).aggregate(() => ({ n: count() })).where(() => val(false));
+  expect(rewrite(global.ir).root).toBe(global.ir);
+});
+it('replicates Union predicates per slot without crossing branch fences or merging Params', () => {
+  const branches = [q.limit(1), q.orderBy(r => r.id), q.distinct(), q.materialize()];
+  const p = val(1, col.UInt32), other = val(1, col.UInt32);
+  const query = unionAll(branches[0]!, branches[1]!, ...branches.slice(2), branches[0]!).where(r => r.id.gt(p).and(r.id.ne(other)));
+  const result = rewriteRel(query.ir);
+  expect(result.hits.PushFilterUnion).toBe(1);
+  if (result.root.kind !== 'Union') throw new Error('shape');
+  expect(result.root.all).toBe(true);
+  expect(result.root.inputs).toHaveLength(5);
+  for (const [i, branch] of result.root.inputs.entries()) {
+    if (branch.kind !== 'Filter') throw new Error('shape');
+    expect(branch.input).toBe(i === 4 ? branches[0]!.ir : branches[i]!.ir);
+    expect(references(branch.pred).every(r => r.rel === branch.input.id)).toBe(true);
+  }
+  expect(rewriteRel(result.root).root).toBe(result.root);
+});
+it('requires exact Union path/order descriptors and preserves DISTINCT occurrences', () => {
+  const a = q.map(r => ({ first: r.id, second: r.id }));
+  const b = q.map(r => ({ second: r.id, first: r.id }));
+  const reordered = unionAll(a, b).where(r => r.first.gt(1));
+  expect(rewrite(reordered.ir).hits.PushFilterUnion).toBe(0);
+  const distinct = structuredClone(unionAll(a, a, a).where(r => r.first.gt(1)).ir);
+  if (distinct.kind !== 'Filter' || distinct.input.kind !== 'Union') throw new Error('shape');
+  Object.assign(distinct.input, { all: false });
+  const result = rewrite(distinct);
+  expect(result.hits.PushFilterUnion).toBe(1);
+  if (result.root.kind !== 'Union') throw new Error('shape');
+  expect(result.root.all).toBe(false); expect(result.root.inputs).toHaveLength(3);
+});
+it('does not suppress computed keys, arithmetic aggregates or unused invalid computations', () => {
+  const computed = q.groupBy(r => ({ key: r.id.plus(1) })).aggregate(() => ({ n: count() })).where(r => r.key.gt(1n));
+  const arithmetic = q.groupBy(r => ({ key: r.id })).aggregate(g => ({ n: sum(g.id).plus(1n) })).where(r => r.key.gt(1));
+  for (const query of [computed, arithmetic]) expect(rewrite(query.ir).hits.PushFilterAggKey).toBe(0);
+  const invalid = structuredClone(q.groupBy(r => ({ key: r.id })).aggregate(() => ({ n: count() })).where(r => r.key.gt(1)).ir);
+  if (invalid.kind !== 'Filter' || invalid.input.kind !== 'Aggregate') throw new Error('shape');
+  Object.assign(invalid.input.aggs.n!, { fn: { name: 'rand', deterministic: false, origin: 'known' } });
+  expect(() => compile(invalid)).toThrow();
+});
+it('keeps shared conflicting aggregate consumers independent', () => {
+  const shared = q.groupBy(r => ({ key: r.id })).aggregate(() => ({ n: count() }));
+  const query = unionAll(shared.where(r => r.key.eq(1)), shared.where(r => r.key.eq(2)), shared);
+  const result = rewrite(query.ir);
+  expect(result.hits.PushFilterAggKey).toBe(2);
+  if (result.root.kind !== 'Union') throw new Error('shape');
+  expect(result.root.inputs[2]).toBe(shared.ir);
+  expect(shared.ir.kind === 'Aggregate' && shared.ir.input).toBe(q.ir);
 });
 it('retains original invalid graph diagnostics and fails loudly at the convergence cap', () => {
   const foreign = q.map(r => ({ id: r.id }));

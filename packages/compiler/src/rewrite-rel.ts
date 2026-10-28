@@ -1,5 +1,5 @@
-import { relNode as constructRel, type ExprNode, type Rel } from '@chql/core';
-import { exprNode, conjunction, conjuncts, mapExpression, rebind, references, safePredicate } from './rewrite-expressions.js';
+import { outputLeaves, print, relNode as constructRel, type ExprNode, type Rel } from '@chql/core';
+import { exprNode, conjunction, conjuncts, mapExpression, rebind, references, safeAggregate, safePredicate } from './rewrite-expressions.js';
 
 function mapRecord(es: Readonly<Record<string, ExprNode>>, visit: (e: ExprNode) => ExprNode): Readonly<Record<string, ExprNode>> {
   const out: Record<string, ExprNode> = {};
@@ -32,7 +32,7 @@ function relNode(fields: Parameters<typeof constructRel>[0]): Rel {
   return Object.keys(edges).every(k => same(edges[k], (made as unknown as Record<string, unknown>)[k])) ? made : Object.freeze({ ...made, ...edges });
 }
 
-export type RewriteRule = 'MergeFilter' | 'PushFilterProject' | 'PushFilterJoin' | 'PushFilterArrayJoin';
+export type RewriteRule = 'MergeFilter' | 'PushFilterProject' | 'PushFilterJoin' | 'PushFilterArrayJoin' | 'PushFilterAggKey' | 'PushFilterUnion';
 export interface RewriteResult { readonly root: Rel; readonly hits: Readonly<Record<RewriteRule, number>> }
 const filter = (input: Rel, pred: ExprNode): Rel => relNode({ kind: 'Filter', input, pred, output: input.output });
 /** Lexicographic occurrence-tree measure. Filters do not contribute to distance,
@@ -59,17 +59,42 @@ export function rewriteMeasure(root: Rel): readonly [number, number] {
  * Each pass memoizes original occurrences, never consumer-specific pushdowns.
  * Termination: each atomic conjunct moves strictly toward leaves (sum of sizes
  * of its non-Filter descendant occurrence trees decreases); merging decreases Filter count
- * when that distance is unchanged. No rule pulls predicates upward or copies one
- * into multiple sides. Fifty passes are a safety limit, never partial success.
+ * when that distance is unchanged. Union replication replaces weight
+ * 1 + sum(branch sizes) with sum(branch sizes) per conjunct, strictly decreasing
+ * distance despite increasing Filter count. Repeated slots count as occurrences.
+ * No rule pulls predicates upward. Fifty passes are a safety limit, never partial success.
  */
 export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
-  const hits: Record<RewriteRule, number> = { MergeFilter: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0 };
+  const hits: Record<RewriteRule, number> = { MergeFilter: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 };
   function local(node: Rel): Rel {
     if (node.kind !== 'Filter' || !safePredicate(node.pred)) return node;
     const child = node.input;
     if (child.kind === 'Filter' && safePredicate(child.pred)) {
       hits.MergeFilter++;
       return filter(child.input, conjunction([child.pred, rebind(node.pred, child, child.input)]));
+    }
+    if (child.kind === 'Aggregate' && Object.getOwnPropertyNames(child.keys).length && safeAggregate(child)) {
+      const pushed: ExprNode[] = [], residual: ExprNode[] = [];
+      for (const pred of conjuncts(node.pred)) {
+        const refs = references(pred);
+        if (!refs.every(r => r.rel === child.id && r.path.length === 1 && Object.hasOwn(child.keys, r.path[0]!))) { residual.push(pred); continue; }
+        pushed.push(mapExpression(pred, r => child.keys[r.path[0]!]!));
+      }
+      if (!pushed.length) return node;
+      const input = filter(child.input, conjunction(pushed));
+      const aggregate = relNode({ kind: 'Aggregate', input, output: child.output, columns: child.columns,
+        keys: mapRecord(child.keys, e => rebind(e, child.input, input)), aggs: mapRecord(child.aggs, e => rebind(e, child.input, input)) });
+      hits.PushFilterAggKey++;
+      return residual.length ? filter(aggregate, rebind(conjunction(residual), child, aggregate)) : aggregate;
+    }
+    if (child.kind === 'Union') {
+      const schema = (r: Rel) => JSON.stringify(outputLeaves(r.output).map(l => [l.path, print(l.type)]));
+      if (!child.inputs.every(r => schema(r) === schema(child))) return node;
+      // Each slot gets its own binding; the branch itself (including fences) is
+      // untouched. Subsequent passes can only cross their existing safe rules.
+      const inputs = child.inputs.map(input => filter(input, rebind(node.pred, child, input)));
+      hits.PushFilterUnion++;
+      return relNode({ kind: 'Union', inputs, all: child.all, output: child.output });
     }
     if (child.kind === 'Project' && Object.getOwnPropertyNames(child.exprs).every(k => { const e = child.exprs[k]!; return e.kind === 'ColumnRef' && e.rel === child.input.id; })) {
       const pred = mapExpression(node.pred, r => r.rel === child.id && r.path.length === 1 ? child.exprs[r.path[0]!]! : r);

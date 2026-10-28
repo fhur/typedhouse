@@ -152,6 +152,29 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
   }
   function renderBlock(rel: Rel, order: readonly string[], path = 'root'): string {
     const block = plan!.blocks.get(rel)!;
+    if (block.aggregate) {
+      const aggregate = block.aggregate;
+      // SELECT precedes even a derived FROM in final textual parameter order.
+      // Qualify source references; HAVING/ORDER deliberately use output aliases.
+      const keys = Object.entries(aggregate.keys).map(([name, e]) => [name, expression(e, aggregate.input, `${path}.keys.${name}`, undefined, false, 'row', inputAlias)] as const);
+      const items = [...keys.map(([name, sql]) => `${sql} AS ${quoteIdentifier(name)}`),
+        ...Object.entries(aggregate.aggs).map(([name, e]) => `${expression(e, aggregate.input, `${path}.aggs.${name}`, undefined, false, 'aggregate', inputAlias)} AS ${quoteIdentifier(name)}`)];
+      const source = block.source.kind === 'table'
+        ? `${quoteIdentifier(block.source.scan.table.name)} AS ${inputAlias}${block.source.scan.final ? ' FINAL' : ''}${block.source.scan.sample === undefined ? '' : ` SAMPLE ${block.source.scan.sample}`}`
+        : `(${emit(block.source.rel, `${path}.source`)}) AS ${inputAlias}`;
+      const where = (block.where ?? []).map((node, i) => {
+        if (node.kind !== 'Filter') throw new Error('invalid_aggregate_where');
+        return expression(node.pred, node.input, `${path}.where[${i}]`, undefined, false, 'row', inputAlias);
+      });
+      const having: string[] = [], tails: string[] = [];
+      for (const [i, node] of block.clauses.entries()) {
+        const p = `${path}.clauses[${i}]`;
+        if (node.kind === 'Filter') having.push(expression(node.pred, node.input, `${p}.pred`, undefined, false, 'row', ''));
+        else if (node.kind === 'Sort') tails.push(` ORDER BY ${node.keys.map((k, j) => `${expression(k.expr, node.input, `${p}.keys[${j}]`, undefined, false, 'row', '')} ${k.dir.toUpperCase()}${k.nulls === undefined ? '' : ` NULLS ${k.nulls.toUpperCase()}`}`).join(', ')}`);
+        else tails.push(` LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
+      }
+      return `SELECT ${items.join(', ')} FROM ${source}${where.length ? ` WHERE ${where.join(' AND ')}` : ''}${keys.length ? ` GROUP BY ${keys.map(([, sql]) => sql).join(', ')}` : ''}${having.length ? ` HAVING ${having.join(' AND ')}` : ''}${tails.join('')}`;
+    }
     let from: string;
     if (block.source.kind === 'table') {
       const scan = block.source.scan;
