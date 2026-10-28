@@ -47,6 +47,7 @@ try {
     .orderBy(r => r.id).thenBy(r => r.partId).limit(10);
   console.log(componentParts.toSQL());
   console.log(await client.run(componentParts));
+  for await (const row of client.stream(componentParts)) console.log('streamed part', row);
   // Ordinary CTE hint only: compilation warns; this does not cache server results.
   const fencedParts = componentParts.materialize().where(r => r.partId.notEmpty())
     .groupBy(r => r.partId).aggregate(() => count()).orderBy(r => r.count.desc()).limit(10);

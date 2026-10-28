@@ -135,7 +135,7 @@ The client decodes String/FixedString, Bool, integer widths, floats (including
 non-finite values), DateTime64(0–3), recursive Array and named/unnamed Tuple,
 Nullable and LowCardinality. Decimal, other dates/high-precision timestamps,
 Map, Enum, addresses, opaque states and unknown descriptors remain explicitly
-unsupported. Full catalog, outer joins, optimizations, streaming and Part 4 backend
+unsupported. Full catalog, outer joins, optimizations and Part 4 backend
 plugins remain backlog. M3–M6 and the remaining Part 4 constraints are incomplete;
 this preview is not full v1 acceptance. M7–M8 remain deferred.
 
@@ -167,6 +167,18 @@ Core intentionally has no compiler dependency. Explicitly initialize `toSQL()` w
 memoizes plans/decoders by IR identity. `run` forces ISO date output, quoted 64-bit
 integers and quoted non-finite floats; errors retain SQL, params, cause and the root
 node (fine-grained server attribution remains backlog). Always `await client.close()`.
+`client.stream(q)` lazily compiles and executes on first iteration, sharing the same
+plan/decoder cache, parameter transport and output settings as `run`. It yields decoded
+rows incrementally from the driver's JSONEachRow batches, without collecting results.
+Exhaustion, early `break`, consumer exceptions and read/decode failures release the
+response, not the reusable client. Each iterator has its own cursor. The driver has
+bounded internal stream buffering; this is not a strict single-network-chunk guarantee.
+The enabled Docker test consumes 10,000,000 real `{ id: UInt32 }` rows in an isolated
+Node process (`scripts/verify-stream-memory.mjs`), checking count/checksum and sampled
+peak `heapUsed < 200_000_000` bytes (every 4096 rows plus a 10ms timer, no forced GC or
+baseline subtraction). Fixture population is outside that process. This budget applies
+only to this measured workload, not arbitrary row widths or consumer-retained rows.
+
 Rows and graph nodes are immutable. Named Tuple descriptors survive projections;
 named/unnamed tuples and arrays decode recursively. The executable example also
 shows structural filtering, tuple-field extraction and array lengths. Array indices

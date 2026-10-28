@@ -119,7 +119,11 @@ assert.deepEqual(Object.values(expandedPlan.columnPaths), [['a', 'specs'], ['a',
 assert.equal(toTypeScript(expandedPlan.columns[Object.keys(expandedPlan.columns).at(-1)]), 'bigint');
 const plan = joined.toSQL();
 assert.deepEqual(rowDecoder(plan.columns, plan.columnPaths)(Object.fromEntries(Object.keys(plan.columns).map(k => [k, '2']))), { a: { id: 2n }, b: { id: 2n } });
-await createClient().close();
+const streamClient = createClient();
+const lazy = streamClient.stream(nestedExpanded);
+assert.equal(typeof lazy[Symbol.asyncIterator], 'function');
+await lazy.return(); // no server required: unused iterators do not execute
+await streamClient.close();
 `);
   run(process.execPath, ['smoke.mjs'], directory);
   const version = process.env.CHQL_TYPESCRIPT_VERSION;
