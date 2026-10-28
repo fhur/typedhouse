@@ -13,7 +13,7 @@ it('folds the available-products example into one SELECT', () => {
   const before = JSON.stringify(query.ir);
   const naive = emitNaive(query.ir);
   const result = compile(query.ir);
-  expect(result.sql).toBe('SELECT `id`, `stock` FROM `products` WHERE greater(`stock`, {p0:UInt32}) AND (`category` = {p1:String}) ORDER BY `stock` DESC LIMIT 10');
+  expect(result.sql).toBe('SELECT `id`, `stock` FROM `products` WHERE and(greater(`stock`, {p0:UInt32}), (`category` = {p1:String})) ORDER BY `stock` DESC LIMIT 10');
   expect({ ...result, sql: '' }).toEqual({ ...naive, sql: '' });
   expect(JSON.stringify(query.ir)).toBe(before);
   expect(countSelects(compile(available.ir).sql)).toBe(1);
@@ -28,13 +28,13 @@ it('folds repeated selections and filters while keeping parameter identities', (
     .map(r => ({ id: r.id })).where(r => r.id.eq(shared)).orderBy(r => r.id).limit(0);
   const plan = compile(query.ir);
   expect(countSelects(plan.sql)).toBe(1);
-  expect(plan.sql).toContain('WHERE or(greater(`stock`, {p0:UInt32}), (`id` = {p1:UInt32})) AND less(`stock`, {p2:UInt32}) AND (`id` = {p0:UInt32})');
+  expect(plan.sql).toContain('WHERE and(and(or(greater(`stock`, {p0:UInt32}), (`id` = {p1:UInt32})), less(`stock`, {p2:UInt32})), (`id` = {p0:UInt32}))');
   expect(plan.params).toEqual(emitNaive(query.ir).params);
   expect(Object.values(plan.params)).toEqual(['2', '0', '10']);
   expect(plan.columns).toEqual({ id: col.UInt32.type });
 });
 
-it('keeps renames, computed columns, and projection after sort/limit as fences', () => {
+it('pushes renames while keeping computed columns and sort/limit as fences', () => {
   const q = from(products);
   const cases = [
     q.map(r => ({ stock: r.id, id: r.stock })).where(r => r.id.gt(0)),
@@ -42,7 +42,9 @@ it('keeps renames, computed columns, and projection after sort/limit as fences',
     q.orderBy(r => r.stock).map(r => ({ id: r.id })).limit(1),
     q.limit(1).map(r => ({ id: r.id })).where(r => r.id.gt(0)),
   ];
-  for (const query of cases) expect(countSelects(compile(query.ir).sql)).toBe(3);
+  expect(cases.map(query => countSelects(compile(query.ir).sql))).toEqual([2, 3, 3, 2]);
+  expect(compile(cases[0]!.ir).sql).toContain('WHERE greater(`stock`, {p0:UInt32})');
+  expect(compile(cases[3]!.ir).sql).toContain('LIMIT 1) AS `__chql_input` WHERE greater(`__chql_input`.`id`, {p0:UInt32})');
 });
 
 it('folds inside set subqueries and retains the outer scope', () => {
