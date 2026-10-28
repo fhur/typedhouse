@@ -3,11 +3,9 @@ import type { SqlPlan } from './plan-selects.js';
 import { parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
 
-export class ValidationError extends Error {
-  constructor(readonly code: string, readonly node: unknown, readonly path: string, detail = '') {
-    super(`${code} at ${path}: ${detail}`); this.name = 'ValidationError';
-  }
-}
+import { validateStructure } from './validate-structure.js';
+import { ValidationError } from './validation-error.js';
+export { ValidationError } from './validation-error.js';
 export function quoteIdentifier(name: string): string {
   if (typeof name !== 'string' || name.includes('\0')) throw new Error('invalid_identifier');
   return '`' + name.replaceAll('\\', '\\\\').replaceAll('`', '\\`') + '`';
@@ -34,6 +32,8 @@ export function emitPlanned(plan: SqlPlan): CompiledQuery {
 }
 
 function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
+  // Planned emission follows validateRel; preflight once per public compilation.
+  if (!plan) validateStructure(root);
   const rendered = new Map<Rel, string>();
   const clauses = new Map<Rel, string>();
   const params: Record<string, string> = Object.create(null) as Record<string, string>;
