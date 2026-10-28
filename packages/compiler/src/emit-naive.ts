@@ -141,6 +141,20 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
       default: return fail('unsupported_expression', e, path, e.kind);
     }
   }
+  function renderBlock(rel: Rel, order: readonly string[]): string {
+    const block = plan!.blocks.get(rel)!;
+    let from: string;
+    if (block.source.kind === 'table') {
+      const scan = block.source.scan;
+      from = `${quoteIdentifier(scan.table.name)} AS ${inputAlias}${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
+    } else {
+      from = `(${rendered.get(block.source.rel)!}) AS ${inputAlias}`;
+    }
+    const predicates = block.clauses.filter(node => node.kind === 'Filter').map(node => clauses.get(node)!);
+    const where = predicates.length ? ` WHERE ${predicates.length === 1 ? predicates[0] : predicates.map(sql => `(${sql})`).join(' AND ')}` : '';
+    const tail = block.clauses.filter(node => node.kind !== 'Filter').map(node => clauses.get(node)!).join('');
+    return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM ${from}${where}${tail}`;
+  }
   function emit(rel: Rel, path: string): string {
     const sql = emitNode(rel, path);
     rendered.set(rel, sql);
@@ -290,7 +304,9 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
             if (!e || !e.type || !same(e.type, columns[k]!)) return fail('nested_projection', rel, `${path}.exprs.${k}`);
             return `${expression(e, rel.input, `${path}.exprs.${k}`)} AS ${quoteIdentifier(k)}`;
           });
-          return `SELECT ${items.join(', ')} FROM (${emit(rel.input, `${path}.input`)}) AS ${inputAlias}`;
+          const source = emit(rel.input, `${path}.input`);
+          if (plan?.blocks.has(rel)) return renderBlock(rel, order);
+          return `SELECT ${items.join(', ')} FROM (${source}) AS ${inputAlias}`;
         }
         case 'Filter': case 'Limit': case 'Sort': case 'Distinct': case 'Materialize': {
           const inputLeaves = outputLeaves(rel.input.output);
@@ -305,17 +321,9 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
             return `WITH ${name} AS (${source}) SELECT ${order.map(k => `${name}.${quoteIdentifier(k)}`).join(', ')} FROM ${name}`;
           }
           if (rel.kind === 'Distinct') return `SELECT DISTINCT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias}`;
-          function renderBlock(clause: string): string {
+          function renderClause(clause: string): string {
             clauses.set(rel, clause);
-            const block = plan!.blocks.get(rel)!;
-            let from: string;
-            if (block.source.kind === 'table') {
-              const scan = block.source.scan;
-              from = `${quoteIdentifier(scan.table.name)} AS ${inputAlias}${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
-            } else {
-              from = `(${rendered.get(block.source.rel)!}) AS ${inputAlias}`;
-            }
-            return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM ${from}${block.clauses.map(node => clauses.get(node)!).join('')}`;
+            return renderBlock(rel, order);
           }
           if (rel.kind === 'Sort') {
             if (!Array.isArray(rel.keys) || rel.keys.length === 0) return fail('invalid_sort_key', rel, `${path}.keys`);
@@ -324,19 +332,19 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
               if (!key || (key.dir !== 'asc' && key.dir !== 'desc') || (key.nulls !== undefined && key.nulls !== 'first' && key.nulls !== 'last')) return fail('invalid_sort_key', rel, keyPath);
               return `${expression(key.expr, rel.input, `${keyPath}.expr`)} ${key.dir.toUpperCase()}${key.nulls === undefined ? '' : ` NULLS ${key.nulls.toUpperCase()}`}`;
             });
-            if (plan) return renderBlock(` ORDER BY ${keys.join(', ')}`);
+            if (plan) return renderClause(` ORDER BY ${keys.join(', ')}`);
             return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias} ORDER BY ${keys.join(', ')}`;
           }
           if (rel.kind === 'Filter') {
             const type = rel.pred?.type && base(rel.pred.type);
             if (!type || type.kind !== 'scalar' || type.name !== 'Bool') return fail('invalid_predicate', rel, path);
             const predicate = expression(rel.pred, rel.input, `${path}.pred`);
-            if (plan) return renderBlock(` WHERE ${predicate}`);
+            if (plan) return renderClause(predicate);
             return `SELECT ${list} FROM (${source}) AS ${inputAlias} WHERE ${predicate}`;
           }
           if (!Number.isSafeInteger(rel.n) || rel.n < 0 || (rel.offset !== undefined && (!Number.isSafeInteger(rel.offset) || rel.offset < 0))) return fail('invalid_limit', rel, path);
           const limit = ` LIMIT ${rel.n}${rel.offset === undefined ? '' : ` OFFSET ${rel.offset}`}`;
-          if (plan) return renderBlock(limit);
+          if (plan) return renderClause(limit);
           return `SELECT ${list} FROM (${source})${limit}`;
         }
         default: return fail('unsupported_node', rel, path, rel.kind);

@@ -22,12 +22,11 @@ it('keeps reversed and repeated clause boundaries', () => {
     q.limit(2).where(r => r.stock.eq(1n)),
     q.limit(2).orderBy(r => r.stock),
     q.orderBy(r => r.stock).where(r => r.stock.eq(1n)),
-    q.where(r => r.stock.eq(1n)).where(r => r.id.eq(2n)),
     q.limit(4, 1).limit(2, 1),
   ];
   for (const query of cases) expect(selects(compile(query.ir).sql)).toBe(2);
   expect(compile(cases[1]!.ir).sql).toContain('LIMIT 2) AS `__chql_input` ORDER BY');
-  expect(compile(cases[4]!.ir).sql).toContain('LIMIT 4 OFFSET 1) AS `__chql_input` LIMIT 2 OFFSET 1');
+  expect(compile(cases[3]!.ir).sql).toContain('LIMIT 4 OFFSET 1) AS `__chql_input` LIMIT 2 OFFSET 1');
 });
 
 it('folds above but not through projection and distinct fences', () => {
