@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GenericContainer, Wait } from 'testcontainers';
-import { argMax, argMaxIf, Expr, aggregateDefinitions, col, count, countIf, countState, defineAggregate, defineFunction, exprNode, extendExpr, max, maxMerge, methodCatalog, orderingCatalog, stringLike, sum, sumIf, sumMerge, sumState, val, parseCHType, type Column, type NodeId } from '../src/index.js';
+import { avg, avgIf, argMax, argMaxIf, Expr, aggregateDefinitions, col, count, countIf, countState, defineAggregate, defineFunction, exprNode, extendExpr, max, maxMerge, methodCatalog, orderingCatalog, stringLike, sum, sumIf, sumMerge, sumState, val, parseCHType, type Column, type NodeId } from '../src/index.js';
 function grouped<T>(column: Column<T>) { return new Expr<T, 'value', 'grouped'>(exprNode({ kind: 'ColumnRef', rel: 1 as NodeId, path: ['value'], type: column.type }), 'value', 'grouped'); }
 describe('catalog slice', () => {
   it('installs exactly its generated method surface', () => {
@@ -24,6 +24,18 @@ describe('catalog slice', () => {
     expect(sumState(x).ir.type).toEqual(col.AggregateFunction('sum', col.Float64).type);
     expect(countState().name).toBe('count');
     expect(sumMerge(grouped(col.AggregateFunction('sum', col.Float64))).ir).toMatchObject({ combinators: ['Merge'], type: col.Float64.type });
+  });
+  it('retains mean roots, nullable Float64 descriptors and immutable operand edges', () => {
+    const value = grouped(col.Nullable(col.UInt256)), predicate = grouped(col.Nullable(col.Bool));
+    const result = avgIf(value, predicate);
+    expect(result).toMatchObject({ name: 'value', mode: 'agg', ir: { type: col.Nullable(col.Float64).type, fn: { name: 'avg', deterministic: true, linear: true }, combinators: ['If'] } });
+    if (result.ir.kind !== 'Agg') throw new Error('expected Agg');
+    expect(result.ir.args[0]).toBe(value.ir); expect(result.ir.args[1]).toBe(predicate.ir);
+    expect(Object.isFrozen(result.ir.args)).toBe(true);
+    expect(Object.isFrozen(result.ir.type)).toBe(true);
+    expect(avg(val(1)).name).toBe('avg');
+    expect(avgIf(val(1), predicate).name).toBe('value');
+    expect(avgIf(grouped(col.UInt32), predicate).ir.type).toEqual(col.Float64.type);
   });
   it('retains argMax value roots, descriptors and immutable operand edges', () => {
     const value = grouped(col.Nullable(col.Float32)), version = grouped(col.UInt32);
@@ -85,6 +97,9 @@ describe('catalog slice', () => {
     const container = await new GenericContainer('clickhouse/clickhouse-server:24.8').withEnvironment({ CLICKHOUSE_SKIP_USER_SETUP: '1' }).withExposedPorts(8123).withWaitStrategy(Wait.forHttp('/ping', 8123)).start();
     try {
       const cases = [
+        [avg(grouped(col.UInt256)), 'avg(toUInt256(7))'],
+        [avg(grouped(col.Nullable(col.Float32))), 'avg(toNullable(toFloat32(7)))'],
+        [avgIf(grouped(col.Float64), grouped(col.Nullable(col.Bool))), 'avgIf(toFloat64(7),CAST(NULL AS Nullable(Bool)))'],
         [argMax(grouped(col.Nullable(col.Float64)), grouped(col.UInt32)), 'argMax(toNullable(toFloat64(1)),toUInt32(2))'],
         [argMaxIf(grouped(col.Bool), grouped(col.UInt32), val(false)), 'argMaxIf(true,toUInt32(2),false)'],
         [sum(grouped(col.Nullable(col.Float64))), 'sum(toNullable(toFloat64(1)))'],

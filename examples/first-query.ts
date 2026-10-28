@@ -1,4 +1,4 @@
-import { argMax, argMaxIf, cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
+import { avg, avgIf, argMax, argMaxIf, cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
 import { emitNaive } from "@chql/compiler";
 import { createClient } from "@chql/client";
 // Checked-in output of the real codegen integration fixture. For your database,
@@ -44,6 +44,14 @@ try {
   // NULL metric values are skipped independently, so leadDays may be older than version.
   // Different values tied at the maximal version have no deterministic winner.
   const cleanIndices = from(db.metric_group_ots_component_indices).final();
+  // Caller-selected half-open history window; no weekly bucketing/quantile yet.
+  const historyMeans = cleanIndices.where(i => i.tenantId.eq('acme'))
+    .where(i => i.effectiveAt.ge(new Date('2026-01-01T00:00:00Z')).and(i.effectiveAt.lt(new Date('2027-01-01T00:00:00Z'))))
+    .groupBy(i => ({ entityId: i.entityId }))
+    .aggregate(g => ({ stock: avg(g.stock_index), leadDays: avg(g.lead_time_max_days), positiveStock: avgIf(g.stock_index, g.stock_index.gt(0)) }))
+    .orderBy(r => r.stock.desc()).limit(10);
+  console.log('history means', await client.run(historyMeans));
+  for await (const row of client.stream(historyMeans)) console.log('streamed history mean', row);
   const latestMetrics = cleanIndices.where(i => i.tenantId.eq('acme'))
     .groupBy(i => ({ entityId: i.entityId }))
     .aggregate(g => ({ version: max(g.version), stockIndex: argMax(g.stock_index, g.version), leadDays: argMax(g.lead_time_max_days, g.version) }))

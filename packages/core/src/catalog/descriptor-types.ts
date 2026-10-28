@@ -15,6 +15,8 @@ type WithNull<D, B> = B extends true ? { readonly kind: 'Nullable'; readonly inn
 export type MaxDescriptor<D> = WithNull<Unwrapped<D>, IsNullable<D>>;
 /** Bounded argMax accepts only these closed descriptors; no transparent wrappers. */
 export type ArgMaxNumericDescriptor = { readonly kind: 'scalar'; readonly name: `${'UInt' | 'Int'}${8 | 16 | 32 | 64 | 128 | 256}` | 'Float32' | 'Float64' };
+export type AvgInputDescriptor = ArgMaxNumericDescriptor | { readonly kind: 'Nullable'; readonly inner: ArgMaxNumericDescriptor };
+export type AvgDescriptor<D> = CHType extends D ? CHType : WithNull<{ readonly kind: 'scalar'; readonly name: 'Float64' }, IsNullable<D>>;
 export type ArgMaxScalarDescriptor = ArgMaxNumericDescriptor | { readonly kind: 'scalar'; readonly name: 'String' | 'Bool' };
 export type ArgMaxValueDescriptor = ArgMaxScalarDescriptor | { readonly kind: 'Nullable'; readonly inner: ArgMaxScalarDescriptor };
 export type ArgMaxOperand<D, Allowed> = CHType extends D ? unknown : D extends Allowed ? unknown : never;

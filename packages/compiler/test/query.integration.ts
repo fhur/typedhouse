@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
+import { avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
 import { emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -24,6 +24,102 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('summarizes bounded tenant history with FINAL and composes mean outputs through union/scalar', async () => {
+  await sql('CREATE TABLE mean_history (tenantId String, entityId String, effectiveAt DateTime64(3), inserted UInt32, stock Float64, lead Nullable(Float64)) ENGINE=ReplacingMergeTree(inserted) ORDER BY (tenantId,entityId,effectiveAt)');
+  await sql("INSERT INTO mean_history VALUES ('acme','a','2026-01-01',1,100,100),('acme','a','2026-01-02',1,99,99),('acme','a','2026-01-02',2,8,4),('acme','a','2026-01-03',1,16,NULL),('acme','a','2026-01-04',1,200,200),('acme','b','2026-01-02',1,4,NULL),('other','a','2026-01-02',1,900,900)");
+  const source = from(table('mean_history', { tenantId: col.String, entityId: col.String, effectiveAt: col.DateTime64(3), inserted: col.UInt32, stock: col.Float64, lead: col.Nullable(col.Float64) }, { engine: 'ReplacingMergeTree', sortingKey: ['tenantId', 'entityId', 'effectiveAt'], partitionKey: [] })).final()
+    .where(r => r.tenantId.eq('acme')).where(r => r.effectiveAt.ge(new Date('2026-01-02T00:00:00Z')).and(r.effectiveAt.lt(new Date('2026-01-04T00:00:00Z'))));
+  const summary = source.groupBy(r => r.entityId).aggregate(g => ({ stock: avg(g.stock), leadDays: avg(g.lead), positive: avgIf(g.stock, g.stock.gt(4)), ratio: avg(g.stock).divide(avg(g.stock)) }));
+  const base = "FROM mean_history FINAL WHERE tenantId='acme' AND effectiveAt>=toDateTime64('2026-01-02',3) AND effectiveAt<toDateTime64('2026-01-04',3)";
+  const baseline = `SELECT entityId,avg(stock) AS stockMean,avg(lead) AS leadDays,avgIf(stock,stock>4) AS positive,avg(stock)/avg(stock) AS ratio ${base} GROUP BY entityId`;
+  const decode = (text: string) => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line, (_k, v) => v === 'nan' ? NaN : v === 'inf' ? Infinity : v === '-inf' ? -Infinity : v));
+  const direct = (query: string) => sql(query + ' SETTINGS output_format_json_quote_denormals=1 FORMAT JSONEachRow').then(decode);
+  const compare = async <R>(query: { ir: import('@chql/core').Rel; caps: { live: boolean }; _rowType: R }, expected: unknown) => {
+    expect(await client.run(query)).toEqual(expected);
+    const rows = []; for await (const row of client.stream(query)) rows.push(row);
+    expect(rows).toEqual(expected);
+  };
+  const expected = await direct(`SELECT entityId,stockMean AS stock,leadDays,positive,ratio FROM (${baseline}) ORDER BY entityId`);
+  expect(expected).toEqual([{ entityId: 'a', stock: 12, leadDays: 4, positive: 12, ratio: 1 }, { entityId: 'b', stock: 4, leadDays: null, positive: NaN, ratio: 1 }]);
+  await compare(summary.orderBy(r => r.entityId), expected);
+  expect(Object.values(emitNaive(summary.ir).columns).map(print)).toEqual(['String', 'Float64', 'Nullable(Float64)', 'Float64', 'Float64']);
+  await compare(unionAll(summary, summary).where(r => r.stock.gt(4)).orderBy(r => r.entityId).limit(2), await direct(`SELECT entityId,stockMean AS stock,leadDays,positive,ratio FROM (${baseline} UNION ALL ${baseline}) WHERE stockMean>4 ORDER BY entityId LIMIT 2`));
+  const global = source.aggregate(g => avg(g.stock));
+  const composed = summary.map(r => ({ entityId: r.entityId, mean: scalar(global) })).orderBy(r => r.entityId);
+  expect(print(composed.row.mean.ir.type)).toBe('Nullable(Float64)');
+  await compare(composed, await direct(`SELECT entityId,(SELECT avg(stock) ${base}) AS mean FROM (${baseline}) ORDER BY entityId`));
+  await compare(source.limit(0).aggregate(g => ({ stock: avg(g.stock), lead: avg(g.lead) })), [{ stock: NaN, lead: null }]);
+  await compare(source.limit(0).groupBy(r => r.entityId).aggregate(g => avg(g.stock)), []);
+});
+it('matches mean descriptors, empty/NULL/If semantics and precision across all supported widths', async () => {
+  const source = from(db.entity_ots_component).limit(1);
+  const descriptors: Column<number | bigint>[] = [col.UInt8, col.UInt16, col.UInt32, col.UInt64, col.UInt128, col.UInt256, col.Int8, col.Int16, col.Int32, col.Int64, col.Int128, col.Int256, col.Float32, col.Float64];
+  const decode = (v: unknown) => v === 'nan' ? NaN : v === 'inf' ? Infinity : v === '-inf' ? -Infinity : v;
+  for (const descriptor of descriptors) {
+    const type = print(descriptor.type);
+    for (const empty of [false, true]) {
+      const input = empty ? source.limit(0) : source;
+      const value = /^(U?Int)(64|128|256)$/.test(type) ? 8n : 8;
+      const nullable: Column<number | bigint | null> = col.Nullable(descriptor);
+      const query = input.aggregate(() => ({ value: avg(val(value, descriptor)), nullable: avg(val(value, nullable)), excluded: avgIf(val(value, descriptor), val(false)), excludedNull: avgIf(val(value, nullable), val(false)), nullPredicate: avgIf(val(value, descriptor), val(null, col.Nullable(col.Bool))), allNull: avg(val(null, nullable)) }));
+      const direct = JSON.parse(await sql(`SELECT avg(CAST(8 AS ${type})) AS value,avg(CAST(8 AS Nullable(${type}))) AS nullable,avgIf(CAST(8 AS ${type}),false) AS excluded,avgIf(CAST(8 AS Nullable(${type})),false) AS excludedNull,avgIf(CAST(8 AS ${type}),CAST(NULL AS Nullable(Bool))) AS nullPredicate,avg(CAST(NULL AS Nullable(${type}))) AS allNull,toTypeName(value) AS valueType,toTypeName(nullable) AS nullableType,toTypeName(excluded) AS excludedType,toTypeName(excludedNull) AS excludedNullType,toTypeName(nullPredicate) AS predicateType FROM numbers(${empty ? 0 : 1}) SETTINGS output_format_json_quote_denormals=1 FORMAT JSONEachRow`));
+      expect([direct.valueType, direct.nullableType, direct.excludedType, direct.excludedNullType, direct.predicateType]).toEqual(['Float64', 'Nullable(Float64)', 'Float64', 'Nullable(Float64)', 'Float64']);
+      expect(Object.values(emitNaive(query.ir).columns).map(print)).toEqual(['Float64', 'Nullable(Float64)', 'Float64', 'Nullable(Float64)', 'Float64', 'Nullable(Float64)']);
+      const expected = [{ value: empty ? NaN : 8, nullable: empty ? null : 8, excluded: NaN, excludedNull: null, nullPredicate: NaN, allNull: null }];
+      expect([{ value: decode(direct.value), nullable: direct.nullable, excluded: decode(direct.excluded), excludedNull: direct.excludedNull, nullPredicate: decode(direct.nullPredicate), allNull: direct.allNull }]).toEqual(expected);
+      expect(await client.run(query)).toEqual(expected);
+      const rows = []; for await (const row of client.stream(query)) rows.push(row); expect(rows).toEqual(expected);
+    }
+  }
+  for (const values of [[Infinity], [-Infinity], [Infinity, -Infinity], [NaN], [0.5, 1.5]]) {
+    const q = source.map(() => ({ values: val(values, col.Array(col.Float64)) })).arrayJoin(r => r.values, 'item').aggregate(g => avg(g.item));
+    const direct = JSON.parse(await sql(`SELECT avg(x) AS value,toTypeName(value) AS type FROM (SELECT arrayJoin([${values.map(v => `toFloat64('${String(v)}')`).join(',')}]) AS x) SETTINGS output_format_json_quote_denormals=1 FORMAT JSONEachRow`));
+    expect(direct.type).toBe('Float64'); const expected = [{ item: decode(direct.value) }];
+    expect(await client.run(q)).toEqual(expected); const rows = []; for await (const row of client.stream(q)) rows.push(row); expect(rows).toEqual(expected);
+  }
+  const wide = source.aggregate(() => avg(val(9007199254740993n, col.UInt256)));
+  const direct = JSON.parse(await sql("SELECT avg(toUInt256('9007199254740993')) AS value,toTypeName(value) AS type FROM numbers(1) FORMAT JSONEachRow"));
+  expect(direct).toEqual({ value: 9007199254740992, type: 'Float64' }); // Float64 means are not exact bigint arithmetic.
+  expect(await client.run(wide)).toEqual([{ avg: direct.value }]);
+  const rows = []; for await (const row of client.stream(wide)) rows.push(row); expect(rows).toEqual([{ avg: direct.value }]);
+});
+it('adversarial means preserve nullable predicate selection and hostile shared parameters across scopes', async () => {
+  const seed = from(db.entity_ots_component).limit(1);
+  const hostile = "x'); SELECT 999 --\\\n\0雪";
+  const shared = val(hostile);
+  const branch = (value: number | null, flag: boolean | null) => seed.map(() => ({ value: val(value, col.Nullable(col.Float64)), flag: val(flag, col.Nullable(col.Bool)), tag: shared }));
+  const input = unionAll(branch(2, true), branch(10, true), branch(100, false), branch(1000, null), branch(null, true));
+  const means = input.where(r => r.tag.eq(shared)).aggregate(g => ({ selected: avgIf(g.value, g.flag), all: avg(g.value) }));
+  const repeated = unionAll(means, means).map(r => ({ ...r, global: scalar(input.aggregate(g => avgIf(g.value, g.flag))), equalButDistinct: val(hostile) }));
+  const compiled = emitNaive(repeated.ir);
+  expect(compiled.sql).not.toContain(hostile);
+  expect(Object.values(compiled.params).filter(v => v === hostile)).toHaveLength(2);
+  const hex = Buffer.from(hostile).toString('hex');
+  const directInput = "SELECT CAST(v AS Nullable(Float64)) AS value,CAST(f AS Nullable(Bool)) AS flag FROM values('v Nullable(Float64), f Nullable(Bool)', (2,true),(10,true),(100,false),(1000,NULL),(NULL,true))";
+  const direct = JSON.parse(await sql(`SELECT avgIf(value,flag) AS selected,avg(value) AS all,(SELECT avgIf(value,flag) FROM (${directInput})) AS global,unhex('${hex}') AS equalButDistinct,toTypeName(selected) AS type FROM (${directInput}) FORMAT JSONEachRow`));
+  expect(direct).toEqual({ selected: 6, all: 278, global: 6, equalButDistinct: hostile, type: 'Nullable(Float64)' });
+  const { type: _type, ...row } = direct;
+  const expected = [row, row];
+  expect(Object.values(compiled.columns).map(print)).toEqual(['Nullable(Float64)', 'Nullable(Float64)', 'Nullable(Float64)', 'String']);
+  expect(await client.run(repeated)).toEqual(expected);
+  const streamed = []; for await (const row of client.stream(repeated)) streamed.push(row);
+  expect(streamed).toEqual(expected);
+});
+it('adversarial means use server Float32 rounding and wide signed arithmetic rather than JS preaggregation', async () => {
+  const seed = from(db.entity_ots_component).limit(1);
+  for (const [descriptor, values, literal] of [
+    [col.Float32, [16777217, 16777219], '[toFloat32(16777217),toFloat32(16777219)]'],
+    [col.Int256, [-(1n << 200n), 1n << 200n], '[toInt256(\'-1606938044258990275541962092341162602522202993782792835301376\'),toInt256(\'1606938044258990275541962092341162602522202993782792835301376\')]'],
+  ] as const) {
+    const column: Column<number | bigint> = descriptor;
+    const q = seed.map(() => ({ values: val([...values], col.Array(column)) })).arrayJoin(r => r.values, 'item').aggregate(g => avg(g.item));
+    const direct = JSON.parse(await sql(`SELECT avg(x) AS item,toTypeName(item) AS type FROM (SELECT arrayJoin(${literal}) AS x) FORMAT JSONEachRow`));
+    expect(direct).toEqual({ item: descriptor === col.Float32 ? 16777218 : 0, type: 'Float64' });
+    expect(print(q.row.item.ir.type)).toBe(direct.type);
+    expect(await client.run(q)).toEqual([{ item: direct.item }]);
+    const rows = []; for await (const row of client.stream(q)) rows.push(row); expect(rows).toEqual([{ item: direct.item }]);
+  }
+});
 it('selects latest tenant metrics with FINAL, NULL skipping, conditional exclusion, union and scalar composition', async () => {
   await sql('CREATE TABLE latest_metrics (tenantId String, entityId String, version UInt32, inserted UInt32, stock_index Float64, lead_time_max_days Nullable(Float64)) ENGINE=ReplacingMergeTree(inserted) ORDER BY (tenantId,entityId,version)');
   await sql("INSERT INTO latest_metrics VALUES ('acme','a',3,1,30,NULL),('acme','a',1,1,10,10),('acme','a',2,1,19,19),('acme','a',2,2,20,20),('acme','b',1,1,5,NULL),('acme','b',1,1,5,NULL),('other','a',9,1,900,900)");

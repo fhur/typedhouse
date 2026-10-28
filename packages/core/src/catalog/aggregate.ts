@@ -2,7 +2,7 @@ import type { CHType } from '../ch-type.js';
 import { col } from '../columns.js';
 import type { Constant, DescribedExpr, Expr } from '../expr.js';
 import type { AggregateState, Decimal, Grouped } from '../types.js';
-import type { ArgMaxNumericDescriptor, ArgMaxOperand, ArgMaxValueDescriptor, DescriptorValue, MaxDescriptor, ResolvedExpr, SumDescriptor, SumPrecision } from './descriptor-types.js';
+import type { AvgDescriptor, AvgInputDescriptor, ArgMaxNumericDescriptor, ArgMaxOperand, ArgMaxValueDescriptor, DescriptorValue, MaxDescriptor, ResolvedExpr, SumDescriptor, SumPrecision } from './descriptor-types.js';
 import { aggregateCall, type AggregateDefinition } from './define.js';
 import { anyType, isNullable, nullable, numeric, unwrap } from './matchers.js';
 
@@ -31,6 +31,7 @@ export const aggregateDefinitions: readonly AggregateDefinition[] = [
   }, tsReturns: 'SumResult<T>', nullable: 'propagate', deterministic: true, origin: 'typed', linear: true },
   { name: 'max', args: [anyType], returns: (args: readonly CHType[]) => isNullable(args[0]!) ? nullable(unwrap(args[0]!)) : unwrap(args[0]!), tsReturns: 'T', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
   { name: 'argMax', args: [argMaxValue, argMaxVersion], returns: 'arg0', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
+  { name: 'avg', args: [Object.freeze({ match: (t: CHType) => argMaxVersion.match(t.kind === 'Nullable' ? t.inner : t) })], returns: col.Float64, nullable: 'propagate', deterministic: true, origin: 'typed', linear: true },
 ].map(d => Object.freeze(d)) as readonly AggregateDefinition[];
 
 interface Count {
@@ -43,6 +44,8 @@ interface CountIf { <E extends AggregateOperand<boolean | null>>(predicate: E): 
 type ResultDescriptor<D, F> = CHType extends D ? CHType : F extends 'sum' ? SumDescriptor<D> : MaxDescriptor<D>;
 interface Sum { <E extends AggregateOperand<Numeric | null>>(value: E): ResolvedExpr<OperandSum<E>, OperandName<E, 'sum'>, 'agg', ResultDescriptor<E['ir']['type'], 'sum'>> }
 interface SumIf { <E extends AggregateOperand<Numeric | null>, P extends AggregateOperand<boolean | null>>(value: E, predicate: P): ResolvedExpr<OperandSum<E>, OperandName<E, OperandName<P, 'sum'>>, 'agg', ResultDescriptor<E['ir']['type'], 'sum'>> }
+interface Avg { <E extends AggregateOperand<number | bigint | null>>(value: E & ArgMaxOperand<E['ir']['type'], AvgInputDescriptor>): ResolvedExpr<number | Extract<OperandValue<E>, null>, OperandName<E, 'avg'>, 'agg', AvgDescriptor<E['ir']['type']>> }
+interface AvgIf { <E extends AggregateOperand<number | bigint | null>, P extends AggregateOperand<boolean | null>>(value: E & ArgMaxOperand<E['ir']['type'], AvgInputDescriptor>, predicate: P): ResolvedExpr<number | Extract<OperandValue<E>, null>, OperandName<E, OperandName<P, 'avg'>>, 'agg', AvgDescriptor<E['ir']['type']>> }
 interface Max { <E extends AggregateOperand<unknown>>(value: E): ResolvedExpr<OperandValue<E>, OperandName<E, 'max'>, 'agg', ResultDescriptor<E['ir']['type'], 'max'>> }
 interface MaxIf { <E extends AggregateOperand<unknown>, P extends AggregateOperand<boolean | null>>(value: E, predicate: P): ResolvedExpr<OperandValue<E>, OperandName<E, OperandName<P, 'max'>>, 'agg', ResultDescriptor<E['ir']['type'], 'max'>> }
 type ArgMaxValue = AggregateOperand<number | bigint | string | boolean | null>;
@@ -97,3 +100,7 @@ export const maxMerge = derived[2]!.Merge as Merge<'max', unknown>;
 export const argMax = derived[3]!.base as ArgMax;
 export const argMaxIf = derived[3]!.If as ArgMaxIf;
 // Binary State/Merge signatures and execution are deliberately not exposed.
+/** Float64 mean; NULL inputs are skipped, empty non-null inputs produce NaN. */
+export const avg = derived[4]!.base as Avg;
+export const avgIf = derived[4]!.If as AvgIf;
+// avg State/Merge execution is deliberately not exposed.

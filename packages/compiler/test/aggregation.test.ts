@@ -1,7 +1,39 @@
 import { expect, it } from 'vitest';
-import { argMax, argMaxIf, type CHType, from, table, col, count, sum, sumState, val, columnExpr, exprNode, relNode, flatOutput, Expr } from '@chql/core';
+import { avg, avgIf, argMax, argMaxIf, type CHType, from, table, col, count, sum, sumState, val, columnExpr, exprNode, relNode, flatOutput, Expr } from '@chql/core';
 import { emitNaive } from '../src/index.js';
 const t = table('t', { k: col.String, n: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+it('validates mean operands, modes, metadata and result descriptors authoritatively with paths', () => {
+  const q = from(t), other = from(t);
+  const root = q.aggregate(g => ({ mean: avgIf(g.n, g.n.gt(0)) })).ir;
+  expect(emitNaive(root).sql).toContain('avgIf(');
+  if (root.aggs.mean?.kind !== 'Agg') throw new Error('expected Agg');
+  const { id: _id, ...fields } = root;
+  const { id: _expr, ...agg } = root.aggs.mean;
+  const check = (changes: Partial<typeof agg>, error: RegExp) => {
+    const output = flatOutput([['mean', changes.type ?? agg.type]]);
+    expect(() => emitNaive(relNode({ ...fields, output, columns: output.columns, aggs: { mean: exprNode({ ...agg, ...changes }) } }))).toThrow(error);
+  };
+  check({ args: [] }, /invalid_argument_arity at root.aggs.mean/);
+  check({ type: col.UInt64.type }, /invalid_expression_type at root.aggs.mean/);
+  check({ fn: { ...agg.fn, linear: false } }, /invalid_function_metadata at root.aggs.mean/);
+  check({ fn: { ...agg.fn, deterministic: false } }, /invalid_function_metadata/);
+  check({ fn: { ...agg.fn, sqlName: 'unsafe)' } }, /invalid_function_metadata/);
+  check({ args: [q.row.n.ir, agg.args[1]!] }, /invalid_expression_mode/);
+  check({ args: [root.aggs.mean, agg.args[1]!] }, /invalid_aggregate_placement/);
+  check({ args: [agg.args[0]!, val(1).ir] }, /invalid_predicate/);
+  for (const combinators of [['State'], ['Merge'], ['If', 'If']] as const) check({ combinators }, /unsupported_aggregate_combinator/);
+  check({ params: [val(1).ir] }, /unsupported_aggregate_combinator/);
+  const foreign = columnExpr(col.UInt32, other.ir.id, ['n'], 'n', 'grouped');
+  expect(() => emitNaive(q.aggregate(() => avg(foreign.plus(1))).ir)).toThrow(/unbound_column.*root.aggs.n/);
+  expect(() => emitNaive(q.aggregate(g => avgIf(g.n, foreign.gt(1))).ir)).toThrow(/unbound_column.*root.aggs.n/);
+  for (const value of [-1, 256, 1.5]) expect(() => emitNaive(q.aggregate(() => avg(val(value, col.UInt8))).ir)).toThrow(/param/);
+  const unsupported: CHType[] = [col.String.type, col.Bool.type, col.Decimal64(2).type, col.Array(col.UInt32).type, col.LowCardinality(col.UInt32).type, col.Date.type, col.Tuple({ n: col.UInt32 }).type, col.SimpleAggregateFunction('max', col.UInt32).type, { kind: 'Unknown', raw: 'unsafe' }];
+  for (const type of unsupported) {
+    const source = from(table('unsupported_mean', { value: { type } }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    const value = columnExpr({ type }, source.ir.id, ['value'], 'value', 'grouped');
+    expect(() => emitNaive(relNode({ ...fields, input: source.ir, aggs: { mean: exprNode({ ...agg, combinators: [], args: [value.ir] }) } }))).toThrow(/incompatible_operands at root.aggs.mean/);
+  }
+});
 it('validates both argMax operands, conditional predicates and authoritative metadata with paths', () => {
   const q = from(t), other = from(t);
   const query = q.aggregate(g => ({ latest: argMaxIf(g.n, g.n, g.n.gt(0)) }));

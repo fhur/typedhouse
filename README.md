@@ -91,6 +91,35 @@ repeatedly. This does **not** promise cached rows, one evaluation, temporary tab
 or automatic shared-parent CTE extraction (the latter remains M4; real materialization
 is deferred M7). See `examples/first-query.ts` for executable composition.
 
+Mean metrics over a caller-selected history window:
+```ts
+import { from, avg, avgIf } from '@chql/core';
+const since = new Date('2026-01-01T00:00:00Z');
+const until = new Date('2027-01-01T00:00:00Z');
+const history = from(db.metric_group_ots_component_market_availability).final()
+  .where(a => a.tenantId.eq('acme'))
+  .where(a => a.effectiveAt.ge(since).and(a.effectiveAt.lt(until)))
+  .groupBy(a => ({ entityId: a.entityId }))
+  .aggregate(g => ({ stock: avg(g.market_stock_total),
+    leadDays: avg(g.market_lead_time_p50_days),
+    positiveStock: avgIf(g.market_stock_total, g.market_stock_total.gt(0)) }))
+  .orderBy(r => r.stock.desc());
+console.log(await client.run(history));
+for await (const row of client.stream(history)) console.log(row);
+```
+`avg`/`avgIf` accept closed integer/float descriptors, optionally Nullable,
+returning Float64/Nullable(Float64). NULL values are skipped; false or NULL
+predicates exclude rows without making a non-null value's result nullable.
+Empty/no-match non-null aggregates return **NaN**, not NULL or zero; nullable
+inputs return NULL when no non-null values qualify. Empty grouped input yields
+no rows. Non-finite values remain NaN/±Infinity through run and stream.
+Means use Float64: wide integers can lose precision (9007199254740993 becomes
+9007199254740992), and floating accumulation is not exact decimal arithmetic.
+Decimal, Bool, String, wrappers and containers are rejected; State/Merge are
+not exposed. Aligned means compose with UNION ALL and bounded global scalar
+queries (scalar remains Nullable). Weekly Date bucketing and quantile remain
+backlog. `pnpm example:first-query` runs the analogous indices history query.
+
 Latest metric values do not require a self-join:
 ```ts
 import { from, max, argMax } from '@chql/core';
@@ -163,7 +192,7 @@ defaults. Nullable containers are rejected by the server. Enabled regression
 reproductions are in `cross-join.test.ts` and `query.integration.ts`. A decision on
 ordered input evidence and structured null-extension representation is required
 before the specified outer-join API can honestly promise exact rows.
-Grouped and global aggregation execute `count`, `sum`, `max`, `argMax` and their `If`
+Grouped and global aggregation execute `count`, `sum`, `avg`, `max`, `argMax` and their `If`
 forms: `q.groupBy(r => r.category).aggregate(() => count())` or
 `q.aggregate(g => ({ total: sum(g.amount) }))`. Keys precede aggregate outputs;
 object forms choose names, single forms retain root names, and collisions fail.
