@@ -151,7 +151,9 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
       from = `(${rendered.get(block.source.rel)!}) AS ${inputAlias}`;
     }
     const predicates = block.clauses.filter(node => node.kind === 'Filter').map(node => clauses.get(node)!);
-    const where = predicates.length ? ` WHERE ${predicates.length === 1 ? predicates[0] : predicates.map(sql => `(${sql})`).join(' AND ')}` : '';
+    // Expressions already delimit infix operators; calls (including or/and)
+    // are atomic SQL expressions. Combining them needs no extra wrappers.
+    const where = predicates.length ? ` WHERE ${predicates.join(' AND ')}` : '';
     const tail = block.clauses.filter(node => node.kind !== 'Filter').map(node => clauses.get(node)!).join('');
     return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM ${from}${where}${tail}`;
   }
