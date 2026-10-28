@@ -1,4 +1,5 @@
 import type { Rel } from '@chql/core';
+import type { ColumnDemand } from './prune-columns.js';
 
 export type SelectClause = Extract<Rel, { kind: 'Filter' | 'Sort' | 'Limit' }>;
 export interface SelectBlock {
@@ -10,6 +11,7 @@ export interface SelectBlock {
 export interface SqlPlan {
   readonly root: Rel;
   readonly blocks: ReadonlyMap<Rel, SelectBlock>;
+  readonly columns?: ColumnDemand;
 }
 const rank = { Filter: 1, Sort: 2, Limit: 3 } as const;
 
@@ -26,7 +28,7 @@ function isColumnSelection(rel: Extract<Rel, { kind: 'Project' }>): boolean {
  * sorts/limits and earlier clauses start new blocks. Identity selections can
  * fold before sorting/limiting without changing expression scopes.
  */
-export function planSelects(root: Rel, nodes: Iterable<Rel>): SqlPlan {
+export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDemand): SqlPlan {
   const blocks = new Map<Rel, SelectBlock>();
   function plan(rel: Rel): SelectBlock | undefined {
     const cached = blocks.get(rel);
@@ -50,5 +52,5 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>): SqlPlan {
   }
   // The validated node index includes branches and expression subqueries.
   for (const node of nodes) plan(node);
-  return Object.freeze({ root, blocks });
+  return Object.freeze({ root, blocks, ...(columns ? { columns } : {}) });
 }

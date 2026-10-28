@@ -78,10 +78,12 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
         if (!leaf || !same(e.type, leaf.type)) return fail('unbound_column', e, path, JSON.stringify(e.path));
         if (qualifier === '' && input.kind === 'Join') {
           const side = input.inputs.find(([alias]) => alias === e.path[0]);
-          const child = side && outputLeaves(side[1].output).find(l => JSON.stringify(l.path) === JSON.stringify(e.path.slice(1)));
+          const child = side && (plan?.columns?.get(side[1]) ?? outputLeaves(side[1].output)).find(l => JSON.stringify(l.path) === JSON.stringify(e.path.slice(1)));
           if (!side || !child) return fail('unbound_column', e, path);
           return `${quoteIdentifier(side[0])}.${quoteIdentifier(child.name)}`;
         }
+        const physical = plan?.columns?.get(input);
+        if (physical && !physical.some(l => l.name === leaf.name)) return fail('missing_physical_column', e, path);
         return `${qualifier ? `${qualifier}.` : ''}${quoteIdentifier(leaf.name)}`;
       }
       case 'Param': {
@@ -177,10 +179,14 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
       const leaves = outputLeaves(rel.output);
       const columns = Object.fromEntries(leaves.map(l => [l.name, l.type]));
       const order = leaves.map(l => l.name);
+      // Logical validation uses the full schema; SELECT lists use the explicit
+      // physical interface, whose names retain full-schema transport ordinals.
+      const physical = plan?.columns?.get(rel) ?? leaves;
+      const physicalOrder = physical.map(l => l.name);
       if (new Set(order).size !== order.length || order.length !== Object.keys(columns).length || order.some(k => !Object.hasOwn(columns, k))) return fail('invalid_output', rel, path);
       if (order.some(k => base(columns[k]!).kind === 'AggregateFunction')) return fail('aggregate_state_selection', rel, path);
       nodes[path] = rel;
-      const list = order.map(quoteIdentifier).join(', ');
+      const list = physicalOrder.map(quoteIdentifier).join(', ');
       switch (rel.kind) {
         case 'Union': {
           if (!Array.isArray(rel.inputs) || rel.inputs.length < 2) return fail('union_input_count', rel, `${path}.inputs`);
@@ -242,9 +248,10 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
             clauses[Math.max(left[0]!, right[0]!)]!.push({ e, path: p });
           }
           for (let i = 1; i < clauses.length; i++) if (rel.joinKind !== 'cross' && !clauses[i]!.length) return fail('join_condition_arity', rel, `${path}.inputs[${i}]`, 'no equality connects this input to an earlier input');
-          const items = leaves.map(l => {
+          const items = physical.map(l => {
             const side = rel.inputs.find(([a]) => a === l.path[0])!;
-            const child = outputLeaves(side[1].output).find(c => JSON.stringify(c.path) === JSON.stringify(l.path.slice(1)))!;
+            const child = (plan?.columns?.get(side[1]) ?? outputLeaves(side[1].output)).find(c => JSON.stringify(c.path) === JSON.stringify(l.path.slice(1)));
+            if (!child) return fail('missing_physical_column', rel, path, JSON.stringify(l.path));
             return `${quoteIdentifier(side[0])}.${quoteIdentifier(child.name)} AS ${quoteIdentifier(l.name)}`;
           });
           let source = '';
@@ -281,9 +288,10 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           let sourceAlias = '__chql_input';
           while (Object.hasOwn(columns, sourceAlias) || inputLeaves.some(l => l.name === sourceAlias)) sourceAlias += '_';
           const qualifier = quoteIdentifier(sourceAlias);
-          const items = leaves.map(leaf => {
+          const items = physical.map(leaf => {
             if (leaf.path.length === 1 && leaf.path[0] === rel.alias) return `${quotedElement} AS ${quoteIdentifier(leaf.name)}`;
-            const source = inputLeaves.find(l => JSON.stringify(l.path) === JSON.stringify(leaf.path))!;
+            const source = (plan?.columns?.get(rel.input) ?? inputLeaves).find(l => JSON.stringify(l.path) === JSON.stringify(leaf.path));
+            if (!source) return fail('missing_physical_column', rel, path, JSON.stringify(leaf.path));
             return `${qualifier}.${quoteIdentifier(source.name)} AS ${quoteIdentifier(leaf.name)}`;
           });
           // FROM precedes ARRAY JOIN in emitted text, hence its Params are assigned first.
@@ -307,13 +315,14 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
         }
         case 'Project': {
           if (Object.keys(rel.exprs).length !== order.length) return fail('nested_projection', rel, path);
-          const items = order.map(k => {
+          const items = order.flatMap(k => {
             const e = rel.exprs[k];
             if (!e || !e.type || !same(e.type, columns[k]!)) return fail('nested_projection', rel, `${path}.exprs.${k}`);
-            return `${expression(e, rel.input, `${path}.exprs.${k}`)} AS ${quoteIdentifier(k)}`;
+            if (!physicalOrder.includes(k)) return [];
+            return [`${expression(e, rel.input, `${path}.exprs.${k}`)} AS ${quoteIdentifier(k)}`];
           });
           const source = emit(rel.input, `${path}.input`);
-          if (plan?.blocks.has(rel)) return renderBlock(rel, order);
+          if (plan?.blocks.has(rel)) return renderBlock(rel, physicalOrder);
           return `SELECT ${items.join(', ')} FROM (${source}) AS ${inputAlias}`;
         }
         case 'Filter': case 'Limit': case 'Sort': case 'Distinct': case 'Materialize': {
@@ -331,7 +340,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           if (rel.kind === 'Distinct') return `SELECT DISTINCT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias}`;
           function renderClause(clause: string): string {
             clauses.set(rel, clause);
-            return renderBlock(rel, order);
+            return renderBlock(rel, physicalOrder);
           }
           if (rel.kind === 'Sort') {
             if (!Array.isArray(rel.keys) || rel.keys.length === 0) return fail('invalid_sort_key', rel, `${path}.keys`);
