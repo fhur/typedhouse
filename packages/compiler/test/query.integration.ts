@@ -24,6 +24,93 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('adversarial membership composes scalar receivers, grouped sets and post-expansion grouping', async () => {
+  const source = from(db.entity_ots_component);
+  const hostile = "EOL'\\\n{p77:Array(String)} --";
+  const selected = unionAll(source.limit(1).map(() => ({ value: val(hostile, col.String) })), source.limit(1).map(() => ({ value: val(hostile, col.String) })));
+  const expanded = source.limit(1).map(() => ({ values: val([hostile, hostile, 'safe'], col.Array(col.String)) })).leftArrayJoin(r => r.values, 'value');
+  const grouped = expanded.groupBy(r => ({ member: r.value.in(selected) })).aggregate(g => ({ matches: countIf(g.value.in(selected)), misses: countIf(g.value.notIn(selected)) })).orderBy(r => r.member);
+  const literal = `unhex('${Buffer.from(hostile).toString('hex')}')`;
+  const baseline = (await sql(`SELECT value IN (SELECT ${literal}) AS member, countIf(value IN (SELECT ${literal})) AS matches, countIf(value NOT IN (SELECT ${literal})) AS misses FROM (SELECT arrayJoin([${literal},${literal},'safe']) AS value) GROUP BY member ORDER BY member FORMAT JSONEachRow`)).trim().split('\n').map(line => JSON.parse(line) as { member: number; matches: string; misses: string });
+  expect(await client.run(grouped)).toEqual(baseline.map(r => ({ member: Boolean(r.member), matches: BigInt(r.matches), misses: BigInt(r.misses) })));
+  expect(await client.run(grouped)).toEqual([{ member: false, matches: 0n, misses: 1n }, { member: true, matches: 2n, misses: 0n }]);
+  expect(emitNaive(grouped.ir).sql).not.toContain(hostile);
+  const totals = source.aggregate(() => count());
+  const scalarMembership = source.limit(1).map(() => ({ yes: scalar(totals).in(totals), no: scalar(totals).notIn(totals) }));
+  expect(await client.run(scalarMembership)).toEqual([{ yes: true, no: false }]);
+  const aggregateMembership = source.aggregate(() => ({ yes: count().in(totals), no: count().notIn([]) }));
+  expect(await client.run(aggregateMembership)).toEqual([{ yes: true, no: true }]);
+});
+it('adversarial numeric membership agrees with SQL across compatible descriptors and NULL-only sets', async () => {
+  const source = from(db.entity_ots_component).limit(1);
+  const sets = unionAll(source.map(() => ({ n: val(-1.5, col.Float64) })), source.map(() => ({ n: val(255, col.Float64) })), source.map(() => ({ n: val(256, col.Float64) })));
+  const query = source.map(() => ({ yes: val(255, col.UInt8).in(sets), no: val(0, col.UInt8).notIn(sets) }));
+  const direct = JSON.parse((await sql('SELECT toUInt8(255) IN (SELECT arrayJoin([-1.5,255.,256.])) AS yes,toUInt8(0) NOT IN (SELECT arrayJoin([-1.5,255.,256.])) AS no FORMAT JSONEachRow')).trim()) as { yes: number; no: number };
+  expect(await client.run(query)).toEqual([{ yes: Boolean(direct.yes), no: Boolean(direct.no) }]);
+  const nulls = source.map(() => ({ n: val(null, col.Nullable(col.Int64)) }));
+  expect(await client.run(source.map(() => ({ yes: val(0n, col.Int64).in(nulls), no: val(0n, col.Int64).notIn(nulls) })))).toEqual([{ yes: false, no: true }]);
+});
+it('matches IN and NOT IN truth values and filtered rows for NULL, empty and duplicate sets', async () => {
+  await sql('CREATE TABLE membership_values (id String, lifecycleStatus Nullable(String), n Nullable(Int64), b Bool) ENGINE=Memory');
+  await sql("INSERT INTO membership_values VALUES ('a',NULL,NULL,false),('b','EOL',7,true),('c','Active',9,false),('d','EOL',7,true)");
+  const parts = from(table('membership_values', { id: col.String, lifecycleStatus: col.Nullable(col.String), n: col.Nullable(col.Int64), b: col.Bool }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const direct = async (query: string) => (await sql(query + ' FORMAT JSONEachRow')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+  for (const [set, text] of [[parts.map(r => r.lifecycleStatus), 'SELECT lifecycleStatus FROM membership_values'], [parts.where(r => r.id.eq('absent')).map(r => r.lifecycleStatus), "SELECT lifecycleStatus FROM membership_values WHERE id='absent'"], [parts.where(r => r.lifecycleStatus.isNull()).map(r => r.lifecycleStatus), 'SELECT lifecycleStatus FROM membership_values WHERE isNull(lifecycleStatus)']] as const) {
+    const result = parts.map(r => ({ id: r.id, yes: r.lifecycleStatus.in(set), no: r.lifecycleStatus.notIn(set) })).orderBy(r => r.id);
+    const baseline = await direct(`SELECT id,lifecycleStatus IN (${text}) AS yes,lifecycleStatus NOT IN (${text}) AS no FROM membership_values ORDER BY id`);
+    expect(await client.run(result)).toEqual(baseline.map(r => ({ id: r.id, yes: r.yes === null ? null : Boolean(r.yes), no: r.no === null ? null : Boolean(r.no) })));
+    for (const negative of [false, true]) {
+      const filtered = parts.where(r => negative ? r.lifecycleStatus.notIn(set) : r.lifecycleStatus.in(set)).map(r => r.id).orderBy(r => r.id);
+      expect(await client.run(filtered)).toEqual(await direct(`SELECT id FROM membership_values WHERE lifecycleStatus ${negative ? 'NOT IN' : 'IN'} (${text}) ORDER BY id`));
+    }
+  }
+  for (const values of [[], ['EOL', 'EOL']] as const) {
+    const list = values.length ? "['EOL','EOL']" : '[]';
+    const result = parts.map(r => ({ id: r.id, yes: r.lifecycleStatus.in(values), no: r.lifecycleStatus.notIn(values) })).orderBy(r => r.id);
+    const baseline = await direct(`SELECT id,lifecycleStatus IN ${list} AS yes,lifecycleStatus NOT IN ${list} AS no FROM membership_values ORDER BY id`);
+    expect(await client.run(result)).toEqual(baseline.map(r => ({ id: r.id, yes: r.yes === null ? null : Boolean(r.yes), no: r.no === null ? null : Boolean(r.no) })));
+  }
+  const typed = parts.map(r => ({ id: r.id, n: r.n.in([7n]), b: r.b.notIn([true]), empty: r.id.in([]) })).orderBy(r => r.id);
+  const baseline = await direct('SELECT id,n IN [7] AS n,b NOT IN [true] AS b,id IN [] AS empty FROM membership_values ORDER BY id');
+  expect(await client.run(typed)).toEqual(baseline.map(r => ({ id: r.id, n: r.n === null ? null : Boolean(r.n), b: Boolean(r.b), empty: Boolean(r.empty) })));
+  expect(await client.run(parts.aggregate(g => ({ eol: countIf(g.lifecycleStatus.in(['EOL', 'Obsolete'])) })))).toEqual([{ eol: 2n }]);
+  expect(await direct("SELECT toTypeName(lifecycleStatus IN ['EOL']) AS n,toTypeName(id IN (SELECT lifecycleStatus FROM membership_values)) AS s FROM membership_values LIMIT 1")).toEqual([{ n: 'Nullable(UInt8)', s: 'UInt8' }]);
+});
+it('preserves hostile set/list values and shared versus equal parameter identity', async () => {
+  const source = from(db.entity_ots_component).limit(1);
+  const hostile = "x'\\\\\n{p900:String}`); SELECT 999 --";
+  const shared = val(hostile, col.String);
+  const set = source.map(() => ({ ['a.b`__proto__']: shared }));
+  const query = source.map(() => ({ yes: shared.in(set), no: shared.notIn([hostile, hostile]), equal: val(hostile, col.String).in(set) }));
+  const plan = emitNaive(query.ir);
+  expect(plan.sql).not.toContain(hostile);
+  expect(Object.keys(plan.params)).toHaveLength(3);
+  expect(plan.params.p0).toBe(hostile);
+  expect(plan.params.p2).toBe(hostile);
+  expect(plan.sql.match(/\{p0:String\}/g)).toHaveLength(4);
+  expect(await client.run(query)).toEqual([{ yes: true, no: false, equal: true }]);
+  const literal = `unhex('${Buffer.from(hostile).toString('hex')}')`;
+  const direct = JSON.parse((await sql(`SELECT ${literal} IN (SELECT ${literal} AS \`a.b\`) AS yes, ${literal} NOT IN [${literal},${literal}] AS no FORMAT JSONEachRow`)).trim()) as unknown;
+  expect(direct).toEqual({ yes: 1, no: 0 });
+  const bigSet = from(db.entity_ots_component).map(r => r.countOfParts).distinct();
+  // Object form is required for unnamed constants.
+  const boolNamed = source.map(() => ({ b: val(true, col.Bool) }));
+  expect(await client.run(source.map(r => ({ big: r.countOfParts.in(bigSet), bool: val(false, col.Bool).notIn(boolNamed) })))).toEqual([{ big: true, bool: true }]);
+});
+it('executes entityId set examples with UNION, nested dependencies and branch-local limits', async () => {
+  const components = from(db.entity_ots_component);
+  const cIndices = components.map(r => ({ entityId: r.entityId, stock_index: val(0.25, col.Float64) }));
+  const object = components.where(c => c.entityId.in(cIndices.where(i => i.stock_index.lt(0.5)).map(i => ({ id: i.entityId }))));
+  const single = components.where(c => c.entityId.in(cIndices.where(i => i.stock_index.lt(0.5)).map(i => i.entityId)));
+  expect(await client.run(object.map(r => r.entityId).orderBy(r => r.entityId))).toEqual(await client.run(single.map(r => r.entityId).orderBy(r => r.entityId)));
+  expect(await client.run(single.map(r => r.entityId).orderBy(r => r.entityId))).toEqual([{ entityId: 'a' }, { entityId: 'b' }, { entityId: 'c' }]);
+  const branch = components.map(r => r.entityId).distinct().orderBy(r => r.entityId).limit(1, 1);
+  const set = unionAll(branch, branch, components.where(r => r.entityId.in(branch)).map(r => r.entityId));
+  const query = components.where(r => r.entityId.in(set)).map(r => r.entityId);
+  const baseline = (await sql('SELECT entityId FROM entity_ots_component WHERE entityId IN (SELECT entityId FROM (SELECT DISTINCT entityId FROM entity_ots_component ORDER BY entityId LIMIT 1 OFFSET 1) UNION ALL SELECT entityId FROM (SELECT DISTINCT entityId FROM entity_ots_component ORDER BY entityId LIMIT 1 OFFSET 1)) FORMAT JSONEachRow')).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(await client.run(query)).toEqual(baseline);
+  expect(baseline).toEqual([{ entityId: 'b' }]);
+});
 it('keeps hostile scalar parameters isolated through UNION, grouping and replaced sorting', async () => {
   const source = from(db.entity_ots_component);
   const hostile = "x'\\\\\n{p900:String}`); SELECT 999 --";

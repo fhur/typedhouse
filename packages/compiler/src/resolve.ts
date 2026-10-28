@@ -1,4 +1,4 @@
-import { aggregateDefinitions, methodCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
+import { setDescriptor, membershipBase, aggregateDefinitions, methodCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
 
 export function resolveAggregate(e: Extract<ExprNode, { kind: 'Agg' }>, resolve: (e: ExprNode, expected?: CHType) => CHType): { result: CHType; sqlName: string } {
   const def = aggregateDefinitions.find(d => d.name === e.fn.name);
@@ -34,6 +34,31 @@ export function resolveCall(e: Extract<ExprNode, { kind: 'Call' }>, resolve: (e:
   if (!def || e.fn.origin !== 'typed') throw new Error('unsupported_expression');
   if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || JSON.stringify(e.fn.argumentPolicies) !== JSON.stringify(def.argumentPolicies)) throw new Error('invalid_function_metadata');
   if (e.args.length !== def.args.length) throw new Error('invalid_argument_arity');
+  if (def.surface === 'membership') {
+    const left = resolve(e.args[0]!);
+    const base = membershipBase(left);
+    const set = e.args[1]!;
+    let right: CHType;
+    if (set.kind === 'Subquery') {
+      if (set.usage !== 'in') throw new Error('invalid_subquery_usage');
+      right = setDescriptor(set.rel);
+      if (print(right) !== print(set.type)) throw new Error('invalid_expression_type');
+    } else {
+      if (set.kind !== 'Param' || !Array.isArray(set.value)) throw new Error('invalid_set_operand');
+      const array = resolve(set, { kind: 'Array', inner: base });
+      if (array.kind !== 'Array' || array.inner.kind === 'Nullable') throw new Error('invalid_set_operand');
+      right = array.inner;
+    }
+    const family = (t: CHType) => {
+      const b = membershipBase(t);
+      if (b.kind !== 'scalar') throw new Error('unsupported_membership_type');
+      return /^U?Int(64|128|256)$/.test(b.name) ? 'bigint' : /^(U?Int|Float)/.test(b.name) ? 'number' : b.name;
+    };
+    if (family(left) !== family(right)) throw new Error('incompatible_operands');
+    const result: CHType = left.kind === 'Nullable' ? nullable({ kind: 'scalar', name: 'Bool' }) : { kind: 'scalar', name: 'Bool' };
+    if (print(result) !== print(e.type)) throw new Error('invalid_expression_type');
+    return { types: [left, set.kind === 'Subquery' ? right : { kind: 'Array', inner: base }], result, sqlName: def.name };
+  }
   const sibling = e.args.find(a => a.type !== null);
   const siblingType = sibling ? resolve(sibling) : undefined;
   const types = e.args.map((a, i) => {

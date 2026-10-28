@@ -110,7 +110,7 @@ export function deterministic(e: ExprNode, active = new Set<Rel>()): boolean {
     case 'Agg': return e.fn.deterministic === true && e.args.every(a => deterministic(a, active)) && e.params.every(a => deterministic(a, active));
     case 'Call': return e.fn.deterministic === true && e.args.every(a => deterministic(a, active));
     case 'Cast': return deterministic(e.expr, active);
-    case 'Subquery': return e.usage === 'scalar' && liveRelation(e.rel, active);
+    case 'Subquery': return (e.usage === 'scalar' || e.usage === 'in') && liveRelation(e.rel, active);
     default: return false;
   }
 }

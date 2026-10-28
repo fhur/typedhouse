@@ -1,11 +1,35 @@
 import { Expr, type DescribedExpr } from './expr.js';
-import { exprNode, type Rel } from './ir.js';
+import { exprNode, type ExprNode, type Rel } from './ir.js';
 import { print, type CHType } from './ch-type.js';
 
 type Union<K, Whole = K> = K extends Whole ? [Whole] extends [K] ? false : true : never;
-type OneKey<R> = [keyof R] extends [never] ? never : true extends Union<keyof R> ? never : {} extends Record<keyof R, unknown> ? never : keyof R & string;
+export type OneKey<R> = [keyof R] extends [never] ? never : true extends Union<keyof R> ? never : {} extends Record<keyof R, unknown> ? never : keyof R & string;
 type NullableDescriptor<D extends CHType> = D extends { readonly kind: 'Nullable' } ? D : { readonly kind: 'Nullable'; readonly inner: D };
 type Descriptor<P, K extends PropertyKey> = K extends keyof P ? P[K] extends { readonly ir: { readonly type: infer D extends CHType } } ? NullableDescriptor<D> : CHType : CHType;
+
+export type SetQuery<R, T> = { readonly _rowType: R; readonly ir: Rel } &
+  ([OneKey<R>] extends [never] ? { readonly set_column_count: never } :
+    [R[OneKey<R>]] extends [NonNullable<T> | null] ? unknown : { readonly incompatible_set_values: never });
+
+/** Set evidence deliberately imposes no scalar cardinality restriction. */
+export function setDescriptor(rel: Rel): CHType {
+  if (rel.output.shape !== 'flat' || rel.output.order.length !== 1 || Object.keys(rel.output.columns).length !== 1) throw new Error('set_column_count');
+  const type = rel.output.columns[rel.output.order[0]!];
+  if (!type) throw new Error('invalid_output');
+  membershipBase(type);
+  return type;
+}
+export function membershipBase(type: CHType): CHType {
+  const inner = type.kind === 'Nullable' ? type.inner : type;
+  if (inner.kind !== 'scalar' || !/^(U?Int(8|16|32|64|128|256)|Float(32|64)|String|Bool)$/.test(inner.name)) throw new Error('unsupported_membership_type');
+  return inner;
+}
+export function setOperand(value: unknown): ExprNode {
+  if (Array.isArray(value)) return exprNode({ kind: 'Param', value, type: null });
+  if (!value || typeof value !== 'object' || !('ir' in value)) throw new Error('invalid_set_operand');
+  const rel = value.ir as Rel;
+  return exprNode({ kind: 'Subquery', rel, usage: 'in', type: setDescriptor(rel) });
+}
 
 /** ClickHouse 24.8 scalar wrappers expose Nullable even for a keyless aggregate.
  * Keep this conservative runtime/TS twin; do not erase nullability via defaults.

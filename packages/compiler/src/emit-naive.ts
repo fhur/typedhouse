@@ -85,7 +85,13 @@ export function emitNaive(root: Rel): CompiledQuery {
       case 'Call': {
         let resolved: ReturnType<typeof resolveCall>;
         try { resolved = resolveCall(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_call', e, path); }
-        const args = e.args.map((arg, i) => expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope, qualifier));
+        const args = e.args.map((arg, i) => {
+          // Only the authoritative membership resolver grants this set position.
+          if ((e.fn.name === 'in' || e.fn.name === 'notIn') && i === 1 && arg.kind === 'Subquery') {
+            return `(${emit(arg.rel, `${path}.args[${i}].rel`)})`;
+          }
+          return expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope, qualifier);
+        });
         // Retain the established equality SQL contract; all other names come from the catalog.
         return e.fn.name === 'eq' ? `(${args[0]} = ${args[1]})` : `${resolved.sqlName}(${args.join(', ')})`;
       }

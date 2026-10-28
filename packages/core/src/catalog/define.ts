@@ -1,10 +1,11 @@
+import { setOperand } from '../subquery.js';
 import type { CHType } from '../ch-type.js';
 import { Expr, defaultType, operand, type Constant } from '../expr.js';
 import { exprNode, type FunctionMetadata, type AggregateMetadata, type ArgumentPolicy } from '../ir.js';
 import type { Column, Mode } from '../types.js';
 import { isNullable, nullable, type Argument, type Matched, unwrap } from './matchers.js';
 
-export type Surface = 'comparison' | 'boolean' | 'not' | 'arithmetic' | 'divide' | 'nullTest' | 'ifNull' | 'length' | 'empty' | 'startsWith' | 'has' | 'hasAny' | 'arrayElement' | 'element';
+export type Surface = 'membership' | 'comparison' | 'boolean' | 'not' | 'arithmetic' | 'divide' | 'nullTest' | 'ifNull' | 'length' | 'empty' | 'startsWith' | 'has' | 'hasAny' | 'arrayElement' | 'element';
 export interface Definition<A extends readonly Argument[] = readonly Argument[], R = unknown> {
   readonly name: string;
   readonly sqlName?: string;
@@ -64,7 +65,7 @@ export function resolveReturn(def: Definition, args: readonly unknown[]): CHType
 }
 export function invoke(def: Definition, args: readonly unknown[]): Expr<unknown, string, Mode> {
   const first = args.find((arg): arg is Expr<unknown, string, Mode> => arg instanceof Expr && arg.ir.kind !== 'Param');
-  return new Expr(exprNode({ kind: 'Call', fn: metadata(def), args: args.map(operand), type: resolveReturn(def, args) }), first?.name as string, first?.mode ?? 'row');
+  return new Expr(exprNode({ kind: 'Call', fn: metadata(def), args: args.map((arg, i) => def.argumentPolicies?.[i] === 'set' ? setOperand(arg) : operand(arg)), type: resolveReturn(def, args) }), first?.name as string, first?.mode ?? 'row');
 }
 export function defineFunction<const A extends readonly Argument[], R, const S extends Definition<A, R>['returns'], P extends 'propagate' | 'never' = 'propagate'>(definition: Definition<A, R> & { readonly returns: S; readonly nullable?: P }): DefinedFunction<A, R, P, S> {
   const def = Object.freeze({ ...definition, args: Object.freeze([...definition.args]) as unknown as A, ...(definition.argumentPolicies ? { argumentPolicies: Object.freeze([...definition.argumentPolicies]) } : {}) });

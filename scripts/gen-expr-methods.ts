@@ -5,7 +5,8 @@ import { methodCatalog, type Definition } from '../packages/core/src/catalog/ind
 import { orderingCatalog } from '../packages/core/src/catalog/ordering.js';
 
 const imports = `import type { Expr, Constant } from './expr.js';\nimport type { Mode, Decimal } from './types.js';\n`;
-const helpers = `import type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
+const helpers = `import type { SetQuery } from './subquery.js';
+import type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 type NullResult<T, R> = null extends T ? R | null : R;
 type NumericResult<T> = T extends bigint ? bigint : T extends Decimal ? Decimal : number | bigint;
 type DivideResult<T> = T extends Decimal ? Decimal : number;
@@ -48,6 +49,7 @@ function signature(definition: Definition): string {
     case 'has': case 'hasAny': return `${name}<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, other: Operand<${surface === 'has' ? 'NoInfer<V[number]>' : 'NoInfer<V>'}, NoInfer<M>>): StructuralResult<never, N, M, 'Bool'>;`;
     case 'arrayElement': return `${name}<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, index: Operand<number | bigint, NoInfer<M>>): ${definition.tsReturns?.replace(/\bT\b/g, 'V')};`;
     case 'element': return `${name}<D, V, const K extends ElementKeys<D>>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } }, key: K & (string extends K ? never : unknown)): ${definition.tsReturns};`;
+    case 'membership': return `${name}(${receiver('string | number | bigint | boolean')}, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;\n  ${name}<R>(${receiver('string | number | bigint | boolean')}, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;`;
     case 'comparison': return `${name}<U extends NonNullable<T> | null>(${receiver('string | number | bigint | boolean | Date')}, ${argument}): Expr<NullResult<T | U, boolean>, N, M>;`;
     case 'boolean': return `${name}<U extends boolean | null>(${receiver('boolean')}, ${argument}): Expr<NullResult<T | U, boolean>, N, M>;`;
     case 'not': return `${name}(${receiver('boolean')}): Expr<NullResult<T, boolean>, N, M>;`;

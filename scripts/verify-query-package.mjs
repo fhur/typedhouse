@@ -17,6 +17,11 @@ try {
 import { from, table, col, join, crossJoin, unionAll, sum, scalar, type Infer } from '@chql/core';
 import type { JoinSnapshot } from './join.d.ts';
 const side = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+import type { MembershipSnapshot } from './membership.d.ts';
+const membershipSource = from(table('members', { id: col.String, s: col.Nullable(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const membershipQuery = membershipSource.map(r => ({ member: r.id.in(membershipSource.map(r => r.id)), missing: r.s.notIn([]) }));
+expectTypeOf<Infer<typeof membershipQuery>>().toEqualTypeOf<MembershipSnapshot>();
+expectTypeOf<Infer<typeof membershipQuery>>().not.toBeAny();
 import type { ScalarSnapshot } from './scalar.d.ts';
 const scalarQuery = side.map(() => scalar(side.aggregate(g => sum(g.id))));
 expectTypeOf<Infer<typeof scalarQuery>>().toEqualTypeOf<ScalarSnapshot>();
@@ -40,6 +45,7 @@ expectTypeOf<Infer<typeof nestedExpanded>>().toEqualTypeOf<JoinedArrayJoinSnapsh
 expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
 `);
   writeFileSync(join(directory, 'joined-array-join.d.ts'), readFileSync('test/types/snapshots/joined-array-join.d.ts', 'utf8'));
+  writeFileSync(join(directory, 'membership.d.ts'), readFileSync('test/types/snapshots/membership.d.ts', 'utf8'));
   writeFileSync(join(directory, 'scalar.d.ts'), readFileSync('test/types/snapshots/scalar.d.ts', 'utf8'));
   writeFileSync(join(directory, 'join.d.ts'), readFileSync('test/types/snapshots/join.d.ts', 'utf8'));
   writeFileSync(join(directory, 'array-join.d.ts'), readFileSync('test/types/snapshots/array-join.d.ts', 'utf8'));
@@ -65,6 +71,14 @@ const ordered = structural.map(r => r.first).distinct().orderBy(r => r.first.des
 assert.match(ordered.toSQL().sql, /SELECT DISTINCT/);
 assert.match(ordered.toSQL().sql, /DESC NULLS LAST/);
 assert.equal('thenBy' in ordered, false);
+const membershipSource = from(table('members', { id: col.String, s: col.Nullable(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const membershipQuery = membershipSource.map(r => ({ member: r.id.in(membershipSource.map(r => r.id)), missing: r.s.notIn([]) }));
+const membershipType = Object.entries(membershipQuery.toSQL().columns).map(([k, t]) => JSON.stringify(k) + ': ' + toTypeScript(t)).join('; ');
+assert.equal(readFileSync('membership.d.ts', 'utf8'), 'export type MembershipSnapshot = { ' + membershipType + ' };\\n');
+const membership = q.map(r => ({ id: r.id.in(q), absent: r.id.notIn([]) }));
+assert.deepEqual({...membership.toSQL().params}, { p0: '2', p1: '[]' });
+assert.equal(Object.values(membership.toSQL().columns).map(toTypeScript).join(','), 'boolean,boolean');
+assert.equal(decoder(membership.toSQL().columns.id)(1), true);
 const scalarQuery = q.map(() => scalar(q.aggregate(g => sum(g.id))));
 const scalarType = Object.entries(scalarQuery.toSQL().columns).map(([k, t]) => JSON.stringify(k) + ': ' + toTypeScript(t)).join('; ');
 assert.equal(readFileSync('scalar.d.ts', 'utf8'), 'export type ScalarSnapshot = { ' + scalarType + ' };\\n');

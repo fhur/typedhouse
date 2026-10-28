@@ -2,6 +2,7 @@
 import type { Expr, Constant } from './expr.js';
 import type { Mode, Decimal } from './types.js';
 import { Ordering } from './ordering.js';
+import type { SetQuery } from './subquery.js';
 import type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 type NullResult<T, R> = null extends T ? R | null : R;
 type NumericResult<T> = T extends bigint ? bigint : T extends Decimal ? Decimal : number | bigint;
@@ -39,6 +40,10 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
   le<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
   gt<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
   ge<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  in(this: Expr<string | number | bigint | boolean | null, string, M>, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;
+  in<R>(this: Expr<string | number | bigint | boolean | null, string, M>, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;
+  notIn(this: Expr<string | number | bigint | boolean | null, string, M>, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;
+  notIn<R>(this: Expr<string | number | bigint | boolean | null, string, M>, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;
   and<U extends boolean | null>(this: Expr<boolean | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
   or<U extends boolean | null>(this: Expr<boolean | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
   not(this: Expr<boolean | null, string, M>): Expr<NullResult<T, boolean>, N, M>;

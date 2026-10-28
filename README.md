@@ -59,7 +59,7 @@ Matching TypeScript rows are not sufficient for SQL compatibility: UInt32 and
 Float64 both decode to number, but this increment rejects their union explicitly
 with `union_descriptor_mismatch`. Common-type/coercion support remains backlog.
 The naive compiler also supports low-level `Union { all: false }` with explicit
-UNION DISTINCT; no public intersect/except or IN subqueries are implied.
+UNION DISTINCT; no public intersect/except APIs are implied.
 
 `scalar(q.aggregate(g => sum(g.stock)))` now embeds a directly built keyless,
 exactly-one-column aggregate as a row-mode expression. Object-form names and
@@ -74,8 +74,25 @@ Nullable descriptor; stock-share arithmetic conservatively returns `number | nul
 not the spec example's `number`. This discrepancy remains explicit rather than
 masking it with a default or pretending the descriptor is non-nullable. Current
 scalar descriptor support is numeric, String and Bool (optionally Nullable);
-containers and other families are rejected pending server evidence. IN/notIn
-is a separate future increment.
+containers and other families are rejected pending server evidence.
+
+Generated `expr.in(valuesOrQuery)` / `notIn` accept readonly JS lists or exactly
+one flat column from an ordinary Query (including filtered/distinct/UNION sets).
+No cardinality restriction or LIMIT 1 is imposed. Examples:
+```ts
+components.where(c => c.entityId.in(cIndices.map(i => i.entityId)))
+parts.aggregate(g => ({ eol: countIf(g.lifecycleStatus.in(['EOL', 'Obsolete'])) }))
+```
+Numeric, bigint, String and Bool descriptors (optionally Nullable) are supported;
+other families and container membership are explicitly rejected. Lists use
+`Array(<non-null receiver type>)`: NULL list elements and Expr-valued lists are
+not supported. Nullable set columns are supported. On pinned ClickHouse 24.8,
+NULL receivers produce NULL for both IN and NOT IN, even against an empty set;
+non-NULL receivers do not match NULL set entries. Results are boolean, nullable
+only when the receiver is nullable (Bool decoder accepts the server UInt8).
+Duplicates do not multiply rows. Inner queries are independently scoped, inline,
+and share the outer Param allocator; correlation and shared CTE extraction remain
+unsupported. Names and grouped modes survive membership (including countIf).
 
 Outer joins are owner-deferred unresolved v1 backlog, not a blocker for cross
 joins or independent features. Two explicit contract issues remain, without silently widened
@@ -97,7 +114,7 @@ naive filter. State/Merge construction remains available but execution and raw
 state selection remain explicitly unsupported. Builder ColumnRefs record row/grouped
 provenance; legacy low-level refs without a mode are checked in their contextual
 scope (their original wrapper mode cannot be recovered).
-All 24 existing scalar catalog methods execute: six
+All 26 existing scalar catalog methods execute: IN/NOT IN, six
 comparisons, and/or/not, plus/minus/multiply/divide, isNull/isNotNull/ifNull,
 length/empty/notEmpty/startsWith, has/hasAny/arrayElement/element. No additional
 operators or catalog families are implied; unsupported forms fail explicitly.

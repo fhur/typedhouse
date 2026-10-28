@@ -20,6 +20,10 @@ const noArgAggregate = core.defineAggregate({ name: 'customCount', args: [], ret
 const parametricCount = core.defineAggregate({ name: 'customParamCount', params: [col.Float64], args: [], returns: col.UInt64, deterministic: true, linear: true });
 const parametricSum = core.defineAggregate({ name: 'customParamSum', params: [col.Float64], args: [core.numeric], returns: col.UInt64, deterministic: true, linear: true });
 const cases = {
+  membershipEmpty: 'id.in([])',
+  membershipNullable: 'nullable.notIn([1n, 2n])',
+  membershipGrouped: "groupedString.in(['EOL'])",
+  membershipAggregate: 'sum(grouped).notIn([1n])',
   structuralRecursiveChild: "column(col.Array(col.Array(col.Tuple({ child: col.Array(col.Tuple({ 'a.b': col.Nullable(col.UInt64) })) }))), 'root', 'grouped').element('child').element('a.b')",
   structuralRecursiveChildDefault: "column(col.Array(col.Array(col.Tuple({ child: col.Array(col.Tuple({ 'a.b': col.Nullable(col.UInt64) })) }))), 'root', 'agg').element('child').element('a.b').arrayElement(-1).arrayElement(1).arrayElement(99)",
   structuralFixedPrefix: "column(col.String, 's', 'grouped').startsWith(column(col.FixedString(2), 'p', 'grouped'))",
@@ -144,6 +148,7 @@ try {
   // Only published type re-exports, not core source or a fake expression implementation.
   writeFileSync(join(directory, 'ordering.d.ts'), "export { Ordering } from '@chql/core';\n");
   writeFileSync(join(directory, 'expr.d.ts'), "export type { Expr, Constant } from '@chql/core';\n");
+  writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery } from '@chql/core';\n");
   writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@chql/core';\n");
   mkdirSync(join(directory, 'catalog'));
   writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");

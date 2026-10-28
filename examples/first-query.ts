@@ -56,6 +56,10 @@ try {
   const combined = unionAll(q, q.limit(1)).orderBy(r => r.id);
   console.log(combined.toSQL());
   console.log(await client.run(combined));
+  const selectedIds = q.map(r => r.id).distinct().limit(2);
+  const membership = q.where(r => r.id.in(selectedIds)).map(r => ({ id: r.id, known: r.category.notIn(['obsolete']) }));
+  console.log(membership.toSQL());
+  console.log(await client.run(membership));
   // Scalar wrappers have Nullable descriptors on ClickHouse 24.8, even for count/sum.
   const totalParts = q.aggregate(g => sum(g.count));
   const shares = q.map(r => ({ id: r.id, share: r.count.divide(scalar(totalParts)).multiply(100) }));
