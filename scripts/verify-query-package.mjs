@@ -54,7 +54,7 @@ expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { toTypeScript, count, sum, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
+import { toTypeScript, count, sum, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
 import { emitNaive } from '@chql/compiler';
 import { createClient, decoder, rowDecoder } from '@chql/client';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).where(r => r.id.eq(2n)).map(r => ({ id: r.id })).limit(10);
@@ -62,6 +62,15 @@ assert.throws(() => q.toSQL(), /compiler_not_registered/);
 registerCompiler(emitNaive);
 assert.deepEqual({...q.toSQL().params}, {p0: '2'});
 assert.equal(decoder(col.UInt64.type)('2'), 2n);
+const castParam = val('7', col.String);
+const castQuery = q.map(() => ({ a: cast(castParam, col.UInt64), b: cast(castParam, col.Float64), c: cast(val(null, col.Nullable(col.String)), col.Nullable(col.Float64)) }));
+assert.deepEqual({...castQuery.toSQL().params}, { p0: '7', p1: '2' });
+assert.match(castQuery.toSQL().sql, /CAST/);
+assert.deepEqual(rowDecoder(castQuery.toSQL().columns)({a: '7', b: 7, c: null}), {a: 7n, b: 7, c: null});
+assert.equal(Object.values(castQuery.toSQL().columns).map(toTypeScript).join(','), 'bigint,number,(number) | null');
+const castUnion = unionAll(q.map(r => cast(r.id, col.Float64)), q.map(r => cast(r.id, col.Float64)));
+assert.match(castUnion.toSQL().sql, /UNION ALL/);
+assert.equal(castUnion.toSQL().columns.id.name, 'Float64');
 const structural = from(table('s', { specs: col.Array(col.Tuple({ name: col.Nullable(col.String) })), ids: col.Array(col.UInt64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }))
   .where(r => r.ids.hasAny([2n])).map(r => ({ names: r.specs.element('name'), first: r.specs.arrayElement(-1).element('name'), size: r.ids.length(), empty: r.ids.empty() }));
 assert.deepEqual({...structural.toSQL().params}, { p0: 'name', p1: '-1', p2: 'name', p3: '[2]' });

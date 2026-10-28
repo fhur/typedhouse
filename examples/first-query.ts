@@ -1,4 +1,4 @@
-import { count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
+import { cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
 import { emitNaive } from "@chql/compiler";
 import { createClient } from "@chql/client";
 // Checked-in output of the real codegen integration fixture. For your database,
@@ -62,6 +62,14 @@ try {
   const combined = unionAll(q, q.limit(1)).orderBy(r => r.id);
   console.log(combined.toSQL());
   console.log(await client.run(combined));
+  // Explicit SQL conversion aligns descriptors; .as() does not convert values.
+  const integerValues = q.map(() => ({ value: val(2, col.UInt32) }));
+  const floatValues = q.map(() => ({ value: val(2.5, col.Float64) }));
+  const aligned = unionAll(integerValues.map(r => cast(r.value, col.Float64)), floatValues)
+    .where(r => r.value.gt(0)).groupBy(r => r.value).aggregate(() => count()).orderBy(r => r.value);
+  console.log(aligned.toSQL());
+  console.log(await client.run(aligned));
+  for await (const row of client.stream(aligned)) console.log('aligned union', row);
   const selectedIds = q.map(r => r.id).distinct().limit(2);
   const membership = q.where(r => r.id.in(selectedIds)).map(r => ({ id: r.id, known: r.category.notIn(['obsolete']) }));
   console.log(membership.toSQL());

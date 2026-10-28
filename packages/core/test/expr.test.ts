@@ -70,6 +70,23 @@ describe('expression wrapper', () => {
     if (casted.ir.kind === 'Cast') expect(casted.ir.expr).toBe(x.ir);
     expect(x.ir.type).toEqual(col.String.type);
   });
+  it('casts retain shared Param identity, frozen descriptors and each original mode', () => {
+    const shared = val('7', col.String);
+    for (const descriptor of [col.Float64, col.UInt64, col.Nullable(col.String)]) {
+      const value = cast(shared, descriptor);
+      expect(value.ir.kind).toBe('Cast');
+      if (value.ir.kind !== 'Cast') throw new Error('Cast expected');
+      expect(value.ir.expr).toBe(shared.ir);
+      expect(value.ir.to).toEqual(descriptor.type);
+      expect(value.ir.type).toEqual(descriptor.type);
+      expect(Object.isFrozen(value.ir.to)).toBe(true);
+      expect(value.mode).toBe('row');
+      expect(value.name).toBeUndefined();
+    }
+    const grouped = columnExpr(col.UInt32, 1 as NodeId, ['n'], 'n', 'grouped');
+    expect(cast(grouped, col.Float64)).toMatchObject({ mode: 'grouped', name: 'n' });
+    expect(cast(sum(grouped), col.Float64)).toMatchObject({ mode: 'agg', name: 'n' });
+  });
   it('keeps repeated constant declarations as owned Params, never Casts', () => {
     const original = val(new Date(0));
     const declared = original.as(col.DateTime64(3)).as(col.DateTime());

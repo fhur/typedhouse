@@ -1,5 +1,22 @@
 import { setDescriptor, membershipBase, aggregateDefinitions, methodCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
 
+/** Closed descriptor grammar: no raw/Unknown type text ever reaches CAST syntax.
+ * Nullable -> non-null is deliberately unsupported: cast_keep_nullable changes
+ * that conversion's descriptor, and NULL removal must never be implicit here.
+ */
+function castDescriptor(type: CHType): CHType {
+  const inner = type?.kind === 'Nullable' ? type.inner : type;
+  if (!inner || inner.kind !== 'scalar' || typeof inner.name !== 'string' || !/^(U?Int(8|16|32|64|128|256)|Float(32|64)|String|Bool)$/.test(inner.name)) throw new Error('unsupported_cast_type');
+  return type;
+}
+export function resolveCast(e: Extract<ExprNode, { kind: 'Cast' }>, resolve: (e: ExprNode) => CHType): CHType {
+  const target = castDescriptor(e.to);
+  if (print(castDescriptor(e.type)) !== print(target)) throw new Error('invalid_expression_type');
+  const source = castDescriptor(resolve(e.expr));
+  if (source.kind === 'Nullable' && target.kind !== 'Nullable') throw new Error('cast_nullable_removal');
+  return target;
+}
+
 export function resolveAggregate(e: Extract<ExprNode, { kind: 'Agg' }>, resolve: (e: ExprNode, expected?: CHType) => CHType): { result: CHType; sqlName: string } {
   const def = aggregateDefinitions.find(d => d.name === e.fn.name);
   if (!def || e.fn.origin !== 'typed') throw new Error('unsupported_aggregate');

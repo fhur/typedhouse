@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query } from '@chql/core';
+import { cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
 import { emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -24,6 +24,114 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('executes explicit union alignment, grouping and aggregate casts through run and stream', async () => {
+  await sql('CREATE TABLE cast_values (`a.b` UInt32, f Float64, text String, n Nullable(UInt32)) ENGINE=Memory');
+  await sql("INSERT INTO cast_values VALUES (0,0.5,'7',NULL),(2,2.5,'9',2),(2,2.5,'9',2)");
+  const source = from(table('cast_values', { 'a.b': col.UInt32, f: col.Float64, text: col.String, n: col.Nullable(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const direct = async (query: string) => (await sql(query + ' FORMAT JSONEachRow')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+  const small = source.map(r => ({ value: r['a.b'] }));
+  const wide = source.map(r => ({ value: r.f }));
+  expect(() => unionAll(small, wide)).toThrow('union_descriptor_mismatch');
+  const aligned = unionAll(small.map(r => cast(r.value, col.Float64)), wide);
+  const grouped = aligned.where(r => cast(r.value, col.Bool)).groupBy(r => cast(r.value, col.String)).aggregate(g => ({ total: cast(count(), col.Float64) }))
+    .orderBy(r => r.value.desc()).orderBy(r => cast(r.value, col.Float64));
+  const expected = await direct('SELECT key AS value,total FROM (SELECT CAST(value AS String) AS key,CAST(count() AS Float64) AS total FROM (SELECT CAST(`a.b` AS Float64) AS value FROM cast_values UNION ALL SELECT f AS value FROM cast_values) WHERE CAST(value AS Bool) GROUP BY CAST(value AS String)) ORDER BY CAST(key AS Float64)');
+  expect(await client.run(grouped)).toEqual(expected);
+  const streamed = []; for await (const row of client.stream(grouped)) streamed.push(row);
+  expect(streamed).toEqual(expected);
+  const aggregates = source.aggregate(g => ({ before: sum(cast(g['a.b'], col.Float64)), after: cast(sum(g['a.b']), col.Float64).plus(1) }));
+  expect(await client.run(aggregates)).toEqual(await direct('SELECT sum(CAST(`a.b` AS Float64)) AS before,CAST(sum(`a.b`) AS Float64)+1 AS after FROM cast_values'));
+  const set = source.map(r => cast(r.text, col.UInt64));
+  const composed = source.map(r => ({ value: cast(r.text, col.UInt64), member: cast(r.text, col.UInt64).in(set), total: cast(scalar(source.aggregate(() => cast(count(), col.Float64))), col.Nullable(col.String)) })).orderBy(r => r.value);
+  const baseline = await direct('SELECT CAST(text AS UInt64) AS value,CAST(text AS UInt64) IN (SELECT CAST(text AS UInt64) FROM cast_values) AS member,CAST((SELECT CAST(count() AS Float64) FROM cast_values) AS Nullable(String)) AS total FROM cast_values ORDER BY value');
+  expect(await client.run(composed)).toEqual(baseline.map(r => ({ ...r, value: BigInt(r.value as string), member: Boolean(r.member) })));
+  const converted = source.map(r => ({ text: cast(r['a.b'], col.String), n: cast(r.n, col.Nullable(col.Float64)) })).orderBy(r => r.text);
+  const convertedDirect = await direct('SELECT CAST(`a.b` AS String) AS text,CAST(n AS Nullable(Float64)) AS n FROM cast_values ORDER BY text');
+  expect(await client.run(converted)).toEqual(convertedDirect);
+  const convertedStream = []; for await (const row of client.stream(converted)) convertedStream.push(row);
+  expect(convertedStream).toEqual(convertedDirect);
+  expect(await client.run(source.limit(0).map(r => cast(r.n, col.Nullable(col.Float64))))).toEqual([]);
+});
+it('matches cast descriptors and values under both cast_keep_nullable settings, including failures', async () => {
+  const source = from(db.entity_ots_component).limit(1);
+  const descriptors: Column[] = [col.UInt8, col.UInt16, col.UInt32, col.UInt64, col.UInt128, col.UInt256, col.Int8, col.Int16, col.Int32, col.Int64, col.Int128, col.Int256, col.Float32, col.Float64, col.String, col.Bool];
+  for (const setting of [0, 1] as const) {
+    const configured = createClient({ url, username: 'fixture', password: 'fixture', clickhouse_settings: { cast_keep_nullable: setting } });
+    try {
+      for (const descriptor of descriptors) {
+        const text = descriptor === col.Bool ? 'true' : '7';
+        const query = source.map(() => ({ value: cast(val(text, col.String), descriptor), nullable: cast(val(null, col.Nullable(col.String)), col.Nullable(descriptor)) }));
+        const type = print(descriptor.type);
+        const direct = JSON.parse(await sql(`SELECT CAST('${text}' AS ${type}) AS value,CAST(NULL AS Nullable(${type})) AS nullable,toTypeName(CAST('${text}' AS ${type})) AS type,toTypeName(CAST(NULL AS Nullable(${type}))) AS nullableType SETTINGS cast_keep_nullable=${setting} FORMAT JSONEachRow`)) as { value: unknown; nullable: null; type: string; nullableType: string };
+        expect(direct.type).toBe(type); expect(direct.nullableType).toBe(`Nullable(${type})`);
+        const value = /^(U?Int)(64|128|256)$/.test(type) ? BigInt(direct.value as string) : direct.value;
+        expect(await configured.run(query)).toEqual([{ value, nullable: null }]);
+        const rows = []; for await (const row of configured.stream(query)) rows.push(row);
+        expect(rows).toEqual([{ value, nullable: null }]);
+      }
+      const shared = val("hostile'\\\n{p77:String}", col.String);
+      const hostile = source.map(() => ({ a: cast(shared, col.String), b: cast(shared, col.Nullable(col.String)), c: cast(val("hostile'\\\n{p77:String}", col.String), col.String), empty: cast(val('', col.String), col.String) }));
+      expect(Object.keys(emitNaive(hostile.ir).params)).toHaveLength(3);
+      expect(await configured.run(hostile)).toEqual([{ a: "hostile'\\\n{p77:String}", b: "hostile'\\\n{p77:String}", c: "hostile'\\\n{p77:String}", empty: '' }]);
+      for (const bad of ['not-a-number', '']) {
+        const invalid = source.map(() => ({ value: cast(val(bad, col.String), col.UInt64) }));
+        await expect(configured.run(invalid)).rejects.toBeInstanceOf(QueryError);
+        await expect((async () => { for await (const _row of configured.stream(invalid)) { /* must throw */ } })()).rejects.toBeInstanceOf(QueryError);
+      }
+      // Non-NULL Nullable operands must also stay Nullable, independent of server configuration.
+      const nullable = source.map(() => ({ value: cast(val(7, col.Nullable(col.UInt32)), col.Nullable(col.Float64)) }));
+      expect(await configured.run(nullable)).toEqual([{ value: 7 }]);
+    } finally { await configured.close(); }
+  }
+});
+it('adversarial casts preserve server rounding, overflow, non-finite and wide integer semantics', async () => {
+  const source = from(db.entity_ots_component).limit(1);
+  const query = source.map(() => ({
+    overflow: cast(val(257, col.UInt32), col.UInt8),
+    negative: cast(val(-1, col.Int32), col.UInt8),
+    fractional: cast(val(-2.75), col.Int32),
+    rounded: cast(val(16777217), col.Float32),
+    huge: cast(val('115792089237316195423570985008687907853269984665640564039457584007913129639935', col.String), col.UInt256),
+    signed: cast(val('-170141183460469231731687303715884105728', col.String), col.Int128),
+    nan: cast(val('nan', col.String), col.Float64),
+    infinity: cast(val('-inf', col.String), col.Float32),
+    bool: cast(val(-2), col.Bool),
+    boolText: cast(val(false), col.String),
+  }));
+  const direct = JSON.parse(await sql(`SELECT CAST(toUInt32(257) AS UInt8) AS overflow,CAST(toInt32(-1) AS UInt8) AS negative,CAST(toFloat64(-2.75) AS Int32) AS fractional,CAST(toFloat64(16777217) AS Float32) AS rounded,CAST('115792089237316195423570985008687907853269984665640564039457584007913129639935' AS UInt256) AS huge,CAST('-170141183460469231731687303715884105728' AS Int128) AS signed,CAST('nan' AS Float64) AS nan,CAST('-inf' AS Float32) AS infinity,CAST(toFloat64(-2) AS Bool) AS bool,CAST(false AS String) AS boolText SETTINGS output_format_json_quote_denormals=1,output_format_json_quote_64bit_integers=1 FORMAT JSONEachRow`));
+  expect(direct.nan).toBe('nan'); expect(direct.infinity).toBe('-inf');
+  const expected = [{ ...direct, huge: BigInt(direct.huge), signed: BigInt(direct.signed), nan: NaN, infinity: -Infinity }];
+  expect(await client.run(query)).toEqual(expected);
+  const rows = []; for await (const row of client.stream(query)) rows.push(row);
+  expect(rows).toEqual(expected);
+});
+it('adversarial cast composition preserves shared hostile Params through union, expansion, fences and scalar sets', async () => {
+  const hostile = "7'\\\n{p99:String}\0";
+  const shared = val(hostile, col.String);
+  const source = from(db.entity_ots_component).orderBy(r => r.entityId).limit(1);
+  const branch = source.map(() => ({ values: val([0, 2, 2], col.Array(col.UInt32)), text: cast(shared, col.String) })).arrayJoin(r => r.values, 'item')
+    .map(r => ({ value: cast(r.item, col.Float64), text: r.text })).orderBy(r => r.value).materialize();
+  const combined = unionAll(branch, branch.limit(1)).materialize();
+  const set = combined.map(r => cast(r.value, col.UInt64));
+  const query = combined.map(r => ({
+    text: cast(r.text, col.Nullable(col.String)), equal: cast(val(hostile, col.String), col.String),
+    value: cast(r.value, col.UInt64), member: cast(cast(r.value, col.UInt64).in(set), col.String),
+    total: cast(scalar(combined.aggregate(g => sum(cast(g.value, col.UInt64)))), col.Nullable(col.String)),
+  })).orderBy(r => r.value);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const plan = emitNaive(query.ir);
+    expect(plan.sql).not.toContain(hostile);
+    expect(Object.values(plan.params).filter(v => v === hostile)).toHaveLength(2);
+    expect([...new Set([...plan.sql.matchAll(/\{(p\d+):/g)].map(m => m[1]))]).toEqual(Object.keys(plan.params));
+    const literal = `unhex('${Buffer.from(hostile).toString('hex')}')`;
+    const baseline = (await sql(`SELECT CAST(${literal} AS Nullable(String)) AS text,${literal} AS equal,CAST(n AS UInt64) AS value,CAST(n IN (0,2) AS String) AS member,CAST(4 AS Nullable(String)) AS total FROM (SELECT arrayJoin([0,2,2,0]) AS n) ORDER BY value FORMAT JSONEachRow`)).trim().split('\n').map(line => JSON.parse(line) as { value: string });
+    const expected = baseline.map(row => ({ ...row, value: BigInt(row.value) }));
+    expect(await client.run(query)).toEqual(expected);
+    const rows = []; for await (const row of client.stream(query)) rows.push(row);
+    expect(rows).toEqual(expected);
+  } finally { warn.mockRestore(); }
+});
 it('adversarial fences preserve hostile Param transport, identity and client compile memoization', async () => {
   const hostile = "t0`'\\\n{p77:Array(String)} --";
   const shared = val(hostile, col.String);

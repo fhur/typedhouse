@@ -1,6 +1,6 @@
 import { print, scalarDescriptor, outputLeaves, expandedOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
 import { parameterWireType, serializeParameter } from './parameters.js';
-import { resolveAggregate, resolveCall } from './resolve.js';
+import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
 
 export class ValidationError extends Error {
   constructor(readonly code: string, readonly node: unknown, readonly path: string, detail = '') {
@@ -13,7 +13,7 @@ export function quoteIdentifier(name: string): string {
 }
 const same = (a: CHType, b: CHType) => print(a) === print(b);
 function hasAggregate(e: ExprNode): boolean {
-  return e.kind === 'Agg' || (e.kind === 'Call' && e.args.some(hasAggregate));
+  return e.kind === 'Agg' || (e.kind === 'Call' && e.args.some(hasAggregate)) || (e.kind === 'Cast' && hasAggregate(e.expr));
 }
 function base(t: CHType): CHType { return t.kind === 'Nullable' || t.kind === 'LowCardinality' ? base(t.inner) : t; }
 /** Permanent one-subquery-per-node reference backend. Unsupported IR is rejected. */
@@ -35,6 +35,7 @@ export function emitNaive(root: Rel): CompiledQuery {
       if (!same(type, e.type)) throw new Error('invalid_expression_type');
       return type;
     }
+    if (e.kind === 'Cast') return resolveCast(e, resolvedType);
     if (e.kind === 'Agg') return resolveAggregate(e, resolvedType).result;
     if (e.kind === 'Call') return resolveCall(e, resolvedType).result;
     const type = e.type ?? expected;
@@ -77,6 +78,12 @@ export function emitNaive(root: Rel): CompiledQuery {
         try { resolvedType(e); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_subquery', e, path); }
         // Same allocator/active graph, but emit establishes a fresh inner column scope.
         return `(${emit(e.rel, `${path}.rel`)})`;
+      }
+      case 'Cast': {
+        let target: CHType;
+        try { target = resolveCast(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_cast', e, path); }
+        // The operand retains its own descriptor/Param identity and original scope.
+        return `CAST(${expression(e.expr, input, `${path}.expr`, undefined, false, scope, qualifier)} AS ${print(target)})`;
       }
       case 'Agg': {
         if (scope !== 'aggregate') return fail('invalid_aggregate_placement', e, path);

@@ -57,7 +57,24 @@ operators to the returned Query; UNION row order itself is unspecified. Live
 capability is the AND of inputs; scan-only and thenBy stages are not retained.
 Matching TypeScript rows are not sufficient for SQL compatibility: UInt32 and
 Float64 both decode to number, but this increment rejects their union explicitly
-with `union_descriptor_mismatch`. Common-type/coercion support remains backlog.
+with `union_descriptor_mismatch`. Automatic common-type/coercion support remains backlog.
+Use explicit alignment instead (import `cast`, `col`, `unionAll` from `@chql/core`):
+```ts
+const aligned = unionAll(
+  integers.map(r => ({ value: cast(r.value, col.Float64) })),
+  floats.map(r => ({ value: r.value })),
+);
+```
+`cast(expr, col.X)` emits SQL CAST, unlike `.as(col.X)` (a declaration only).
+It supports numeric integers/floats, String and Bool operands/targets, optionally
+Nullable, retaining root names, modes and original Params. Nullable operands
+require Nullable targets: nullable removal is rejected, so both values of the
+server's `cast_keep_nullable` setting produce truthful descriptors. Other type
+families (including Decimal, dates, LowCardinality and containers) are rejected.
+Invalid String conversions remain server errors wrapped in QueryError; casts do
+not substitute defaults or promise lossless/range-checked numeric conversion.
+Casts compose with grouping, aggregates, sorting, scalar/IN queries and run/stream.
+
 The naive compiler also supports low-level `Union { all: false }` with explicit
 UNION DISTINCT; no public intersect/except APIs are implied.
 
