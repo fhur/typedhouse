@@ -270,8 +270,17 @@ Credentials can come from `CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD`. Change the ex
 schema import to `./generated/schema.js` and set `CLICKHOUSE_DATABASE=analytics`.
 Your table must have the demo columns; adjust the projection for another schema.
 
+The default `compile` pipeline validates relational IR, lowers it into SELECT blocks,
+then emits SQL and allocates parameters. It folds scan → filter → sort → limit
+into one SELECT. Repeated or out-of-order clauses start a derived table; projections,
+aggregates, joins, DISTINCT and materialization remain fences. `emitNaive` remains
+the one-subquery-per-node reference backend. Future logical rewrites belong between
+validation and block planning, not in SQL rendering. For now validation reuses the
+reference backend (discarding its SQL), and emission retains defensive checks; a
+standalone validation visitor is a future performance improvement.
+
 Core intentionally has no compiler dependency. Explicitly initialize `toSQL()` with
-`registerCompiler(emitNaive)` (`registerCompiler` from `@chql/core`, `emitNaive` from
+`registerCompiler(compile)` (`registerCompiler` from `@chql/core`, `compile` from
 `@chql/compiler`). `createClient` from `@chql/client` compiles independently and
 memoizes plans/decoders by IR identity. `run` forces ISO date output, quoted 64-bit
 integers and quoted non-finite floats; errors retain SQL, params, cause and the root

@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
 import { avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
-import { emitNaive, quoteIdentifier } from '../src/index.js';
+import { compile, emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
 let container: StartedTestContainer;
@@ -24,6 +24,27 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('simple optimizer agrees with naive execution across clause boundaries', async () => {
+  const source = from(db.entity_ots_component);
+  const queries = [
+    source.where(r => r.tenantId.eq('acme')).orderBy(r => r.entityId).limit(1, 1),
+    source.orderBy(r => r.entityId).limit(2).where(r => r.tenantId.eq('acme')),
+    source.orderBy(r => r.entityId).limit(2).orderBy(r => r.entityId.desc()),
+    source.orderBy(r => r.entityId).limit(3, 1).limit(1, 1),
+  ];
+  for (const query of queries) {
+    const execute = async (emitter: typeof compile) => {
+      const plan = emitter(query.ir);
+      const endpoint = new URL(url);
+      for (const [key, value] of Object.entries(plan.params)) endpoint.searchParams.set(`param_${key}`, value);
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: `${plan.sql} FORMAT JSONEachRow` });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text);
+      return text;
+    };
+    expect(await execute(compile)).toBe(await execute(emitNaive));
+  }
+});
 it('adversarial weekly Date: exhausts every supported day against independent calendar arithmetic and SQL', async () => {
   await sql('CREATE TABLE adversarial_calendar (day Date) ENGINE=Memory');
   await sql("INSERT INTO adversarial_calendar SELECT toDate(number) FROM numbers(65536)");

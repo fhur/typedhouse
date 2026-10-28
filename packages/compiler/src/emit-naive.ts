@@ -1,4 +1,5 @@
 import { print, scalarDescriptor, outputLeaves, expandedOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
+import type { SqlPlan } from './plan-selects.js';
 import { parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
 
@@ -18,6 +19,23 @@ function hasAggregate(e: ExprNode): boolean {
 function base(t: CHType): CHType { return t.kind === 'Nullable' || t.kind === 'LowCardinality' ? base(t.inner) : t; }
 /** Permanent one-subquery-per-node reference backend. Unsupported IR is rejected. */
 export function emitNaive(root: Rel): CompiledQuery {
+  return emitQuery(root);
+}
+
+/** Transitional validation adapter: reuse the reference backend's complete checks.
+ * Its SQL is discarded; warnings belong only to the final emission stage.
+ */
+export function validateRel(root: Rel): CompiledQuery {
+  return emitQuery(root, undefined, false);
+}
+
+export function emitPlanned(plan: SqlPlan): CompiledQuery {
+  return emitQuery(plan.root, plan);
+}
+
+function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
+  const rendered = new Map<Rel, string>();
+  const clauses = new Map<Rel, string>();
   const params: Record<string, string> = Object.create(null) as Record<string, string>;
   const parameterTypes: Record<string, CHType> = Object.create(null) as Record<string, CHType>;
   const nodes: Record<string, Rel> = Object.create(null) as Record<string, Rel>;
@@ -117,6 +135,11 @@ export function emitNaive(root: Rel): CompiledQuery {
     }
   }
   function emit(rel: Rel, path: string): string {
+    const sql = emitNode(rel, path);
+    rendered.set(rel, sql);
+    return sql;
+  }
+  function emitNode(rel: Rel, path: string): string {
     if (!rel || typeof rel !== 'object') return fail('invalid_node', rel, path);
     if (active.has(rel)) return fail('cyclic_ir', rel, path);
     active.add(rel);
@@ -202,11 +225,14 @@ export function emitNaive(root: Rel): CompiledQuery {
           }
           return `SELECT ${items.join(', ')} FROM ${source}${residuals.length ? ` WHERE ${residuals.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}` : ''}`;
         }
-        case 'Scan':
+        case 'Scan': {
           if (rel.final !== undefined && typeof rel.final !== 'boolean') return fail('invalid_scan_hint', rel, `${path}.final`);
           if (rel.sample !== undefined && (typeof rel.sample !== 'number' || !Number.isFinite(rel.sample) || rel.sample <= 0 || rel.sample > 1)) return fail('invalid_scan_hint', rel, `${path}.sample`, 'expected fraction in (0, 1]');
           if (order.some(k => !Object.hasOwn(rel.table.columns, k) || !same(columns[k]!, rel.table.columns[k]!))) return fail('invalid_output', rel, path);
-          return `SELECT ${list} FROM ${quoteIdentifier(rel.table.name)}${rel.final ? ' FINAL' : ''}${rel.sample === undefined ? '' : ` SAMPLE ${rel.sample}`}`;
+          const table = quoteIdentifier(rel.table.name);
+          const hints = `${rel.final ? ' FINAL' : ''}${rel.sample === undefined ? '' : ` SAMPLE ${rel.sample}`}`;
+          return `SELECT ${list} FROM ${table}${hints}`;
+        }
         case 'ArrayJoin': {
           if (typeof rel.alias !== 'string' || rel.alias.includes('\0')) return fail('invalid_array_join_alias', rel, `${path}.alias`);
           if (typeof rel.left !== 'boolean') return fail('invalid_array_join', rel, `${path}.left`);
@@ -272,6 +298,18 @@ export function emitNaive(root: Rel): CompiledQuery {
             return `WITH ${name} AS (${source}) SELECT ${order.map(k => `${name}.${quoteIdentifier(k)}`).join(', ')} FROM ${name}`;
           }
           if (rel.kind === 'Distinct') return `SELECT DISTINCT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias}`;
+          function renderBlock(clause: string): string {
+            clauses.set(rel, clause);
+            const block = plan!.blocks.get(rel)!;
+            let from: string;
+            if (block.source.kind === 'table') {
+              const scan = block.source.scan;
+              from = `${quoteIdentifier(scan.table.name)} AS ${inputAlias}${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
+            } else {
+              from = `(${rendered.get(block.source.rel)!}) AS ${inputAlias}`;
+            }
+            return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM ${from}${block.clauses.map(node => clauses.get(node)!).join('')}`;
+          }
           if (rel.kind === 'Sort') {
             if (!Array.isArray(rel.keys) || rel.keys.length === 0) return fail('invalid_sort_key', rel, `${path}.keys`);
             const keys = rel.keys.map((key, i) => {
@@ -279,15 +317,20 @@ export function emitNaive(root: Rel): CompiledQuery {
               if (!key || (key.dir !== 'asc' && key.dir !== 'desc') || (key.nulls !== undefined && key.nulls !== 'first' && key.nulls !== 'last')) return fail('invalid_sort_key', rel, keyPath);
               return `${expression(key.expr, rel.input, `${keyPath}.expr`)} ${key.dir.toUpperCase()}${key.nulls === undefined ? '' : ` NULLS ${key.nulls.toUpperCase()}`}`;
             });
+            if (plan) return renderBlock(` ORDER BY ${keys.join(', ')}`);
             return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias} ORDER BY ${keys.join(', ')}`;
           }
           if (rel.kind === 'Filter') {
             const type = rel.pred?.type && base(rel.pred.type);
             if (!type || type.kind !== 'scalar' || type.name !== 'Bool') return fail('invalid_predicate', rel, path);
-            return `SELECT ${list} FROM (${source}) AS ${inputAlias} WHERE ${expression(rel.pred, rel.input, `${path}.pred`)}`;
+            const predicate = expression(rel.pred, rel.input, `${path}.pred`);
+            if (plan) return renderBlock(` WHERE ${predicate}`);
+            return `SELECT ${list} FROM (${source}) AS ${inputAlias} WHERE ${predicate}`;
           }
           if (!Number.isSafeInteger(rel.n) || rel.n < 0 || (rel.offset !== undefined && (!Number.isSafeInteger(rel.offset) || rel.offset < 0))) return fail('invalid_limit', rel, path);
-          return `SELECT ${list} FROM (${source}) LIMIT ${rel.n}${rel.offset === undefined ? '' : ` OFFSET ${rel.offset}`}`;
+          const limit = ` LIMIT ${rel.n}${rel.offset === undefined ? '' : ` OFFSET ${rel.offset}`}`;
+          if (plan) return renderBlock(limit);
+          return `SELECT ${list} FROM (${source})${limit}`;
         }
         default: return fail('unsupported_node', rel, path, rel.kind);
       }
@@ -299,8 +342,7 @@ export function emitNaive(root: Rel): CompiledQuery {
   const body = emit(root, 'root');
   const sql = body + (weekBucketing ? ' SETTINGS enable_extended_results_for_datetime_functions = 1' : '');
   // Warn only after successful validation, once per distinct hint per compile.
-  for (const _rel of materialized) console.warn('chql: materialization is not yet implemented; materialize() emits an ordinary CTE, which ClickHouse may inline and evaluate repeatedly.');
+  if (warn) for (const _rel of materialized) console.warn('chql: materialization is not yet implemented; materialize() emits an ordinary CTE, which ClickHouse may inline and evaluate repeatedly.');
   const leaves = outputLeaves(root.output);
   return Object.freeze({ sql, params: Object.freeze(params), parameterTypes: Object.freeze(parameterTypes), columns: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, l.type]))), ...(root.output.shape === 'nested' ? { columnPaths: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, Object.freeze(l.path)]))) } : {}), nodes: Object.freeze(nodes) });
 }
-export const compile = emitNaive;

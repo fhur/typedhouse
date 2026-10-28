@@ -17,7 +17,10 @@ it('emits explicit deterministic collision-safe CTEs, warning once per identity 
   expect(plan.sql).toContain('SELECT DISTINCT');
   expect(warn).toHaveBeenCalledTimes(2);
   expect(warn.mock.calls[0]?.[0]).toContain('materialization is not yet implemented');
-  expect(compile(query.ir)).toEqual(plan);
+  const optimized = compile(query.ir);
+  expect({ ...optimized, sql: '' }).toEqual({ ...plan, sql: '' });
+  expect(optimized.sql).toContain('WITH `t3` AS');
+  expect(optimized.sql).toContain('ORDER BY `__chql_input`.`id` ASC LIMIT 2');
   expect(warn).toHaveBeenCalledTimes(4);
 });
 it('retains shared/equal Params and first textual numbering across nested sets and scalar inputs', () => {
