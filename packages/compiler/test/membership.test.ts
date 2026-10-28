@@ -1,9 +1,81 @@
 import { expect, it } from 'vitest';
 import { Expr, col, table, from, val, countIf, scalar, count, exprNode, relNode, flatOutput, type ExprNode } from '@chql/core';
-import { emitNaive } from '../src/index.js';
+import { compile, emitNaive } from '../src/index.js';
 const q = from(table('membership', { id: col.String, n: col.Nullable(col.Int64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 function fields<T extends { readonly id: unknown }>(n: T): Omit<T, 'id'> { const { id: _id, ...f } = n; return f; }
 function project(e: ExprNode) { const output = flatOutput([['result', e.type!]]); return relNode({ kind: 'Project', input: q.ir, exprs: { result: e }, output, columns: output.columns }); }
+it('adversarial Date lists reject hostile payloads and forged temporal array evidence in both emitters', () => {
+  const dates = from(table('dates', { day: col.Date }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const member = dates.row.day.in([]).ir;
+  if (member.kind !== 'Call') throw new Error('fixture');
+  const projectDate = (operand: ExprNode) => {
+    const output = flatOutput([['result', col.Bool.type]]);
+    return relNode({ kind: 'Project', input: dates.ir, exprs: { result: exprNode({ ...fields(member), args: [member.args[0]!, operand] }) }, output, columns: output.columns });
+  };
+  for (const emitter of [compile, emitNaive]) {
+    for (const value of [["2024-02-29') OR 1 --"], [0], [null], [[new Date('2024-02-29')]], [new Date('1969-12-31T23:59:59.999Z')], [new Date('2149-06-07T00:00:00Z')]]) {
+      expect(() => emitter(projectDate(exprNode({ kind: 'Param', type: null, value })))).toThrow(/param_incompatible.*root.exprs.result.args\[1\]/);
+    }
+    for (const type of [col.Array(col.Date32), col.Array(col.DateTime()), col.Array(col.DateTime64(3)), col.Array(col.Nullable(col.Date))]) {
+      expect(() => emitter(projectDate(exprNode({ kind: 'Param', type: type.type, value: [new Date('2024-02-29')] })))).toThrow(/(unsupported_membership_type|invalid_set_operand).*root.exprs.result/);
+    }
+  }
+});
+it('bounds Date membership descriptors, transport, settings and parameter identity', () => {
+  const dates = from(table('dates', { day: col.Date, maybe: col.Nullable(col.Date) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const days = [new Date('1970-01-01T23:00:00Z'), new Date('2024-02-29T12:00:00Z'), new Date('2149-06-06')];
+  const shared = dates.row.day.in(days);
+  const query = dates.map(r => ({ shared, again: shared, equal: r.day.in(days), nullable: r.maybe.notIn(dates.map(r => r.day)) }));
+  const snapshot = JSON.stringify(query.ir);
+  for (const emitter of [emitNaive, compile]) {
+    const plan = emitter(query.ir);
+    expect(plan.sql).toContain('SETTINGS transform_null_in = 0');
+    expect(plan.sql.match(/\{p0:Array\(Date\)\}/g)).toHaveLength(2);
+    expect(plan.params).toEqual({ p0: "['1970-01-01','2024-02-29','2149-06-06']", p1: "['1970-01-01','2024-02-29','2149-06-06']" });
+    expect(JSON.stringify(query.ir)).toBe(snapshot);
+    for (const bad of [new Date(NaN), new Date('1969-12-31'), new Date('2149-06-07')]) {
+      expect(() => emitter(dates.map(r => r.day.in([bad])).ir)).toThrow(/param_incompatible.*root.exprs.day.args\[1\]/);
+    }
+    expect(emitter(q.map(r => r.id.in([])).ir).sql).not.toContain('transform_null_in');
+  }
+  const member = dates.row.day.in([]).ir;
+  if (member.kind !== 'Call') throw new Error('fixture');
+  for (const descriptor of [col.Date32, col.DateTime(), col.DateTime64(3), col.DateTime64(9), col.LowCardinality(col.Date), col.String, col.UInt16]) {
+    const bad = from(table('other_dates', { day: descriptor }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    const operand = exprNode({ kind: 'Subquery', rel: bad.ir, usage: 'in', type: descriptor.type });
+    const call = exprNode({ ...fields(member), args: [dates.row.day.ir, operand] });
+    const output = flatOutput([['result', col.Bool.type]]);
+    const rel = relNode({ kind: 'Project', input: dates.ir, exprs: { result: call }, output, columns: output.columns });
+    expect(() => emitNaive(rel)).toThrow(/(unsupported_membership_type|incompatible_operands).*root.exprs.result/);
+  }
+});
+it('rejects forged Date membership schemas, usage, results, metadata and captured modes', () => {
+  const dates = from(table('dates', { day: col.Date }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const member = dates.row.day.in(dates).ir;
+  if (member.kind !== 'Call' || member.args[1]?.kind !== 'Subquery') throw new Error('fixture');
+  const set = member.args[1];
+  const emit = (node: ExprNode) => {
+    const output = flatOutput([['result', node.type!]]);
+    return emitNaive(relNode({ kind: 'Project', input: dates.ir, exprs: { result: node }, output, columns: output.columns }));
+  };
+  for (const [node, error] of [
+    [exprNode({ ...fields(member), type: col.Nullable(col.Bool).type }), 'invalid_expression_type'],
+    [exprNode({ ...fields(member), fn: { ...member.fn, deterministic: false } }), 'invalid_function_metadata'],
+    [exprNode({ ...fields(member), args: [member.args[0]!, exprNode({ ...fields(set), usage: 'scalar' })] }), 'invalid_subquery_usage'],
+    [exprNode({ ...fields(member), args: [member.args[0]!, exprNode({ ...fields(set), type: col.Date32.type })] }), 'invalid_expression_type'],
+  ] as const) expect(() => emit(node)).toThrow(`${error} at root.exprs.result`);
+  const selected = dates.map(r => r.day);
+  expect(() => emitNaive(dates.where(r => r.day.in(selected.where(() => dates.row.day.eq(new Date('2024-02-29'))))).ir)).toThrow(/unbound_column.*\.rel.pred/);
+  dates.aggregate(g => {
+    expect(() => emit(g.day.in(dates).ir)).toThrow('invalid_expression_mode');
+    return countIf(g.day.in(dates));
+  });
+  if (dates.ir.kind !== 'Scan') throw new Error('fixture');
+  const output = flatOutput([['day', col.Date32.type]]);
+  const forged = relNode({ ...fields(dates.ir), output, columns: output.columns });
+  const fakeSet = exprNode({ ...fields(set), rel: forged });
+  expect(() => emit(exprNode({ ...fields(member), args: [member.args[0]!, fakeSet] }))).toThrow(/unsupported_membership_type.*root.exprs.result/);
+});
 it('adversarial validation rejects nested captures and non-set positions without allocating parameters', () => {
   const inner = q.map(r => r.id);
   const captured = inner.map(() => ({ id: q.row.id }));

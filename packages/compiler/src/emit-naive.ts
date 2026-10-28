@@ -44,6 +44,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
   const materialized = new Set<Rel>();
   let cteIndex = 0;
   let weekBucketing = false;
+  let dateMembership = false;
   // Each derived input owns this local SQL scope; ColumnRefs never bind SELECT aliases.
   const inputAlias = quoteIdentifier('__chql_input');
   function fail(code: string, node: unknown, path: string, detail = ''): never { throw new ValidationError(code, node, path, detail); }
@@ -121,6 +122,11 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           }
           return expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope, qualifier);
         });
+        if (e.fn.name === 'in' || e.fn.name === 'notIn') {
+          const receiver = resolved.types[0]!;
+          const base = receiver.kind === 'Nullable' ? receiver.inner : receiver;
+          if (base.kind === 'scalar' && base.name === 'Date') dateMembership = true;
+        }
         if (e.fn.name === 'toStartOfWeek') {
           weekBucketing = true;
           // Date32 preserves pre-epoch weeks for the explicit range check. Converting
@@ -341,7 +347,12 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     } finally { active.delete(rel); }
   }
   const body = emit(root, 'root');
-  const sql = body + (weekBucketing ? ' SETTINGS enable_extended_results_for_datetime_functions = 1' : '');
+  const settings = [
+    ...(weekBucketing ? ['enable_extended_results_for_datetime_functions = 1'] : []),
+    // Nullable membership's declared result requires the server's default NULL policy.
+    ...(dateMembership ? ['transform_null_in = 0'] : []),
+  ];
+  const sql = body + (settings.length ? ` SETTINGS ${settings.join(', ')}` : '');
   // Warn only after successful validation, once per distinct hint per compile.
   if (warn) for (const _rel of materialized) console.warn('chql: materialization is not yet implemented; materialize() emits an ordinary CTE, which ClickHouse may inline and evaluate repeatedly.');
   const leaves = outputLeaves(root.output);

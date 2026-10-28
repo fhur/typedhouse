@@ -21,6 +21,24 @@ it('owns lists, retains set relation identity and receiver names/modes', () => {
   expect(Object.isFrozen(operand)).toBe(true);
   q.aggregate(g => { expect(g.status.in(['EOL']).mode).toBe('grouped'); return countIf(g.status.in(['EOL'])); });
 });
+it('snapshots Date lists and preserves Date UNION set identity and grouped modes', () => {
+  const dates = from(table('dates', { day: col.Nullable(col.Date) }, meta));
+  const day = new Date('2024-02-29T23:59:00Z');
+  const list = [day];
+  const member = dates.row.day.in(list);
+  day.setUTCFullYear(2000); list.push(new Date());
+  expect(member.ir).toMatchObject({ args: [{}, { value: [new Date('2024-02-29T23:59:00Z')] }] });
+  expect(print(member.ir.type!)).toBe('Nullable(Bool)');
+  const set = unionAll(dates, dates.limit(0));
+  const expression = dates.row.day.notIn(set);
+  if (expression.ir.kind !== 'Call' || expression.ir.args[1]?.kind !== 'Subquery') throw new Error('fixture');
+  expect(expression.ir.args[1].rel).toBe(set.ir);
+  expect(expression.name).toBe('day');
+  dates.aggregate(g => {
+    expect(g.day.in(set).mode).toBe('grouped');
+    return countIf(g.day.in(set));
+  });
+});
 it('traverses set dependencies for live capability, including UNION', () => {
   const live = from(table('live', { id: col.String }, { ...meta, source: { kind: 'test' } }));
   expect(live.where(r => r.id.in(live)).caps.live).toBe(true);

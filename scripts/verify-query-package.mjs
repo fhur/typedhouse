@@ -106,6 +106,13 @@ const membershipSource = from(table('members', { id: col.String, s: col.Nullable
 const membershipQuery = membershipSource.map(r => ({ member: r.id.in(membershipSource.map(r => r.id)), missing: r.s.notIn([]) }));
 const membershipType = Object.entries(membershipQuery.toSQL().columns).map(([k, t]) => JSON.stringify(k) + ': ' + toTypeScript(t)).join('; ');
 assert.equal(readFileSync('membership.d.ts', 'utf8'), 'export type MembershipSnapshot = { ' + membershipType + ' };\\n');
+const dates = from(table('dates', { day: col.Nullable(col.Date) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const dateSet = unionAll(dates, dates.limit(0));
+const dateMembership = dates.map(r => ({ yes: r.day.in(dateSet), no: r.day.notIn([new Date('2024-02-29T23:00:00Z')]) }));
+assert.match(dateMembership.toSQL().sql, /transform_null_in = 0/);
+assert.deepEqual({...dateMembership.toSQL().params}, { p0: "['2024-02-29']" });
+assert.equal(Object.values(dateMembership.toSQL().columns).map(toTypeScript).join(','), '(boolean) | null,(boolean) | null');
+assert.equal(decoder(dateMembership.toSQL().columns.yes)(null), null);
 const membership = q.map(r => ({ id: r.id.in(q), absent: r.id.notIn([]) }));
 assert.deepEqual({...membership.toSQL().params}, { p0: '2', p1: '[]' });
 assert.equal(Object.values(membership.toSQL().columns).map(toTypeScript).join(','), 'boolean,boolean');

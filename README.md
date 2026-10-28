@@ -151,7 +151,7 @@ Date wire strings must be valid canonical YYYY-MM-DD within 1970-01-01–2149-06
 Date parameters use the UTC calendar day of a valid JS Date (time-of-day discarded),
 with the same range validation, including Array elements. Invalid wire calendar
 days are rejected, never normalized by JavaScript. Date32/DateTime/high-precision
-bucketing and Date scalar/IN subqueries remain unsupported; this is not full
+bucketing and Date scalar subqueries remain unsupported; this is not full
 temporal-catalog acceptance.
 
 `quantile(level)(value)` and `quantileIf(level)(value, predicate)` accept finite
@@ -221,7 +221,7 @@ No cardinality restriction or LIMIT 1 is imposed. Examples:
 components.where(c => c.entityId.in(cIndices.map(i => i.entityId)))
 parts.aggregate(g => ({ eol: countIf(g.lifecycleStatus.in(['EOL', 'Obsolete'])) }))
 ```
-Numeric, bigint, String and Bool descriptors (optionally Nullable) are supported;
+Numeric, bigint, String, Bool and Date descriptors (optionally Nullable) are supported;
 other families and container membership are explicitly rejected. Lists use
 `Array(<non-null receiver type>)`: NULL list elements and Expr-valued lists are
 not supported. Nullable set columns are supported. On pinned ClickHouse 24.8,
@@ -231,6 +231,28 @@ only when the receiver is nullable (Bool decoder accepts the server UInt8).
 Duplicates do not multiply rows. Inner queries are independently scoped, inline,
 and share the outer Param allocator; correlation and shared CTE extraction remain
 unsupported. Names and grouped modes survive membership (including countIf).
+
+Select weeks from a tenant/entity-scoped weekly summary (the runnable
+`examples/first-query.ts` includes this through both run and stream):
+```ts
+const selectedWeeks = weekly.where(r => r.stock.ge(20)).map(r => r.week);
+const selectedHistory = weekly
+  .where(r => r.week.in(unionAll(selectedWeeks, selectedWeeks)))
+  .where(r => r.week.in([new Date('2026-10-25T23:00:00Z')]))
+  .where(r => r.week.notIn([]))
+  .orderBy(r => r.week);
+console.log(await client.run(selectedHistory));
+```
+Date membership requires retained Date/Nullable(Date) descriptors on both the
+receiver and Query set; Date32, DateTime, DateTime64 and LowCardinality(Date) are
+not interchangeable even when decoded as JS Date. Lists use each Date's UTC
+calendar day, discard time-of-day, and reject invalid/out-of-range dates using
+the bounds above. Queries containing Date membership explicitly emit
+`SETTINGS transform_null_in = 0`: on 24.8, setting it to 1 changes nullable
+results from Nullable(UInt8) to UInt8 and allows NULL to match NULL. The emitted
+setting preserves the documented NULL behavior even when the client/session
+sets 1. Unrelated queries acquire no new setting. Date scalar subqueries,
+NULL/Expr list elements and temporal coercions remain unsupported.
 
 Outer joins are owner-deferred unresolved v1 backlog, not a blocker for cross
 joins or independent features. Two explicit contract issues remain, without silently widened

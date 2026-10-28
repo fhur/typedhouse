@@ -152,7 +152,7 @@ try {
   // Only published type re-exports, not core source or a fake expression implementation.
   writeFileSync(join(directory, 'ordering.d.ts'), "export { Ordering } from '@chql/core';\n");
   writeFileSync(join(directory, 'expr.d.ts'), "export type { Expr, Constant } from '@chql/core';\n");
-  writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery } from '@chql/core';\n");
+  writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery, DateSetQuery, DateMembershipDescriptor } from '@chql/core';\n");
   writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@chql/core';\n");
   mkdirSync(join(directory, 'catalog'));
   writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");

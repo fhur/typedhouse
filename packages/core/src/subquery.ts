@@ -7,6 +7,10 @@ export type OneKey<R> = [keyof R] extends [never] ? never : true extends Union<k
 type NullableDescriptor<D extends CHType> = D extends { readonly kind: 'Nullable' } ? D : { readonly kind: 'Nullable'; readonly inner: D };
 type Descriptor<P, K extends PropertyKey> = K extends keyof P ? P[K] extends { readonly ir: { readonly type: infer D extends CHType } } ? NullableDescriptor<D> : CHType : CHType;
 
+/** Retained temporal evidence: decoded Date alone also represents unsupported types. */
+export type DateMembershipDescriptor = { readonly kind: 'scalar'; readonly name: 'Date' } | { readonly kind: 'Nullable'; readonly inner: { readonly kind: 'scalar'; readonly name: 'Date' } };
+export type DateSetQuery<R> = SetQuery<R, Date> & { readonly row: { readonly [K in keyof R]: { readonly ir: { readonly type: DateMembershipDescriptor } } } };
+
 export type SetQuery<R, T> = { readonly _rowType: R; readonly ir: Rel } &
   ([OneKey<R>] extends [never] ? { readonly set_column_count: never } :
     [R[OneKey<R>]] extends [NonNullable<T> | null] ? unknown : { readonly incompatible_set_values: never });
@@ -21,7 +25,7 @@ export function setDescriptor(rel: Rel): CHType {
 }
 export function membershipBase(type: CHType): CHType {
   const inner = type.kind === 'Nullable' ? type.inner : type;
-  if (inner.kind !== 'scalar' || !/^(U?Int(8|16|32|64|128|256)|Float(32|64)|String|Bool)$/.test(inner.name)) throw new Error('unsupported_membership_type');
+  if (inner.kind !== 'scalar' || !/^(U?Int(8|16|32|64|128|256)|Float(32|64)|String|Bool|Date)$/.test(inner.name)) throw new Error('unsupported_membership_type');
   return inner;
 }
 export function setOperand(value: unknown): ExprNode {

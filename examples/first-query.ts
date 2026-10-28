@@ -70,6 +70,14 @@ try {
   console.log('weekly quantiles SQL', weeklyQuantiles.toSQL());
   console.log('weekly quantiles', await client.run(weeklyQuantiles));
   for await (const row of client.stream(weeklyQuantiles)) console.log('streamed weekly quantile', row);
+  // Date membership preserves UTC calendar days, not JS times within those days.
+  const selectedWeeks = weeklyQuantiles.where(r => r.stock.ge(20)).map(r => r.week);
+  const selectedHistory = weeklyQuantiles.where(r => r.week.in(unionAll(selectedWeeks, selectedWeeks)))
+    .where(r => r.week.in([new Date('2026-10-25T23:00:00Z')]))
+    .where(r => r.week.notIn([])).orderBy(r => r.week);
+  console.log('selected weeks SQL', selectedHistory.toSQL());
+  console.log('selected weeks', await client.run(selectedHistory));
+  for await (const row of client.stream(selectedHistory)) console.log('streamed selected week', row);
   const latestMetrics = cleanIndices.where(i => i.tenantId.eq('acme'))
     .groupBy(i => ({ entityId: i.entityId }))
     .aggregate(g => ({ version: max(g.version), stockIndex: argMax(g.stock_index, g.version), leadDays: argMax(g.lead_time_max_days, g.version) }))

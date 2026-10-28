@@ -50,6 +50,26 @@ expectTypeOf(expandedWeeks.row.week.ir.type.inner.name).toEqualTypeOf<'Date'>();
 const regroupedWeeks = unionAll(expandedWeeks, expandedWeeks).groupBy(r => r.week).aggregate(() => count());
 expectTypeOf<Infer<typeof regroupedWeeks>>().toEqualTypeOf<{ week: Date | null; count: bigint }>();
 expectTypeOf<Infer<typeof regroupedWeeks>>().not.toBeAny();
+const dateSet = unionAll(expandedWeeks, expandedWeeks.limit(0));
+const nestedDateSet = dateSet.where(r => r.week.notIn(dateSet)).distinct();
+const nestedDateTruth = weeklyAligned.map(r => ({ yes: r.updatedAt.in(nestedDateSet), no: r.updatedAt.notIn([]) }));
+expectTypeOf<Infer<typeof nestedDateTruth>>().toEqualTypeOf<{ yes: boolean; no: boolean }>();
+expectTypeOf<Infer<typeof nestedDateTruth>>().not.toBeAny();
+expectTypeOf(weeklyAligned.row.updatedAt.in(nestedDateSet).name).toEqualTypeOf<'updatedAt'>();
+expectTypeOf(weeklyAligned.row.updatedAt.in(nestedDateSet).mode).toEqualTypeOf<'row'>();
+const selectedWeeks = weeklyAligned.where(r => r.updatedAt.in(dateSet)).orderBy(r => r.updatedAt);
+expectTypeOf<Infer<typeof selectedWeeks>>().toEqualTypeOf<{ updatedAt: Date; mean: number; latestWeek: Date }>();
+expectTypeOf<Infer<typeof selectedWeeks>>().not.toBeAny();
+const dateTruth = expandedWeeks.map(r => ({ yes: r.week.in(dateSet), no: r.week.notIn([new Date('2024-03-10')] as const) }));
+expectTypeOf<Infer<typeof dateTruth>>().toEqualTypeOf<{ yes: boolean | null; no: boolean | null }>();
+expectTypeOf<Infer<typeof dateTruth>>().not.toBeAny();
+expectTypeOf(expandedWeeks.row.week.in(dateSet).name).toEqualTypeOf<'week'>();
+expectTypeOf(expandedWeeks.row.week.in(dateSet).mode).toEqualTypeOf<'row'>();
+expandedWeeks.aggregate(g => {
+  expectTypeOf(g.week.in(dateSet).mode).toEqualTypeOf<'grouped'>();
+  expectTypeOf(max(g.week).notIn([]).mode).toEqualTypeOf<'agg'>();
+  return countIf(g.week.in(dateSet));
+});
 const meanMetrics = metrics.final().groupBy(r => r.entityId).aggregate(g => {
   const mean = avg(g.wide);
   expectTypeOf(mean.name).toEqualTypeOf<'wide'>();
