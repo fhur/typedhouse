@@ -1,4 +1,4 @@
-import { count, max, from, registerCompiler, join } from "@chql/core";
+import { count, max, from, registerCompiler, join, unionAll } from "@chql/core";
 import { emitNaive } from "@chql/compiler";
 import { createClient } from "@chql/client";
 // Checked-in output of the real codegen integration fixture. For your database,
@@ -52,6 +52,10 @@ try {
     .map(r => ({ a: r.a.id, b: r.b.id, partId: r.a.partId }));
   console.log(sharedParts.toSQL());
   console.log(await client.run(sharedParts));
+  // Bag union keeps duplicates and each branch's local order/limit boundary.
+  const combined = unionAll(q, q.limit(1)).orderBy(r => r.id);
+  console.log(combined.toSQL());
+  console.log(await client.run(combined));
   // Fixture tables have no sampling key: demonstrate SQL only, not execution.
   console.log(from(db.entity_ots_component).sample(0.1).toSQL());
 } finally {

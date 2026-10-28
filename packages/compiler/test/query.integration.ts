@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, type Query } from '@chql/core';
+import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, relNode, Query } from '@chql/core';
 import { emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -24,6 +24,91 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('keeps nested ALL and DISTINCT boundaries, offsets and post-union expansion under joins', async () => {
+  await sql('CREATE TABLE union_adversarial (id UInt32, xs Array(Nullable(Int32))) ENGINE=Memory');
+  await sql('INSERT INTO union_adversarial VALUES (1,[NULL,7,7]),(1,[NULL,7,7]),(2,[]),(3,[9])');
+  const q = from(table('union_adversarial', { id: col.UInt32, xs: col.Array(col.Nullable(col.Int32)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const branch = q.distinct().orderBy(r => r.id).limit(2, 1);
+  const inner = unionAll(q, branch);
+  const distinct = new Query<{ id: number; xs: (number | null)[] }>(relNode({ kind: 'Union', inputs: [inner.ir, q.ir], all: false, output: q.ir.output }), { live: false });
+  const bag = unionAll(inner, distinct).leftArrayJoin(r => r.xs, 'item');
+  const joined = join({ a: bag, b: q }).on(r => r.a.id.eq(r.b.id))
+    .groupBy(r => ({ id: r.a.id, item: r.a.item })).aggregate(() => count())
+    .orderBy(r => r.id).thenBy(r => r.item.asc().nullsFirst());
+  const direct = (await sql(`SELECT a.id AS id,a.item AS item,count() AS count FROM
+    (SELECT id,xs,item FROM (
+      SELECT id,xs FROM (SELECT id,xs FROM union_adversarial UNION ALL SELECT id,xs FROM (SELECT DISTINCT id,xs FROM union_adversarial ORDER BY id LIMIT 2 OFFSET 1))
+      UNION ALL SELECT id,xs FROM (SELECT id,xs FROM union_adversarial UNION DISTINCT SELECT id,xs FROM union_adversarial)
+    ) LEFT ARRAY JOIN xs AS item) AS a
+    INNER ALL JOIN union_adversarial AS b ON a.id=b.id
+    GROUP BY a.id,a.item ORDER BY id,item NULLS FIRST FORMAT JSONEachRow`)).trim().split('\n').map(line => {
+      const row = JSON.parse(line) as { id: number; item: number | null; count: string };
+      return { ...row, count: BigInt(row.count) };
+    });
+  expect(await client.run(joined)).toEqual(direct);
+  expect(direct).toEqual([{ id: 1, item: null, count: 6n }, { id: 1, item: 7, count: 12n }, { id: 2, item: null, count: 3n }, { id: 3, item: 9, count: 3n }]);
+});
+it('transports hostile shared and equal Params through nested union projection and filtering', async () => {
+  const payload = "x'\\\\`); SELECT 999 --\n{p99:String}";
+  const shared = val(payload, col.String);
+  const source = from(db.entity_ots_component).limit(1);
+  const a = source.map(() => ({ ['__proto__']: shared, ['a.b']: val([payload, ''], col.Array(col.String)) }));
+  const b = source.map(() => ({ ['a.b']: val([payload, ''], col.Array(col.String)), ['__proto__']: val(payload, col.String) }));
+  const united = unionAll(unionAll(a, b), a).where(r => r.__proto__.eq(shared));
+  const plan = emitNaive(united.ir);
+  expect(plan.sql).not.toContain(payload);
+  expect(plan.params).toEqual({ p0: payload, p1: plan.params.p1, p2: plan.params.p1, p3: payload });
+  expect(plan.sql.match(/\{p0:String\}/g)).toHaveLength(3);
+  const rows = await client.run(united);
+  expect(rows).toEqual(Array.from({ length: 3 }, () => ({ ['__proto__']: payload, ['a.b']: [payload, ''] })));
+  expect(rows.every(row => Object.hasOwn(row, '__proto__'))).toBe(true);
+});
+it('runs the unchanged component/part union example with bag semantics and branch boundaries', async () => {
+  await sql('CREATE TABLE entity_off_the_shelf_part (entityId String) ENGINE=Memory');
+  await sql("INSERT INTO entity_off_the_shelf_part VALUES ('p1'),('p1'),('p2')");
+  const components = from(db.entity_ots_component);
+  // This independent fixture only needs entityId for the unchanged projection.
+  const parts = from(table('entity_off_the_shelf_part', { entityId: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const example = unionAll(
+    components.map(c => ({ entityId: c.entityId, kind: val('component', col.String) })),
+    parts.map(p => ({ entityId: p.entityId, kind: val('part', col.String) })),
+  );
+  const partRows = parts;
+  const baseline = (await sql("SELECT entityId,kind FROM (SELECT entityId,'component' AS kind FROM entity_ots_component UNION ALL SELECT entityId,'part' AS kind FROM entity_off_the_shelf_part) ORDER BY entityId,kind FORMAT JSONEachRow")).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(await client.run(example.orderBy(r => r.entityId).thenBy(r => r.kind))).toEqual(baseline);
+  expect(baseline).toHaveLength(6);
+  const branch = partRows.orderBy(r => r.entityId.desc()).limit(1);
+  const bag = unionAll(branch, partRows.limit(0), branch, partRows);
+  expect(await client.run(bag.groupBy(r => r.entityId).aggregate(() => count()).orderBy(r => r.entityId))).toEqual([{ entityId: 'p1', count: 2n }, { entityId: 'p2', count: 3n }]);
+  expect(await client.run(bag.where(r => r.entityId.eq('p2')).map(r => ({ id: r.entityId })).distinct().orderBy(r => r.id).limit(1))).toEqual([{ id: 'p2' }]);
+  const distinctIR = relNode({ kind: 'Union', inputs: [partRows.ir, partRows.ir], all: false, output: partRows.ir.output });
+  expect(await client.run(new Query<{ entityId: string }>(distinctIR, { live: false }).orderBy(r => r.entityId))).toEqual([{ entityId: 'p1' }, { entityId: 'p2' }]);
+  expect(await client.run(unionAll(partRows.limit(0), partRows.limit(0)))).toEqual([]);
+});
+it('aligns reversed fields and decodes nullable bigint timestamps arrays and tuples across unions', async () => {
+  await sql('CREATE TABLE union_values (id UInt32,n Nullable(Int64),at DateTime64(3),xs Array(Nullable(Int64)),pair Tuple(label String,n UInt64)) ENGINE=Memory');
+  await sql("INSERT INTO union_values VALUES (1,NULL,'2026-10-27 12:00:00.123',[NULL,7],('x',18446744073709551615)),(2,-7,'1970-01-01 00:00:00',[],('',0))");
+  const side = from(table('union_values', { id: col.UInt32, n: col.Nullable(col.Int64), at: col.DateTime64(3), xs: col.Array(col.Nullable(col.Int64)), pair: col.Tuple({ label: col.String, n: col.UInt64 }) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const a = side.map(r => ({ id: r.id, n: r.n, at: r.at, xs: r.xs, pair: r.pair }));
+  const b = side.map(r => ({ pair: r.pair, xs: r.xs, at: r.at, n: r.n, id: r.id }));
+  const rows = await client.run(unionAll(a, b).orderBy(r => r.id));
+  const direct = (await sql("SELECT id,n,at,xs,pair FROM (SELECT id,n,at,xs,pair FROM union_values UNION ALL SELECT id,n,at,xs,pair FROM union_values) ORDER BY id SETTINGS date_time_output_format='iso',output_format_json_quote_64bit_integers=1 FORMAT JSONEachRow")).trim().split('\n').map(line => {
+    const r = JSON.parse(line) as { id: number; n: string | null; at: string; xs: (string | null)[]; pair: { label: string; n: string } };
+    return { ...r, n: r.n === null ? null : BigInt(r.n), at: new Date(r.at), xs: r.xs.map(n => n === null ? null : BigInt(n)), pair: { ...r.pair, n: BigInt(r.pair.n) } };
+  });
+  expect(rows).toEqual(direct);
+  expect(rows).toHaveLength(4);
+  expect(rows[0]?.pair.n).toBe(18446744073709551615n);
+  const nestedA = crossJoin({ ['__proto__']: side, 'b.dot': side }).leftArrayJoin(r => r.__proto__.xs, '__chql_leaf_0');
+  const nestedB = crossJoin({ 'b.dot': side, ['__proto__']: side }).leftArrayJoin(r => r.__proto__.xs, '__chql_leaf_0');
+  const nested = unionAll(nestedA, nestedB).where(r => r.__proto__.id.eq(1).and(r['b.dot'].id.eq(2))).orderBy(r => r.__chql_leaf_0.asc().nullsFirst());
+  const decoded = await client.run(nested);
+  const expected = (await client.run(nestedA.where(r => r.__proto__.id.eq(1).and(r['b.dot'].id.eq(2))).orderBy(r => r.__chql_leaf_0.asc().nullsFirst())));
+  expect(decoded).toEqual(expected.flatMap(row => [row, row]));
+  expect(decoded).toHaveLength(4);
+  expect(Object.hasOwn(decoded[0]!, '__proto__')).toBe(true);
+  expect(await client.run(unionAll(nestedA, nestedB).aggregate(() => count()))).toEqual([{ count: 12n }]);
+});
 it('executes ordered Cartesian products, nested joins and empty sides without null extension', async () => {
   const source = from(db.entity_ots_component).where(r => r.tenantId.eq('acme'));
   const product = crossJoin({ a: source, b: source, c: source });

@@ -48,6 +48,19 @@ to one alias. `crossJoin({ a: queryA, b: queryB, ... })` directly returns a Quer
 (no `.on` stage), retaining Cartesian multiplicity and returning no rows if any
 input is empty. It supports the same nested rows, descriptors and composition.
 
+`unionAll(q1, q2, ...rest)` requires at least two queries with exactly matching
+row types and retains duplicates. Branch fields are aligned by complete path to
+the first input's explicit order (reversed record insertion order is safe).
+Nested join rows, expanded fields and Tuple leaves retain descriptors and proxies;
+branch-local sorting/limits/distinct remain inside each branch. Apply global
+operators to the returned Query; UNION row order itself is unspecified. Live
+capability is the AND of inputs; scan-only and thenBy stages are not retained.
+Matching TypeScript rows are not sufficient for SQL compatibility: UInt32 and
+Float64 both decode to number, but this increment rejects their union explicitly
+with `union_descriptor_mismatch`. Common-type/coercion support remains backlog.
+The naive compiler also supports low-level `Union { all: false }` with explicit
+UNION DISTINCT; no public intersect/except or scalar/IN subqueries are implied.
+
 Outer joins are owner-deferred unresolved v1 backlog, not a blocker for cross
 joins or independent features. Two explicit contract issues remain, without silently widened
 types: structural TypeScript records do not encode first/last insertion order

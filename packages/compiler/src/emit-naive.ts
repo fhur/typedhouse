@@ -94,6 +94,26 @@ export function emitNaive(root: Rel): CompiledQuery {
       nodes[path] = rel;
       const list = order.map(quoteIdentifier).join(', ');
       switch (rel.kind) {
+        case 'Union': {
+          if (!Array.isArray(rel.inputs) || rel.inputs.length < 2) return fail('union_input_count', rel, `${path}.inputs`);
+          if (typeof rel.all !== 'boolean') return fail('invalid_union_mode', rel, `${path}.all`);
+          const branches = rel.inputs.map((child, i) => {
+            const childPath = `${path}.inputs[${i}]`;
+            // Emit each branch independently: malformed scopes cannot hide behind a matching schema.
+            const source = emit(child, childPath);
+            const childLeaves = outputLeaves(child.output);
+            if (i === 0 && JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(childLeaves.map(l => [l.path, print(l.type)]))) return fail('invalid_output', rel, path, 'Union output must match first input order and descriptors');
+            if (childLeaves.length !== leaves.length) return fail('union_schema_mismatch', rel, `${childPath}.output`);
+            const items = leaves.map(leaf => {
+              const actual = childLeaves.find(candidate => JSON.stringify(candidate.path) === JSON.stringify(leaf.path));
+              if (!actual) return fail('union_schema_mismatch', rel, `${childPath}.output`, JSON.stringify(leaf.path));
+              if (!same(actual.type, leaf.type)) return fail('union_descriptor_mismatch', rel, `${childPath}.output`, JSON.stringify(leaf.path));
+              return `${inputAlias}.${quoteIdentifier(actual.name)} AS ${quoteIdentifier(leaf.name)}`;
+            });
+            return `SELECT ${items.join(', ')} FROM (${source}) AS ${inputAlias}`;
+          });
+          return branches.join(rel.all ? ' UNION ALL ' : ' UNION DISTINCT ');
+        }
         case 'Join': {
           if (rel.joinKind !== 'inner' && rel.joinKind !== 'cross') return fail('unsupported_join', rel, path);
           if (!Array.isArray(rel.on)) return fail('invalid_join_condition', rel, `${path}.on`);
