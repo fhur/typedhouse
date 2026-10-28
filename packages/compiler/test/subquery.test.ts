@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { col, table, from, count, sum, scalar, val, exprNode, relNode, flatOutput, type ExprNode, type Rel } from '@chql/core';
-import { emitNaive } from '../src/index.js';
+import { col, table, from, count, sum, max, scalar, scalarDescriptor, val, exprNode, relNode, flatOutput, type ExprNode, type Rel } from '@chql/core';
+import { compile, emitNaive } from '../src/index.js';
 function fields<T extends { readonly id: unknown }>(node: T): Omit<T, 'id'> { const { id: _id, ...rest } = node; return rest; }
 const q = from(table('s', { stock: col.Float64, id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 function project(e: ExprNode): Rel {
@@ -22,6 +22,45 @@ it('inlines independently scoped aggregates and shares Params by identity in tex
   expect(JSON.stringify(result.ir, (_, v: unknown) => typeof v === 'bigint' ? String(v) : v)).toBe(before);
   const nested = q.map(() => scalar(total)).aggregate(g => sum(g.stock));
   expect(emitNaive(q.map(() => scalar(nested)).ir).sql.match(/SELECT sum/g)).toHaveLength(2);
+});
+it('validates Date scalar twins, preserves shared parameters and rejects unsupported temporal forgeries', () => {
+  const dates = from(table('dates', { day: col.Date }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const shared = val(new Date('2024-02-29T12:00:00Z'), col.Date);
+  const input = dates.where(r => r.day.ge(shared));
+  const newest = scalar(input.aggregate(g => max(g.day)));
+  const nested = scalar(input.map(() => newest).aggregate(g => max(g.day)));
+  const query = input.map(() => ({ newest, nested, shared, equal: val(new Date('2024-02-29T12:00:00Z'), col.Date) }));
+  const snapshot = JSON.stringify(query.ir);
+  for (const emitter of [emitNaive, compile]) {
+    const plan = emitter(query.ir);
+    expect(plan.params).toEqual({ p0: '2024-02-29', p1: '2024-02-29' });
+    expect(plan.columns.newest).toEqual(col.Nullable(col.Date).type);
+    expect(plan.columns.nested).toEqual(col.Nullable(col.Date).type);
+    expect(plan.sql).not.toContain('LIMIT 1');
+    for (const type of [col.Date32.type, col.DateTime().type, col.DateTime64(3).type, col.Nullable(col.Date32).type]) {
+      const total = input.aggregate(g => max(g.day)).ir;
+      const output = flatOutput([['day', type]]);
+      const forged = { ...total, output, columns: output.columns };
+      const sub = { ...newest.ir, kind: 'Subquery' as const, usage: 'scalar' as const, rel: forged, type: col.Nullable(col.Date).type };
+      expect(() => emitter(project(sub))).toThrow(/unsupported_scalar_type.*root.exprs.result/);
+    }
+    expect(() => emitter(project({ ...newest.ir, type: col.Date.type }))).toThrow(/invalid_expression_type.*root.exprs.result/);
+  }
+  expect(JSON.stringify(query.ir)).toBe(snapshot);
+});
+it('rejects mixed String/high-precision temporal scalar evidence at runtime without inspecting decoded values', () => {
+  // Precise negative fixtures reject these unions at the public scalar boundary;
+  // runtime validation must likewise reject the unsupported temporal branch.
+  for (const temporal of [true, false]) {
+    const source = from(table('mixed_scalar', { day: temporal ? col.String : col.DateTime64(6) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    const total = source.aggregate(g => max(g.day));
+    if (temporal) expect(scalarDescriptor(total.ir)).toEqual(col.Nullable(col.String).type);
+    else expect(() => scalarDescriptor(total.ir)).toThrow('unsupported_scalar_type');
+    const nullable = from(table('mixed_nullable_scalar', { day: temporal ? col.Nullable(col.String) : col.Nullable(col.DateTime64(6)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    const nullableTotal = nullable.aggregate(g => max(g.day));
+    if (temporal) expect(scalarDescriptor(nullableTotal.ir)).toEqual(col.Nullable(col.String).type);
+    else expect(() => scalarDescriptor(nullableTotal.ir)).toThrow('unsupported_scalar_type');
+  }
 });
 it('rejects forged usage, descriptor, cardinality, output and foreign scope', () => {
   const e = scalar(q.aggregate(() => count())).ir;

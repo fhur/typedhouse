@@ -151,7 +151,7 @@ Date wire strings must be valid canonical YYYY-MM-DD within 1970-01-01–2149-06
 Date parameters use the UTC calendar day of a valid JS Date (time-of-day discarded),
 with the same range validation, including Array elements. Invalid wire calendar
 days are rejected, never normalized by JavaScript. Date32/DateTime/high-precision
-bucketing and Date scalar subqueries remain unsupported; this is not full
+bucketing remain unsupported; this is not full
 temporal-catalog acceptance.
 
 `quantile(level)(value)` and `quantileIf(level)(value, predicate)` accept finite
@@ -211,7 +211,7 @@ one-row aggregate.** The expression therefore has `T | null` and a matching
 Nullable descriptor; stock-share arithmetic conservatively returns `number | null`,
 not the spec example's `number`. This discrepancy remains explicit rather than
 masking it with a default or pretending the descriptor is non-nullable. Current
-scalar descriptor support is numeric, String and Bool (optionally Nullable);
+scalar descriptor support is numeric, String, Bool and Date (optionally Nullable);
 containers and other families are rejected pending server evidence.
 
 Generated `expr.in(valuesOrQuery)` / `notIn` accept readonly JS lists or exactly
@@ -251,8 +251,27 @@ the bounds above. Queries containing Date membership explicitly emit
 `SETTINGS transform_null_in = 0`: on 24.8, setting it to 1 changes nullable
 results from Nullable(UInt8) to UInt8 and allows NULL to match NULL. The emitted
 setting preserves the documented NULL behavior even when the client/session
-sets 1. Unrelated queries acquire no new setting. Date scalar subqueries,
+sets 1. Unrelated queries acquire no new setting.
 NULL/Expr list elements and temporal coercions remain unsupported.
+
+Select the newest available week without a round trip through application code:
+```ts
+const newestWeek = scalar(weekly.aggregate(g => max(g.week)));
+const newest = weekly.where(r => r.week.eq(newestWeek))
+  .map(r => ({ ...r, newestWeek })).orderBy(r => r.week);
+console.log(await client.run(newest));
+for await (const row of client.stream(newest)) console.log(row);
+```
+Date scalars require retained Date/Nullable(Date) evidence and a direct keyless,
+one-column aggregate; Date32/DateTime/DateTime64 are not interchangeable.
+On ClickHouse 24.8 max/maxIf over empty/nonmatching non-null Date inputs returns
+1970-01-01, not NULL. Nullable empty/all-null/nonmatching inputs return NULL.
+Scalar wrappers always expose Nullable(Date); decoding preserves the server value.
+With `aggregate_functions_null_for_empty=1`, empty/nonmatching Date aggregates
+return NULL too. This library does not override that aggregate setting or invent
+a fallback date. Grouped/arbitrary/LIMIT-1/wrapped scalar queries and correlation
+remain unsupported; broader temporal support and the scalar/spec nullability
+discrepancy remain backlog.
 
 Outer joins are owner-deferred unresolved v1 backlog, not a blocker for cross
 joins or independent features. Two explicit contract issues remain, without silently widened

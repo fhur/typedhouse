@@ -5,6 +5,18 @@ import { print, type CHType } from './ch-type.js';
 type Union<K, Whole = K> = K extends Whole ? [Whole] extends [K] ? false : true : never;
 export type OneKey<R> = [keyof R] extends [never] ? never : true extends Union<keyof R> ? never : {} extends Record<keyof R, unknown> ? never : keyof R & string;
 type NullableDescriptor<D extends CHType> = D extends { readonly kind: 'Nullable' } ? D : { readonly kind: 'Nullable'; readonly inner: D };
+type UnsupportedTemporalDescriptor = { readonly kind: 'DateTime' | 'DateTime64' } | { readonly kind: 'scalar'; readonly name: 'Date32' | 'DateTime' };
+// Unretained CHType evidence remains compatible with legacy primitive scalars;
+// retained unions reject any unsupported alternative, not only all-unsupported unions.
+type UnsupportedTemporal<D> = [CHType] extends [D] ? false : D extends UnsupportedTemporalDescriptor ? true
+  : D extends { readonly kind: 'Nullable' | 'LowCardinality'; readonly inner: infer I }
+    ? [CHType] extends [I] ? false : I extends UnsupportedTemporalDescriptor ? true : false
+    : false;
+type TemporalScalarEvidence<R, P> = P extends { readonly [K in OneKey<R>]: { readonly ir: { readonly type: infer D } } }
+  ? true extends UnsupportedTemporal<D> ? { readonly unsupported_scalar_temporal_descriptor: never }
+    : [Extract<R[OneKey<R>], Date>] extends [never] ? unknown
+    : [D] extends [DateMembershipDescriptor] ? unknown : { readonly unsupported_scalar_temporal_descriptor: never }
+  : [Extract<R[OneKey<R>], Date>] extends [never] ? unknown : { readonly unsupported_scalar_temporal_descriptor: never };
 type Descriptor<P, K extends PropertyKey> = K extends keyof P ? P[K] extends { readonly ir: { readonly type: infer D extends CHType } } ? NullableDescriptor<D> : CHType : CHType;
 
 /** Retained temporal evidence: decoded Date alone also represents unsupported types. */
@@ -46,12 +58,12 @@ export function scalarDescriptor(rel: Rel): CHType {
   const type = rel.output.columns[name];
   if (!type || !Object.hasOwn(rel.columns, name) || !Object.hasOwn(rel.aggs, name) || print(type) !== print(rel.columns[name]!)) throw new Error('invalid_output');
   const inner = type.kind === 'Nullable' ? type.inner : type;
-  if (inner.kind !== 'scalar' || !/^(U?Int(8|16|32|64|128|256)|Float(32|64)|String|Bool)$/.test(inner.name)) throw new Error('unsupported_scalar_type');
+  if (inner.kind !== 'scalar' || !/^(U?Int(8|16|32|64|128|256)|Float(32|64)|String|Bool|Date)$/.test(inner.name)) throw new Error('unsupported_scalar_type');
   return type.kind === 'Nullable' ? type : { kind: 'Nullable', inner: type };
 }
 
 /** Only a directly built, one-column keyless aggregate is supported in this increment. */
-export function scalar<R, P>(query: { readonly _rowType: R; readonly row: P; readonly ir: Extract<Rel, { kind: 'Aggregate' }> } & ([OneKey<R>] extends [never] ? { readonly scalar_column_count: never } : unknown)): DescribedExpr<R[OneKey<R>] | null, OneKey<R>, 'row', Descriptor<P, OneKey<R>>> {
+export function scalar<R, P>(query: { readonly _rowType: R; readonly row: P; readonly ir: Extract<Rel, { kind: 'Aggregate' }> } & TemporalScalarEvidence<R, P> & ([OneKey<R>] extends [never] ? { readonly scalar_column_count: never } : unknown)): DescribedExpr<R[OneKey<R>] | null, OneKey<R>, 'row', Descriptor<P, OneKey<R>>> {
   const type = scalarDescriptor(query.ir);
   return new Expr(exprNode({ kind: 'Subquery', rel: query.ir, usage: 'scalar', type }), query.ir.output.order[0] as OneKey<R>, 'row') as DescribedExpr<R[OneKey<R>] | null, OneKey<R>, 'row', Descriptor<P, OneKey<R>>>;
 }

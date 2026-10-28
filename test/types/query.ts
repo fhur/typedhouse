@@ -36,6 +36,46 @@ const weeklyDates = from(t).groupBy(r => r.updatedAt.toStartOfWeek()).aggregate(
 expectTypeOf<Infer<typeof weeklyDates>>().toEqualTypeOf<{ updatedAt: Date; mean: number; latestWeek: Date }>();
 expectTypeOf<Infer<typeof weeklyDates>>().not.toBeAny();
 expectTypeOf(weeklyDates.row.updatedAt.ir.type.name).toEqualTypeOf<'Date'>();
+// Rejecting any unsupported temporal alternative must not reject supported unions.
+const supportedScalarUnions = from(table('scalar_unions', {
+  text: Math.random() ? col.String : col.Nullable(col.String),
+  numeric: Math.random() ? col.UInt32 : col.Float64,
+  day: Math.random() ? col.Date : col.Nullable(col.Date),
+}, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const supportedUnionScalars = supportedScalarUnions.map(() => ({
+  text: scalar(supportedScalarUnions.aggregate(g => max(g.text))),
+  numeric: scalar(supportedScalarUnions.aggregate(g => max(g.numeric))),
+  day: scalar(supportedScalarUnions.aggregate(g => max(g.day))),
+}));
+expectTypeOf<Infer<typeof supportedUnionScalars>>().toEqualTypeOf<{ text: string | null; numeric: number | null; day: Date | null }>();
+expectTypeOf<Infer<typeof supportedUnionScalars>>().not.toBeAny();
+const newestWeek = scalar(weeklyDates.aggregate(g => max(g.updatedAt)));
+expectTypeOf(newestWeek).not.toBeAny();
+expectTypeOf(newestWeek.name).toEqualTypeOf<'updatedAt'>();
+expectTypeOf(newestWeek.mode).toEqualTypeOf<'row'>();
+expectTypeOf(newestWeek.ir.type.kind).toEqualTypeOf<'Nullable'>();
+expectTypeOf(newestWeek.ir.type.inner.name).toEqualTypeOf<'Date'>();
+expectTypeOf(newestWeek.ir.type).not.toBeAny();
+const newestHistory = weeklyDates.where(r => r.updatedAt.eq(newestWeek)).map(() => newestWeek);
+expectTypeOf<Infer<typeof newestHistory>>().toEqualTypeOf<{ updatedAt: Date | null }>();
+expectTypeOf<Infer<typeof newestHistory>>().not.toBeAny();
+const nullableDateScalar = scalar(from(t).map(() => ({ day: val(null, col.Nullable(col.Date)) })).aggregate(g => max(g.day)));
+expectTypeOf(nullableDateScalar.name).toEqualTypeOf<'day'>();
+expectTypeOf(nullableDateScalar.mode).toEqualTypeOf<'row'>();
+expectTypeOf(nullableDateScalar.ir.type.kind).toEqualTypeOf<'Nullable'>();
+expectTypeOf(nullableDateScalar.ir.type.inner.name).toEqualTypeOf<'Date'>();
+expectTypeOf(nullableDateScalar.ir.type).not.toBeAny();
+const nullableDateProjection = from(t).map(() => nullableDateScalar);
+expectTypeOf<Infer<typeof nullableDateProjection>>().toEqualTypeOf<{ day: Date | null }>();
+expectTypeOf<Infer<typeof nullableDateProjection>>().not.toBeAny();
+const nestedDateScalar = scalar(unionAll(nullableDateProjection, nullableDateProjection).aggregate(g => max(g.day)));
+const nestedScalarDateTruth = from(t).map(() => ({ day: nestedDateScalar, yes: nestedDateScalar.in(nullableDateProjection), no: nestedDateScalar.notIn([]) }));
+expectTypeOf<Infer<typeof nestedScalarDateTruth>>().toEqualTypeOf<{ day: Date | null; yes: boolean | null; no: boolean | null }>();
+expectTypeOf<Infer<typeof nestedScalarDateTruth>>().not.toBeAny();
+expectTypeOf(nestedDateScalar.name).toEqualTypeOf<'day'>();
+expectTypeOf(nestedDateScalar.mode).toEqualTypeOf<'row'>();
+expectTypeOf(nestedDateScalar.ir.type.inner.name).toEqualTypeOf<'Date'>();
+expectTypeOf(nestedDateScalar.ir.type).not.toBeAny();
 const nullableWeek = val(null, col.Nullable(col.DateTime64(2))).toStartOfWeek();
 expectTypeOf(nullableWeek.ir.type.inner.name).toEqualTypeOf<'Date'>();
 expectTypeOf(nullableWeek.mode).toEqualTypeOf<'row'>();
