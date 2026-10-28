@@ -3,8 +3,9 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-// Run against actual built ESM exports, including explicit CAST union alignment
-// through run and stream, without adding runtime dependencies to core.
+// Run against actual built ESM exports, including latest metrics via argMax/If
+// and explicit CAST union alignment through run/stream. Requires the generated
+// fixture's component and metric_group_ots_component_indices tables; no core runtime deps.
 const directory = mkdtempSync(join(tmpdir(), 'chql-first-query-'));
 try {
   mkdirSync(join(directory, 'node_modules/@chql'), { recursive: true });

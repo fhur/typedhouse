@@ -13,6 +13,11 @@ export type Unwrapped<D> = CHType extends D ? CHType : D extends { kind: 'Nullab
 type IsNullable<D> = CHType extends D ? boolean : D extends { kind: 'Nullable' } ? true : D extends { kind: 'LowCardinality'; inner: infer I } ? IsNullable<I> : false;
 type WithNull<D, B> = B extends true ? { readonly kind: 'Nullable'; readonly inner: D } : D;
 export type MaxDescriptor<D> = WithNull<Unwrapped<D>, IsNullable<D>>;
+/** Bounded argMax accepts only these closed descriptors; no transparent wrappers. */
+export type ArgMaxNumericDescriptor = { readonly kind: 'scalar'; readonly name: `${'UInt' | 'Int'}${8 | 16 | 32 | 64 | 128 | 256}` | 'Float32' | 'Float64' };
+export type ArgMaxScalarDescriptor = ArgMaxNumericDescriptor | { readonly kind: 'scalar'; readonly name: 'String' | 'Bool' };
+export type ArgMaxValueDescriptor = ArgMaxScalarDescriptor | { readonly kind: 'Nullable'; readonly inner: ArgMaxScalarDescriptor };
+export type ArgMaxOperand<D, Allowed> = CHType extends D ? unknown : D extends Allowed ? unknown : never;
 type SumBase<D> = D extends { kind: 'Decimal'; precision: infer P; scale: infer S } ? { readonly kind: 'Decimal'; readonly precision: SumPrecision<P>; readonly scale: S } :
   D extends { kind: 'scalar'; name: infer N } ? { readonly kind: 'scalar'; readonly name: N extends 'Float32' | 'Float64' ? 'Float64' : N extends 'UInt128' | 'UInt256' | 'Int128' | 'Int256' ? N : N extends `UInt${number}` ? 'UInt64' : 'Int64' } : CHType;
 export type SumDescriptor<D> = WithNull<SumBase<Unwrapped<D>>, IsNullable<D>>;

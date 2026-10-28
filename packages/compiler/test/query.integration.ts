@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
+import { argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
 import { emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -24,6 +24,119 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('selects latest tenant metrics with FINAL, NULL skipping, conditional exclusion, union and scalar composition', async () => {
+  await sql('CREATE TABLE latest_metrics (tenantId String, entityId String, version UInt32, inserted UInt32, stock_index Float64, lead_time_max_days Nullable(Float64)) ENGINE=ReplacingMergeTree(inserted) ORDER BY (tenantId,entityId,version)');
+  await sql("INSERT INTO latest_metrics VALUES ('acme','a',3,1,30,NULL),('acme','a',1,1,10,10),('acme','a',2,1,19,19),('acme','a',2,2,20,20),('acme','b',1,1,5,NULL),('acme','b',1,1,5,NULL),('other','a',9,1,900,900)");
+  const cleanIndices = from(table('latest_metrics', { tenantId: col.String, entityId: col.String, version: col.UInt32, inserted: col.UInt32, stock_index: col.Float64, lead_time_max_days: col.Nullable(col.Float64) }, { engine: 'ReplacingMergeTree', sortingKey: ['tenantId', 'entityId', 'version'], partitionKey: [] })).final();
+  const scoped = cleanIndices.where(i => i.tenantId.eq('acme'));
+  const latest = scoped.groupBy(i => ({ entityId: i.entityId })).aggregate(g => ({ version: max(g.version), stockIndex: argMax(g.stock_index, g.version), leadDays: argMax(g.lead_time_max_days, g.version) }));
+  const direct = async (query: string) => (await sql(query + ' FORMAT JSONEachRow')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+  const baseline = "SELECT entityId,newest AS version,stockIndex,leadDays FROM (SELECT entityId,max(version) AS newest,argMax(stock_index,version) AS stockIndex,argMax(lead_time_max_days,version) AS leadDays FROM latest_metrics FINAL WHERE tenantId='acme' GROUP BY entityId)";
+  const expected = await direct(baseline + ' ORDER BY entityId');
+  expect(expected).toEqual([{ entityId: 'a', version: 3, stockIndex: 30, leadDays: 20 }, { entityId: 'b', version: 1, stockIndex: 5, leadDays: null }]);
+  expect(await client.run(latest.orderBy(r => r.entityId))).toEqual(expected);
+  const rows = []; for await (const row of client.stream(latest.orderBy(r => r.entityId))) rows.push(row);
+  expect(rows).toEqual(expected);
+  const composed = unionAll(latest, latest).where(r => r.stockIndex.gt(10)).orderBy(r => r.entityId).limit(2);
+  const unionExpected = await direct(`SELECT * FROM (${baseline} UNION ALL ${baseline}) WHERE stockIndex>10 ORDER BY entityId LIMIT 2`);
+  expect(await client.run(composed)).toEqual(unionExpected);
+  const unionRows = []; for await (const row of client.stream(composed)) unionRows.push(row);
+  expect(unionRows).toEqual(unionExpected);
+  const global = scoped.aggregate(g => argMax(g.stock_index, g.version));
+  const scalarQuery = latest.map(r => ({ entityId: r.entityId, latest: scalar(global) })).orderBy(r => r.entityId);
+  expect(print(scalarQuery.row.latest.ir.type)).toBe('Nullable(Float64)');
+  const scalarExpected = await direct(`SELECT entityId,(SELECT argMax(stock_index,version) FROM latest_metrics FINAL WHERE tenantId='acme') AS latest FROM (${baseline}) ORDER BY entityId`);
+  expect(await client.run(scalarQuery)).toEqual(scalarExpected);
+  const scalarRows = []; for await (const row of client.stream(scalarQuery)) scalarRows.push(row);
+  expect(scalarRows).toEqual(scalarExpected);
+  const conditional = scoped.aggregate(g => ({ stock: argMaxIf(g.stock_index, g.version, g.version.lt(3)), none: argMaxIf(g.stock_index, g.version, g.version.gt(99)), lead: argMaxIf(g.lead_time_max_days, g.version, g.version.gt(99)), ratio: argMax(g.stock_index, g.version).divide(max(g.version)) }));
+  const conditionalExpected = await direct("SELECT argMaxIf(stock_index,version,version<3) AS stock,argMaxIf(stock_index,version,version>99) AS none,argMaxIf(lead_time_max_days,version,version>99) AS lead,argMax(stock_index,version)/max(version) AS ratio FROM latest_metrics FINAL WHERE tenantId='acme'");
+  expect(conditionalExpected).toEqual([{ stock: 20, none: 0, lead: null, ratio: 10 }]);
+  expect(await client.run(conditional)).toEqual(conditionalExpected);
+  const conditionalRows = []; for await (const row of client.stream(conditional)) conditionalRows.push(row);
+  expect(conditionalRows).toEqual(conditionalExpected);
+  const nullPredicate = scoped.aggregate(g => ({ value: argMaxIf(g.stock_index, g.version, val(null, col.Nullable(col.Bool))) }));
+  expect(await client.run(nullPredicate)).toEqual(await direct("SELECT argMaxIf(stock_index,version,CAST(NULL AS Nullable(Bool))) AS value FROM latest_metrics FINAL WHERE tenantId='acme'"));
+  expect(await client.run(scoped.limit(0).aggregate(g => ({ stock: argMax(g.stock_index, g.version), lead: argMax(g.lead_time_max_days, g.version) })))).toEqual([{ stock: 0, lead: null }]);
+  expect(await client.run(scoped.limit(0).groupBy(r => r.entityId).aggregate(g => argMax(g.stock_index, g.version)))).toEqual([]);
+});
+it('matches pinned argMax widths, nullable empty defaults and Bool/String descriptors through run and stream', async () => {
+  const source = from(db.entity_ots_component).limit(1);
+  const descriptors: Column[] = [col.UInt8, col.UInt16, col.UInt32, col.UInt64, col.UInt128, col.UInt256, col.Int8, col.Int16, col.Int32, col.Int64, col.Int128, col.Int256, col.Float32, col.Float64, col.String, col.Bool];
+  for (const descriptor of descriptors) {
+    const type = print(descriptor.type), literal = type === 'Bool' ? 'true' : "'7'";
+    // Cast descriptors are runtime-erased here; compiler validation is authoritative.
+    const value = type === 'Bool' ? true : type === 'String' ? '7' : /^(U?Int)(64|128|256)$/.test(type) ? 7n : 7;
+    const typed = descriptor as Column<number | bigint | string | boolean>;
+    for (const empty of [false, true]) {
+      const input = empty ? source.limit(0) : source;
+      const nullableType: Column<number | bigint | string | boolean | null> = col.Nullable(typed);
+      const query = input.aggregate(() => ({ value: argMax(val(value, typed), val(1, col.UInt32)), nullable: argMax(val(value, nullableType), val(1, col.UInt32)), excluded: argMaxIf(val(value, typed), val(1, col.UInt32), val(false)), allNull: argMax(val(null, nullableType), val(1, col.UInt32)) }));
+      const direct = JSON.parse(await sql(`SELECT argMax(CAST(${literal} AS ${type}),toUInt32(1)) AS value,argMax(CAST(${literal} AS Nullable(${type})),toUInt32(1)) AS nullable,argMaxIf(CAST(${literal} AS ${type}),toUInt32(1),false) AS excluded,argMax(CAST(NULL AS Nullable(${type})),toUInt32(1)) AS allNull,toTypeName(value) AS valueType,toTypeName(nullable) AS nullableType,toTypeName(excluded) AS excludedType,toTypeName(allNull) AS nullType FROM numbers(${empty ? 0 : 1}) FORMAT JSONEachRow`));
+      expect(direct.valueType).toBe(type); expect(direct.excludedType).toBe(type);
+      expect(direct.nullableType).toBe(`Nullable(${type})`); expect(direct.nullType).toBe(`Nullable(${type})`);
+      expect(Object.values(emitNaive(query.ir).columns).map(print)).toEqual([type, `Nullable(${type})`, type, `Nullable(${type})`]);
+      const decode = (v: unknown) => v !== null && /^(U?Int)(64|128|256)$/.test(type) ? BigInt(v as string) : v;
+      const expected = [{ value: decode(direct.value), nullable: decode(direct.nullable), excluded: decode(direct.excluded), allNull: null }];
+      expect(await client.run(query)).toEqual(expected);
+      const rows = []; for await (const row of client.stream(query)) rows.push(row);
+      expect(rows).toEqual(expected);
+    }
+  }
+  const probe = JSON.parse(await sql("SELECT argMax(toLowCardinality(toString(number)),number) AS value,toTypeName(value) AS type FROM numbers(3) FORMAT JSONEachRow"));
+  expect(probe).toEqual({ value: '2', type: 'String' }); // LC is intentionally rejected, not mislabeled as retained.
+  const tied = JSON.parse(await sql("SELECT argMax(if(number=0,'a','b'),toUInt32(1)) AS value FROM numbers(2) FORMAT JSONEachRow"));
+  expect(['a', 'b']).toContain(tied.value); // No invented insertion-order tie breaker.
+  const tieQuery = source.map(() => ({ values: val(['a', 'b'], col.Array(col.String)) })).arrayJoin(r => r.values, 'item').aggregate(g => argMax(g.item, val(1, col.UInt32)));
+  const tiedRows = await client.run(tieQuery);
+  expect(tiedRows).toHaveLength(1); expect(['a', 'b']).toContain(tiedRows[0]!.item);
+  const tieStream = []; for await (const row of client.stream(tieQuery)) tieStream.push(row);
+  expect(tieStream).toHaveLength(1); expect(['a', 'b']).toContain(tieStream[0]!.item);
+});
+it('adversarial argMax keeps hostile shared/equal parameters isolated across union and scalar scopes', async () => {
+  const hostile = "x'); DROP TABLE entity_ots_component; --\\\n\u0000雪";
+  const shared = val(hostile, col.String), equal = val(hostile, col.String);
+  const source = from(db.entity_ots_component);
+  const latest = source.aggregate(g => ({ a: argMax(shared, g.countOfParts), b: argMaxIf(shared, g.countOfParts, g.tenantId.eq('acme')), c: argMax(equal, g.countOfParts) }));
+  const combined = unionAll(latest, latest).map(r => ({ ...r, scalar: scalar(source.aggregate(g => argMax(shared, g.countOfParts))) }));
+  const compiled = emitNaive(combined.ir);
+  expect(compiled.sql).not.toContain(hostile);
+  expect(Object.values(compiled.params).filter(v => v === hostile)).toHaveLength(2);
+  // Independent hex literal avoids ClickHouse's escaped-text HTTP parameter format.
+  const direct = JSON.parse(await sql(`SELECT argMax(unhex('${Buffer.from(hostile).toString('hex')}'),countOfParts) AS value FROM entity_ots_component FORMAT JSONEachRow`)).value;
+  expect(direct).toBe(hostile);
+  const expected = Array.from({ length: 2 }, () => ({ a: direct, b: direct, c: direct, scalar: direct }));
+  expect(await client.run(combined)).toEqual(expected);
+  const rows = []; for await (const row of client.stream(combined)) rows.push(row);
+  expect(rows).toEqual(expected);
+});
+it('adversarial argMax orders every supported version width without numeric precision loss', async () => {
+  const source = from(db.entity_ots_component).limit(1);
+  const cases: [Column<number | bigint>, (number | bigint)[], string][] = [
+    [col.UInt8, [0, 255, 1], '255'], [col.UInt16, [0, 65535, 1], '65535'], [col.UInt32, [0, 4294967295, 1], '4294967295'],
+    [col.Int8, [-128, -1, -2], '-1'], [col.Int16, [-32768, -1, -2], '-1'], [col.Int32, [-2147483648, -1, -2], '-1'],
+    [col.UInt64, [9007199254740992n, 9007199254740993n, 1n], '9007199254740993'],
+    [col.UInt128, [1n, (1n << 128n) - 1n, 2n], ((1n << 128n) - 1n).toString()],
+    [col.UInt256, [1n, (1n << 256n) - 1n, 2n], ((1n << 256n) - 1n).toString()],
+    [col.Int64, [-9007199254740993n, -9007199254740992n, -9007199254740994n], '-9007199254740992'],
+    [col.Int128, [-(1n << 127n), -1n, -2n], '-1'], [col.Int256, [-(1n << 255n), -1n, -2n], '-1'],
+    [col.Float32, [-Infinity, Infinity, 0], 'inf'], [col.Float64, [-Infinity, Infinity, 0], 'inf'],
+  ];
+  for (const [descriptor, values, maximum] of cases) {
+    const type = print(descriptor.type);
+    const q = source.map(() => ({ versions: val(values, col.Array(descriptor)) })).arrayJoin(r => r.versions, 'version')
+      .aggregate(g => ({ value: argMax(g.version, g.version), text: argMax(cast(g.version, col.String), g.version) }));
+    const literals = values.map(v => `CAST('${String(v)}' AS ${type})`).join(',');
+    const direct = JSON.parse(await sql(`SELECT argMax(v,v) AS value,argMax(toString(v),v) AS text,toTypeName(value) AS type FROM (SELECT arrayJoin([${literals}]) AS v) SETTINGS output_format_json_quote_denormals=1 FORMAT JSONEachRow`));
+    expect(direct.type).toBe(type); expect(direct.text).toBe(maximum);
+    const value = typeof values[0] === 'bigint' ? BigInt(direct.value) : direct.value === 'inf' ? Infinity : direct.value;
+    const expected = [{ value, text: maximum }];
+    expect(await client.run(q)).toEqual(expected);
+    const rows = []; for await (const row of client.stream(q)) rows.push(row);
+    expect(rows).toEqual(expected);
+    expect(print(q.row.value.ir.type)).toBe(type);
+  }
+});
 it('executes explicit union alignment, grouping and aggregate casts through run and stream', async () => {
   await sql('CREATE TABLE cast_values (`a.b` UInt32, f Float64, text String, n Nullable(UInt32)) ENGINE=Memory');
   await sql("INSERT INTO cast_values VALUES (0,0.5,'7',NULL),(2,2.5,'9',2),(2,2.5,'9',2)");
@@ -945,9 +1058,13 @@ it('adversarial repair: typed NULL preserves nested common-type arithmetic and s
   expect(Object.values(q.toSQL().params).filter(v => v === '4294967295')).toHaveLength(1);
 });
 it('runs the documented executable generated-schema example', async () => {
+  await sql('CREATE TABLE metric_group_ots_component_indices (tenantId String,entityId String,version UInt32,effectiveAt DateTime64(3),insertedAt DateTime64(3),price_change_log_sum Float64,price_change_count Float64,stock_index Float64,stock_index_warnings Array(String),lead_time_index_part_days Float64,lead_time_index_part_count Float64,lead_time_max_days Nullable(Float64)) ENGINE=ReplacingMergeTree(insertedAt) ORDER BY (tenantId,entityId,version,effectiveAt)');
+  await sql("INSERT INTO metric_group_ots_component_indices (tenantId,entityId,version,stock_index,lead_time_max_days) VALUES ('acme','a',2,30,NULL),('acme','a',1,20,7),('other','a',3,99,99)");
   const { stdout } = await promisify(execFile)('pnpm', ['example:first-query'], { env: { ...process.env, CLICKHOUSE_URL: url, CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'fixture' }, timeout: 120000 });
   expect(stdout).toContain('18446744073709551615n');
   expect(stdout).toContain('2026-10-27T12:00:00.123Z');
+  expect(stdout).toContain("streamed latest metric { entityId: 'a', version: 2, stockIndex: 30, leadDays: 7 }");
+  expect(stdout).toContain('latest positive stock [ { stock: 30 } ]');
 });
 it('hostile values cannot escape parameters and genuine server errors retain SQL/params/cause', async () => {
   const q = from(db.entity_ots_component).where(c => c.tenantId.eq("acme' OR 1=1 --")).map(c => ({ id: c.entityId }));

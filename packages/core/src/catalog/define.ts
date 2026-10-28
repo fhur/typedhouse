@@ -77,8 +77,10 @@ export interface DefinedAggregate<A extends readonly Argument[], R, P extends 'p
   <const I extends Inputs<A, 'grouped'>>(...args: I): Expr<P extends 'never' ? ReturnValue<R, S, I> : Result<ReturnValue<R, S, I>, I>, AggregateName<I, F>, 'agg'>;
   readonly definition: AggregateDefinition<A, R>;
 }
-export function aggregateCall(def: AggregateDefinition, args: readonly unknown[], params: readonly unknown[] = [], combinators: readonly ('If' | 'State' | 'Merge')[] = []): Expr<unknown, string, 'agg'> {
-  const first = args.find((a): a is Expr<unknown, string, Mode> => a instanceof Expr && a.ir.kind !== 'Param');
+export function aggregateCall(def: AggregateDefinition, args: readonly unknown[], params: readonly unknown[] = [], combinators: readonly ('If' | 'State' | 'Merge')[] = [], rootName?: 'first'): Expr<unknown, string, 'agg'> {
+  const first = rootName === 'first'
+    ? args[0] instanceof Expr && args[0].ir.kind !== 'Param' ? args[0] : undefined
+    : args.find((a): a is Expr<unknown, string, Mode> => a instanceof Expr && a.ir.kind !== 'Param');
   const fn: AggregateMetadata = { ...metadata(def), linear: def.linear };
   const type = combinators.includes('State')
     ? { kind: 'AggregateFunction' as const, fn: def.name, args: args.map(a => a instanceof Expr ? a.ir.type ?? unknownType : defaultType(a) ?? unknownType) }

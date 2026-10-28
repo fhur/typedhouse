@@ -1,4 +1,4 @@
-import { cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
+import { argMax, argMaxIf, cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
 import { emitNaive } from "@chql/compiler";
 import { createClient } from "@chql/client";
 // Checked-in output of the real codegen integration fixture. For your database,
@@ -41,6 +41,18 @@ try {
     .orderBy(r => r.category);
   console.log(rollup.toSQL());
   console.log(await client.run(rollup));
+  // NULL metric values are skipped independently, so leadDays may be older than version.
+  // Different values tied at the maximal version have no deterministic winner.
+  const cleanIndices = from(db.metric_group_ots_component_indices).final();
+  const latestMetrics = cleanIndices.where(i => i.tenantId.eq('acme'))
+    .groupBy(i => ({ entityId: i.entityId }))
+    .aggregate(g => ({ version: max(g.version), stockIndex: argMax(g.stock_index, g.version), leadDays: argMax(g.lead_time_max_days, g.version) }))
+    .orderBy(r => r.entityId).limit(10);
+  console.log('latest metrics', await client.run(latestMetrics));
+  for await (const row of client.stream(latestMetrics)) console.log('streamed latest metric', row);
+  const latestPositive = cleanIndices.where(i => i.tenantId.eq('acme'))
+    .aggregate(g => ({ stock: argMaxIf(g.stock_index, g.version, g.stock_index.gt(0)) }));
+  console.log('latest positive stock', await client.run(latestPositive));
   const componentParts = from(db.entity_ots_component).where(c => c.tenantId.eq('acme'))
     .leftArrayJoin(c => c.matched_part_ids, 'partId')
     .map(c => ({ id: c.entityId, partId: c.partId }))

@@ -91,6 +91,36 @@ repeatedly. This does **not** promise cached rows, one evaluation, temporary tab
 or automatic shared-parent CTE extraction (the latter remains M4; real materialization
 is deferred M7). See `examples/first-query.ts` for executable composition.
 
+Latest metric values do not require a self-join:
+```ts
+import { from, max, argMax } from '@chql/core';
+const latestMetrics = from(db.metric_group_ots_component_indices).final()
+  .where(i => i.tenantId.eq('acme'))
+  .groupBy(i => ({ entityId: i.entityId }))
+  .aggregate(g => ({
+    version: max(g.version),
+    stockIndex: argMax(g.stock_index, g.version),
+    leadDays: argMax(g.lead_time_max_days, g.version),
+  })).orderBy(r => r.entityId);
+console.log(await client.run(latestMetrics));
+for await (const row of client.stream(latestMetrics)) console.log(row);
+```
+`argMax(value, version)` and `argMaxIf(value, version, predicate)` retain the value
+operand's descriptor and name (constant-first expressions use `argMax`, not the
+version/predicate name). Supported values are integer/float, String and Bool,
+optionally Nullable; versions must be non-null integer/float descriptors.
+LowCardinality, Decimal, dates, containers and nullable versions are rejected.
+ClickHouse 24.8 **skips NULL values**: each metric can come from a different older
+row even though `max(version)` reports the newest version. All-null or empty
+Nullable inputs return NULL; non-null empty/no-match inputs return the type's
+default (0, false or empty string). If predicates exclude false/NULL rows.
+Different values tied at the maximal version have **no stable tie breaker**;
+FINAL deduplicates sorting keys but does not resolve remaining version ties.
+Aligned aggregate outputs compose with UNION ALL, downstream filter/order/limit
+and bounded global scalar queries (whose descriptor remains Nullable).
+No argMax State/Merge helpers are exported in this bounded slice. The runnable
+`pnpm example:first-query` demonstrates this against the generated fixture tables.
+
 `scalar(q.aggregate(g => sum(g.stock)))` now embeds a directly built keyless,
 exactly-one-column aggregate as a row-mode expression. Object-form names and
 single-expression root names are retained. Use it in projections, arithmetic
@@ -133,7 +163,7 @@ defaults. Nullable containers are rejected by the server. Enabled regression
 reproductions are in `cross-join.test.ts` and `query.integration.ts`. A decision on
 ordered input evidence and structured null-extension representation is required
 before the specified outer-join API can honestly promise exact rows.
-Grouped and global aggregation execute `count`, `sum`, `max` and their `If`
+Grouped and global aggregation execute `count`, `sum`, `max`, `argMax` and their `If`
 forms: `q.groupBy(r => r.category).aggregate(() => count())` or
 `q.aggregate(g => ({ total: sum(g.amount) }))`. Keys precede aggregate outputs;
 object forms choose names, single forms retain root names, and collisions fail.

@@ -1,7 +1,66 @@
 import { expect, it } from 'vitest';
-import { from, table, col, count, sum, sumState, val, columnExpr, exprNode, relNode, flatOutput, Expr } from '@chql/core';
+import { argMax, argMaxIf, type CHType, from, table, col, count, sum, sumState, val, columnExpr, exprNode, relNode, flatOutput, Expr } from '@chql/core';
 import { emitNaive } from '../src/index.js';
 const t = table('t', { k: col.String, n: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+it('validates both argMax operands, conditional predicates and authoritative metadata with paths', () => {
+  const q = from(t), other = from(t);
+  const query = q.aggregate(g => ({ latest: argMaxIf(g.n, g.n, g.n.gt(0)) }));
+  expect(emitNaive(query.ir).sql).toContain('argMaxIf(');
+  const root = query.ir;
+  if (root.kind !== 'Aggregate' || root.aggs.latest?.kind !== 'Agg') throw new Error('expected Aggregate');
+  const { id: _id, ...fields } = root;
+  const { id: _expr, ...agg } = root.aggs.latest;
+  const check = (changes: Partial<typeof agg>, error: RegExp) => {
+    const output = flatOutput([['latest', changes.type ?? agg.type]]);
+    expect(() => emitNaive(relNode({ ...fields, output, columns: output.columns, aggs: { latest: exprNode({ ...agg, ...changes }) } }))).toThrow(error);
+  };
+  check({ args: agg.args.slice(0, 2) }, /invalid_argument_arity at root.aggs.latest/);
+  check({ fn: { ...agg.fn, deterministic: false } }, /invalid_function_metadata at root.aggs.latest/);
+  check({ fn: { ...agg.fn, linear: true } }, /invalid_function_metadata at root.aggs.latest/);
+  check({ fn: { ...agg.fn, sqlName: 'unsafe)' } }, /invalid_function_metadata at root.aggs.latest/);
+  check({ args: [agg.args[0]!, columnExpr(col.String, q.ir.id, ['k'], 'k', 'grouped').ir, agg.args[2]!] }, /incompatible_operands at root.aggs.latest/);
+  check({ type: col.Float64.type }, /invalid_expression_type at root.aggs.latest/);
+  check({ combinators: ['State'] }, /unsupported_aggregate_combinator/);
+  for (let index = 0; index < 3; index++) {
+    const args = [...agg.args];
+    args[index] = columnExpr(index === 2 ? col.Bool : col.UInt32, other.ir.id, ['n'], 'n', 'grouped').ir;
+    check({ args }, /unbound_column.*root.aggs.latest/);
+  }
+  check({ args: [q.row.n.ir, ...agg.args.slice(1)] }, /invalid_expression_mode/);
+  check({ args: [agg.args[0]!, root.aggs.latest, agg.args[2]!] }, /invalid_aggregate_placement/);
+  check({ args: [agg.args[0]!, agg.args[1]!, val(1).ir] }, /invalid_predicate/);
+  const unsupported: CHType[] = [col.Array(col.UInt32).type, col.LowCardinality(col.String).type, col.Decimal64(2).type, col.Date.type, col.Tuple({ n: col.UInt32 }).type, { kind: 'Unknown', raw: 'unsafe' }];
+  for (const type of unsupported) {
+    const source = from(table('unsupported', { value: { type }, version: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    const value = columnExpr({ type }, source.ir.id, ['value'], 'value', 'grouped');
+    const version = columnExpr(col.UInt32, source.ir.id, ['version'], 'version', 'grouped');
+    const output = flatOutput([['latest', type]]);
+    expect(() => emitNaive(relNode({ ...fields, input: source.ir, output, columns: output.columns, aggs: { latest: exprNode({ ...agg, combinators: [], args: [value.ir, version.ir], type }) } }))).toThrow(/incompatible_operands at root.aggs.latest/);
+  }
+  const nullableVersion = from(table('nullable_version', { n: col.UInt32, v: col.Nullable(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const forged = nullableVersion.aggregate(g => argMax(g.n, g.n)).ir;
+  if (forged.kind !== 'Aggregate' || forged.aggs.n?.kind !== 'Agg') throw new Error('expected Aggregate');
+  const { id: _r, ...r } = forged; const { id: _a, ...a } = forged.aggs.n;
+  expect(() => emitNaive(relNode({ ...r, aggs: { n: exprNode({ ...a, args: [a.args[0]!, columnExpr(col.Nullable(col.UInt32), nullableVersion.ir.id, ['v'], 'v', 'grouped').ir] }) } }))).toThrow(/incompatible_operands/);
+});
+it('adversarial argMax rejects invalid constant payloads in every operand and nested foreign calls', () => {
+  const q = from(t), other = from(t);
+  for (const value of [-1, 256, 1.5]) {
+    expect(() => emitNaive(q.aggregate(g => argMax(val(value, col.UInt8), g.n)).ir)).toThrow(/param/);
+    expect(() => emitNaive(q.aggregate(g => argMax(g.n, val(value, col.UInt8))).ir)).toThrow(/param/);
+  }
+  const foreign = columnExpr(col.UInt32, other.ir.id, ['n'], 'n', 'grouped');
+  expect(() => emitNaive(q.aggregate(g => argMax(g.n, foreign.plus(1))).ir)).toThrow(/unbound_column.*root.aggs.n/);
+  expect(() => emitNaive(q.aggregate(g => argMaxIf(g.n, g.n, foreign.gt(1))).ir)).toThrow(/unbound_column.*root.aggs.n/);
+  const valid = q.aggregate(g => argMax(g.n, g.n)).ir;
+  if (valid.kind !== 'Aggregate' || valid.aggs.n?.kind !== 'Agg') throw new Error('expected aggregate');
+  const { id: _id, ...fields } = valid;
+  const { id: _agg, ...agg } = valid.aggs.n;
+  for (const combinators of [['If', 'If'], ['Merge'], ['State']] as const) {
+    expect(() => emitNaive(relNode({ ...fields, aggs: { n: exprNode({ ...agg, combinators }) } }))).toThrow(/unsupported_aggregate_combinator at root.aggs.n/);
+  }
+  expect(() => emitNaive(relNode({ ...fields, aggs: { n: exprNode({ ...agg, params: [val(1).ir] }) } }))).toThrow(/unsupported_aggregate_combinator at root.aggs.n/);
+});
 it('preserves keys, shared parameters, output descriptors and immutable aggregation stages', () => {
   const q = from(t), shared = val('fallback');
   const stage = q.groupBy(r => ({ k: r.k.ifNull(shared) }));
