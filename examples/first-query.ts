@@ -1,4 +1,4 @@
-import { count, max, from, registerCompiler, join, unionAll } from "@chql/core";
+import { count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
 import { emitNaive } from "@chql/compiler";
 import { createClient } from "@chql/client";
 // Checked-in output of the real codegen integration fixture. For your database,
@@ -56,6 +56,11 @@ try {
   const combined = unionAll(q, q.limit(1)).orderBy(r => r.id);
   console.log(combined.toSQL());
   console.log(await client.run(combined));
+  // Scalar wrappers have Nullable descriptors on ClickHouse 24.8, even for count/sum.
+  const totalParts = q.aggregate(g => sum(g.count));
+  const shares = q.map(r => ({ id: r.id, share: r.count.divide(scalar(totalParts)).multiply(100) }));
+  console.log(shares.toSQL());
+  console.log(await client.run(shares));
   // Fixture tables have no sampling key: demonstrate SQL only, not execution.
   console.log(from(db.entity_ots_component).sample(0.1).toSQL());
 } finally {

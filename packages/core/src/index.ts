@@ -4,6 +4,7 @@ export * from './table.js';
 export * from './query.js';
 export * from './join.js';
 export * from './union.js';
+export * from './subquery.js';
 export * from './ordering.js';
 export * from './types.js';
 export * from './ir.js';

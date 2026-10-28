@@ -1,4 +1,4 @@
-import { print, outputLeaves, expandedOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
+import { print, scalarDescriptor, outputLeaves, expandedOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
 import { parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall } from './resolve.js';
 
@@ -27,6 +27,12 @@ export function emitNaive(root: Rel): CompiledQuery {
   const inputAlias = quoteIdentifier('__chql_input');
   function fail(code: string, node: unknown, path: string, detail = ''): never { throw new ValidationError(code, node, path, detail); }
   function resolvedType(e: ExprNode, expected?: CHType): CHType {
+    if (e.kind === 'Subquery') {
+      if (e.usage !== 'scalar') throw new Error('invalid_subquery_usage');
+      const type = scalarDescriptor(e.rel);
+      if (!same(type, e.type)) throw new Error('invalid_expression_type');
+      return type;
+    }
     if (e.kind === 'Agg') return resolveAggregate(e, resolvedType).result;
     if (e.kind === 'Call') return resolveCall(e, resolvedType).result;
     const type = e.type ?? expected;
@@ -63,6 +69,12 @@ export function emitNaive(root: Rel): CompiledQuery {
         const name = previous?.name ?? `p${assigned.size}`;
         assigned.set(e, { name, type }); params[name] = value; parameterTypes[name] = parameterWireType(type);
         return `{${name}:${print(parameterWireType(type))}}`;
+      }
+      case 'Subquery': {
+        if (scope !== 'row') return fail('invalid_expression_mode', e, path);
+        try { resolvedType(e); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_subquery', e, path); }
+        // Same allocator/active graph, but emit establishes a fresh inner column scope.
+        return `(${emit(e.rel, `${path}.rel`)})`;
       }
       case 'Agg': {
         if (scope !== 'aggregate') return fail('invalid_aggregate_placement', e, path);

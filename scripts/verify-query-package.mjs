@@ -14,9 +14,13 @@ try {
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
   writeFileSync(join(directory, 'consumer.ts'), readFileSync('test/types/query.ts', 'utf8') + '\nimport type { AggregationSnapshot } from "./aggregation.d.ts";\nconst snapshotQuery = q.groupBy(r => r.id).aggregate(g => ({ total: sum(g.id), count: count() }));\nexpectTypeOf<Infer<typeof snapshotQuery>>().toEqualTypeOf<AggregationSnapshot>();\nexpectTypeOf<Infer<typeof snapshotQuery>>().not.toBeAny();\n');
   writeFileSync(join(directory, 'expansion.ts'), `import { expectTypeOf } from 'expect-type';
-import { from, table, col, join, crossJoin, unionAll, type Infer } from '@chql/core';
+import { from, table, col, join, crossJoin, unionAll, sum, scalar, type Infer } from '@chql/core';
 import type { JoinSnapshot } from './join.d.ts';
 const side = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+import type { ScalarSnapshot } from './scalar.d.ts';
+const scalarQuery = side.map(() => scalar(side.aggregate(g => sum(g.id))));
+expectTypeOf<Infer<typeof scalarQuery>>().toEqualTypeOf<ScalarSnapshot>();
+expectTypeOf<Infer<typeof scalarQuery>>().not.toBeAny();
 const joined = join({ a: side, b: side }).on(r => r.a.id.eq(r.b.id));
 expectTypeOf<Infer<typeof joined>>().toEqualTypeOf<JoinSnapshot>();
 expectTypeOf<Infer<typeof joined>>().not.toBeAny();
@@ -36,6 +40,7 @@ expectTypeOf<Infer<typeof nestedExpanded>>().toEqualTypeOf<JoinedArrayJoinSnapsh
 expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
 `);
   writeFileSync(join(directory, 'joined-array-join.d.ts'), readFileSync('test/types/snapshots/joined-array-join.d.ts', 'utf8'));
+  writeFileSync(join(directory, 'scalar.d.ts'), readFileSync('test/types/snapshots/scalar.d.ts', 'utf8'));
   writeFileSync(join(directory, 'join.d.ts'), readFileSync('test/types/snapshots/join.d.ts', 'utf8'));
   writeFileSync(join(directory, 'array-join.d.ts'), readFileSync('test/types/snapshots/array-join.d.ts', 'utf8'));
   writeFileSync(join(directory, 'aggregation.d.ts'), readFileSync('test/types/snapshots/aggregation.d.ts', 'utf8'));
@@ -43,7 +48,7 @@ expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { toTypeScript, count, sum, col, table, from, registerCompiler, join, crossJoin, unionAll } from '@chql/core';
+import { toTypeScript, count, sum, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
 import { emitNaive } from '@chql/compiler';
 import { createClient, decoder, rowDecoder } from '@chql/client';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).where(r => r.id.eq(2n)).map(r => ({ id: r.id })).limit(10);
@@ -60,6 +65,11 @@ const ordered = structural.map(r => r.first).distinct().orderBy(r => r.first.des
 assert.match(ordered.toSQL().sql, /SELECT DISTINCT/);
 assert.match(ordered.toSQL().sql, /DESC NULLS LAST/);
 assert.equal('thenBy' in ordered, false);
+const scalarQuery = q.map(() => scalar(q.aggregate(g => sum(g.id))));
+const scalarType = Object.entries(scalarQuery.toSQL().columns).map(([k, t]) => JSON.stringify(k) + ': ' + toTypeScript(t)).join('; ');
+assert.equal(readFileSync('scalar.d.ts', 'utf8'), 'export type ScalarSnapshot = { ' + scalarType + ' };\\n');
+assert.equal(decoder(scalarQuery.toSQL().columns.id)('4'), 4n);
+assert.equal(decoder(scalarQuery.toSQL().columns.id)(null), null);
 const rollup = q.groupBy(r => r.id).aggregate(g => ({ total: sum(g.id), count: count() }));
 assert.match(rollup.toSQL().sql, /GROUP BY/);
 const mapped = Object.entries(rollup.toSQL().columns).map(([k, t]) => JSON.stringify(k) + ': ' + toTypeScript(t)).join('; ');

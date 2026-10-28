@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, relNode, Query } from '@chql/core';
+import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query } from '@chql/core';
 import { emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -24,6 +24,92 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('keeps hostile scalar parameters isolated through UNION, grouping and replaced sorting', async () => {
+  const source = from(db.entity_ots_component);
+  const hostile = "x'\\\\\n{p900:String}`); SELECT 999 --";
+  const shared = val(hostile, col.String);
+  const inner = source.map(() => ({ ['__proto__']: shared })).aggregate(g => max(g.__proto__));
+  const value = scalar(inner);
+  const branch = source.limit(1).map(() => ({ value, shared, equal: val(hostile, col.String) }));
+  const combined = unionAll(branch, branch);
+  const result = combined.groupBy(r => ({ value: r.value, total: scalar(source.aggregate(() => count())) }))
+    .aggregate(() => count()).orderBy(r => r.value).thenBy(r => r.total).orderBy(r => r.count);
+  const plan = emitNaive(result.ir);
+  expect(plan.sql).not.toContain(hostile);
+  expect(plan.params).toEqual({ p0: hostile, p1: hostile });
+  expect([...plan.sql.matchAll(/\{(p\d+):String\}/g)].map(m => m[1]).filter((v, i, a) => a.indexOf(v) === i)).toEqual(['p0', 'p1']);
+  expect(await client.run(branch)).toEqual([{ value: hostile, shared: hostile, equal: hostile }]);
+  const direct = JSON.parse((await sql('SELECT (SELECT count() FROM entity_ots_component) AS total, count() AS count FROM (SELECT 1 UNION ALL SELECT 1) GROUP BY total FORMAT JSONEachRow')).trim()) as { total: string; count: string };
+  expect(await client.run(result)).toEqual([{ value: hostile, total: BigInt(direct.total), count: BigInt(direct.count) }]);
+  expect(direct).toEqual({ total: '3', count: '2' });
+});
+it('keeps scalar nullable max nulls and zero-denominator nonfinite arithmetic honest', async () => {
+  const source = from(db.entity_ots_component);
+  const empty = source.where(r => r.tenantId.eq('absent'));
+  const total = scalar(empty.aggregate(() => count()));
+  const result = source.limit(1).map(() => ({ n: scalar(empty.aggregate(g => max(g.category))), nan: total.divide(total), inf: val(1n).divide(total) }));
+  const direct = JSON.parse((await sql("SELECT (SELECT max(category) FROM entity_ots_component WHERE tenantId='absent') AS n, 0/0 AS nan, 1/0 AS inf SETTINGS output_format_json_quote_denormals=1 FORMAT JSONEachRow")).trim()) as unknown;
+  expect(direct).toEqual({ n: null, nan: 'nan', inf: 'inf' });
+  expect(await client.run(result)).toEqual([{ n: null, nan: NaN, inf: Infinity }]);
+  expect(print(emitNaive(result.ir).columns.n!)).toBe('Nullable(String)');
+});
+it('executes unchanged object and expression stock shares with inline global scalars', async () => {
+  await sql('CREATE TABLE scalar_stock (entityId String, version UInt32, stock Float64) ENGINE=Memory');
+  await sql("INSERT INTO scalar_stock VALUES ('a',1,10),('a',2,30),('c',1,70),('other',1,999)");
+  const metrics = from(table('scalar_stock', { entityId: col.String, version: col.UInt32, stock: col.Float64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const newest = metrics.groupBy(r => r.entityId).aggregate(g => max(g.version));
+  const latest = join({ m: metrics, v: newest }).on(r => [r.m.entityId.eq(r.v.entityId), r.m.version.eq(r.v.version)]).map(r => ({ ...r.m }));
+  const scopedLatest = join({ c: from(db.entity_ots_component).where(r => r.tenantId.eq('acme')), a: latest }).on(r => r.c.entityId.eq(r.a.entityId)).map(r => ({ entityId: r.c.entityId, category: r.c.category, stock: r.a.stock }));
+  const total = scopedLatest.aggregate(g => ({ stock: sum(g.stock) }));
+  const stockShare = scopedLatest.map(r => ({ entityId: r.entityId, stock: r.stock, share: r.stock.divide(scalar(total)).multiply(100) })).orderBy(r => r.entityId);
+  const baseline = (await sql("SELECT entityId,stock,stock/(SELECT sum(stock) FROM scalar_stock WHERE (entityId,version) IN (('a',2),('c',1)))*100 AS share FROM scalar_stock WHERE (entityId,version) IN (('a',2),('c',1)) ORDER BY entityId FORMAT JSONEachRow")).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(await client.run(stockShare)).toEqual(baseline);
+  expect(baseline).toEqual([{ entityId: 'a', stock: 30, share: 30 }, { entityId: 'c', stock: 70, share: 70 }]);
+  expect(await client.run(scopedLatest.orderBy(r => r.entityId).map(r => r.stock.divide(scalar(scopedLatest.aggregate(g => sum(g.stock)))).multiply(100)))).toEqual([{ stock: 30 }, { stock: 70 }]);
+  expect(await client.run(scopedLatest.where(r => r.stock.lt(scalar(total))).aggregate(() => count()))).toEqual([{ count: 2n }]);
+});
+it('matches scalar server descriptors and decoding on nonempty, empty and all-null aggregates', async () => {
+  await sql('CREATE TABLE scalar_values (n Nullable(Int64), f Float64) ENGINE=Memory');
+  await sql('INSERT INTO scalar_values VALUES (7,1.5),(NULL,2.5),(-2,3)');
+  const source = from(table('scalar_values', { n: col.Nullable(col.Int64), f: col.Float64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  for (const [input, condition] of [[source, '1'], [source.where(r => r.f.lt(0)), 'f<0'], [source.where(r => r.n.isNull()), 'isNull(n)']] as const) {
+    const values = source.limit(1).map(() => ({ ['__proto__']: scalar(input.aggregate(() => count())), ['s.dot`']: scalar(input.aggregate(g => sum(g.n))), f: scalar(input.aggregate(g => sum(g.f))) }));
+    const direct = JSON.parse((await sql(`SELECT (SELECT count() FROM scalar_values WHERE ${condition}) AS c,(SELECT sum(n) FROM scalar_values WHERE ${condition}) AS n,(SELECT sum(f) FROM scalar_values WHERE ${condition}) AS f FORMAT JSONEachRow`)).trim()) as { c: string; n: string | null; f: number };
+    expect(await client.run(values)).toEqual([{ ['__proto__']: BigInt(direct.c), ['s.dot`']: direct.n === null ? null : BigInt(direct.n), f: direct.f }]);
+    const types = JSON.parse((await sql(`SELECT toTypeName((SELECT count() FROM scalar_values WHERE ${condition})) AS c,toTypeName((SELECT sum(n) FROM scalar_values WHERE ${condition})) AS n,toTypeName((SELECT sum(f) FROM scalar_values WHERE ${condition})) AS f FORMAT JSONEachRow`)).trim()) as Record<string, string>;
+    const columns = emitNaive(values.ir).columns;
+    expect([print(columns.__proto__!), print(columns['s.dot`']!), print(columns.f!)]).toEqual([types.c, types.n, types.f]);
+    expect(types).toEqual({ c: 'Nullable(UInt64)', n: 'Nullable(Int64)', f: 'Nullable(Float64)' });
+  }
+});
+it('preserves supported String and Bool scalar descriptors on empty and nonempty inputs', async () => {
+  await sql('CREATE TABLE scalar_text (s String, b Bool) ENGINE=Memory');
+  await sql("INSERT INTO scalar_text VALUES ('a',false),('z',true)");
+  const source = from(table('scalar_text', { s: col.String, b: col.Bool }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  for (const [input, condition] of [[source, '1'], [source.where(r => r.s.eq('missing')), '0']] as const) {
+    const result = source.limit(1).map(() => ({ s: scalar(input.aggregate(g => max(g.s))), b: scalar(input.aggregate(g => max(g.b))) }));
+    const direct = JSON.parse((await sql(`SELECT (SELECT max(s) FROM scalar_text WHERE ${condition}) AS s,(SELECT max(b) FROM scalar_text WHERE ${condition}) AS b FORMAT JSONEachRow`)).trim()) as unknown;
+    expect(await client.run(result)).toEqual([direct]);
+    const types = JSON.parse((await sql(`SELECT toTypeName((SELECT max(s) FROM scalar_text WHERE ${condition})) AS s,toTypeName((SELECT max(b) FROM scalar_text WHERE ${condition})) AS b FORMAT JSONEachRow`)).trim()) as unknown;
+    const columns = emitNaive(result.ir).columns;
+    expect(types).toEqual({ s: print(columns.s!), b: print(columns.b!) });
+    expect(types).toEqual({ s: 'Nullable(String)', b: 'Nullable(Bool)' });
+  }
+});
+it('executes nested scalar dependencies with shared and equal parameter identities', async () => {
+  const source = from(db.entity_ots_component);
+  const shared = val('acme', col.String);
+  const scoped = source.where(r => r.tenantId.eq(shared));
+  const inner = scoped.aggregate(() => count());
+  const intermediate = scoped.map(() => scalar(inner));
+  const outer = intermediate.aggregate(g => sum(g.count));
+  const result = scoped.limit(1).map(() => ({ total: scalar(outer), shared, equal: val('acme', col.String) }));
+  const plan = emitNaive(result.ir);
+  expect(plan.params).toEqual({ p0: 'acme', p1: 'acme' });
+  const direct = JSON.parse((await sql("SELECT (SELECT sum(n) FROM (SELECT (SELECT count() FROM entity_ots_component WHERE tenantId='acme') AS n FROM entity_ots_component WHERE tenantId='acme')) AS total FORMAT JSONEachRow")).trim()) as { total: string };
+  expect(await client.run(result)).toEqual([{ total: BigInt(direct.total), shared: 'acme', equal: 'acme' }]);
+  expect(direct.total).toBe('4');
+});
 it('keeps nested ALL and DISTINCT boundaries, offsets and post-union expansion under joins', async () => {
   await sql('CREATE TABLE union_adversarial (id UInt32, xs Array(Nullable(Int32))) ENGINE=Memory');
   await sql('INSERT INTO union_adversarial VALUES (1,[NULL,7,7]),(1,[NULL,7,7]),(2,[]),(3,[9])');

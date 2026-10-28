@@ -83,12 +83,34 @@ export class GroupedQuery<R, K, C extends Caps = Caps, Nested extends boolean = 
 }
 type SortResult = Expr<unknown, string, 'row'> | Ordering<'row'>;
 export type ExpressionCaps<C extends Caps> = { readonly live: C['live'] extends false ? false : boolean };
-export function deterministic(e: ExprNode): boolean {
+/** Capabilities are recomputed through relation edges, never trusted from a Subquery flag. */
+function liveRelation(rel: Rel, active: Set<Rel>): boolean {
+  if (active.has(rel)) return false;
+  active.add(rel);
+  const expr = (e: ExprNode) => deterministic(e, active);
+  const child = (r: Rel) => liveRelation(r, active);
+  try {
+    switch (rel.kind) {
+      case 'Scan': return rel.table.source !== undefined;
+      case 'Filter': return child(rel.input) && expr(rel.pred);
+      case 'Project': return child(rel.input) && Object.values(rel.exprs).every(expr);
+      case 'Aggregate': return child(rel.input) && [...Object.values(rel.keys), ...Object.values(rel.aggs)].every(expr);
+      case 'Join': return rel.inputs.every(([, r]) => child(r)) && rel.on.every(expr);
+      case 'Union': return rel.inputs.every(child);
+      case 'Sort': return child(rel.input) && rel.keys.every(k => expr(k.expr));
+      case 'ArrayJoin': return child(rel.input) && expr(rel.expr);
+      case 'Limit': case 'Distinct': case 'Materialize': return child(rel.input);
+      default: return false;
+    }
+  } finally { active.delete(rel); }
+}
+export function deterministic(e: ExprNode, active = new Set<Rel>()): boolean {
   switch (e.kind) {
     case 'ColumnRef': case 'Param': case 'Literal': return true;
-    case 'Agg': return e.fn.deterministic === true && e.args.every(deterministic) && e.params.every(deterministic);
-    case 'Call': return e.fn.deterministic === true && e.args.every(deterministic);
-    case 'Cast': return deterministic(e.expr);
+    case 'Agg': return e.fn.deterministic === true && e.args.every(a => deterministic(a, active)) && e.params.every(a => deterministic(a, active));
+    case 'Call': return e.fn.deterministic === true && e.args.every(a => deterministic(a, active));
+    case 'Cast': return deterministic(e.expr, active);
+    case 'Subquery': return e.usage === 'scalar' && liveRelation(e.rel, active);
     default: return false;
   }
 }
@@ -154,8 +176,8 @@ export class Query<R, C extends Caps = Caps, Proxy = Row<R>, Nested extends bool
   groupBy<K extends Projection | Expr<unknown, string>>(f: (row: this['row']) => K & ValidProjection<K>): GroupedQuery<this['row'], K, C, Nested, QueryGrouped<R, this['row'], Nested>> {
     return new GroupedQuery(this.ir, expressions(f(this.row), 'row') as [string, Expr<unknown, string>][], this.caps);
   }
-  aggregate<A extends AggregateProjection>(f: (row: QueryGrouped<R, this['row'], Nested>) => A & ValidNamed<A>): Query<AggregateRow<{}, A>, ExpressionCaps<C>> & { readonly row: OutputRow<{}, A> } {
-    return new GroupedQuery<this['row'], {}, C, Nested, QueryGrouped<R, this['row'], Nested>>(this.ir, [], this.caps).aggregate<A>(f);
+  aggregate<A extends AggregateProjection>(f: (row: QueryGrouped<R, this['row'], Nested>) => A & ValidNamed<A>): Query<AggregateRow<{}, A>, ExpressionCaps<C>> & { readonly row: OutputRow<{}, A>; readonly ir: Extract<Rel, { kind: 'Aggregate' }> } {
+    return new GroupedQuery<this['row'], {}, C, Nested, QueryGrouped<R, this['row'], Nested>>(this.ir, [], this.caps).aggregate<A>(f) as Query<AggregateRow<{}, A>, ExpressionCaps<C>> & { readonly row: OutputRow<{}, A>; readonly ir: Extract<Rel, { kind: 'Aggregate' }> };
   }
   arrayJoin<E extends Expr<readonly unknown[], string, 'row'>, A extends string>(f: (row: this['row']) => E, alias: A & (A extends keyof R ? { readonly duplicate_column: never } : unknown)): WithRow<Query<Expanded<R, E, A>, ExpressionCaps<C>, ExpandedRow<this['row'], E, A>, Nested>, ExpandedRow<this['row'], E, A>> {
     return this.expand<E, A>(f, alias, false);

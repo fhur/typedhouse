@@ -59,7 +59,23 @@ Matching TypeScript rows are not sufficient for SQL compatibility: UInt32 and
 Float64 both decode to number, but this increment rejects their union explicitly
 with `union_descriptor_mismatch`. Common-type/coercion support remains backlog.
 The naive compiler also supports low-level `Union { all: false }` with explicit
-UNION DISTINCT; no public intersect/except or scalar/IN subqueries are implied.
+UNION DISTINCT; no public intersect/except or IN subqueries are implied.
+
+`scalar(q.aggregate(g => sum(g.stock)))` now embeds a directly built keyless,
+exactly-one-column aggregate as a row-mode expression. Object-form names and
+single-expression root names are retained. Use it in projections, arithmetic
+and predicates; inner references are independently scoped (no correlation).
+The naive emitter inlines the SELECT with shared Param identity; CTE extraction
+is still backlog. Cardinality-preserving wrappers and arbitrary Queries are
+not accepted, and no LIMIT 1 is inserted.
+**ClickHouse 24.8 reports Nullable even for scalar count/sum over a guaranteed
+one-row aggregate.** The expression therefore has `T | null` and a matching
+Nullable descriptor; stock-share arithmetic conservatively returns `number | null`,
+not the spec example's `number`. This discrepancy remains explicit rather than
+masking it with a default or pretending the descriptor is non-nullable. Current
+scalar descriptor support is numeric, String and Bool (optionally Nullable);
+containers and other families are rejected pending server evidence. IN/notIn
+is a separate future increment.
 
 Outer joins are owner-deferred unresolved v1 backlog, not a blocker for cross
 joins or independent features. Two explicit contract issues remain, without silently widened
