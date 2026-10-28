@@ -19,7 +19,10 @@ it('emits explicit deterministic collision-safe CTEs, warning once per identity 
   expect(warn.mock.calls[0]?.[0]).toContain('materialization is not yet implemented');
   const optimized = compile(query.ir);
   expect({ ...optimized, sql: '' }).toEqual({ ...plan, sql: '' });
-  expect(optimized.sql).toContain('WITH `t3` AS');
+  // Planned hints are scheduled once by identity, rather than repeated local WITHs.
+  expect(optimized.sql).toMatch(/^WITH `t1` AS/);
+  expect([...optimized.sql.matchAll(/`t\d+` AS \(/g)].map(m => m[0])).toEqual(['`t1` AS (', '`t2` AS (']);
+  expect(optimized.sql).not.toContain('`t3`');
   expect(optimized.sql).toContain('ORDER BY `id` ASC LIMIT 2');
   expect(warn).toHaveBeenCalledTimes(4);
 });

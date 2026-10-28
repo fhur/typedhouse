@@ -46,7 +46,9 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
   let weekBucketing = false;
   let dateMembership = false;
   // Each derived input owns this local SQL scope; ColumnRefs never bind SELECT aliases.
-  const inputAlias = quoteIdentifier('__chql_input');
+  const inputAlias = quoteIdentifier(plan?.ctes?.inputAlias ?? '__chql_input');
+  const defined = new Set<Rel>();
+  const joinAlias = (rel: Rel, alias: string) => quoteIdentifier(plan?.ctes?.aliases.get(rel)?.get(alias) ?? alias);
   // A physical-table block has no competing input or SELECT aliases. Derived
   // scopes retain qualification; logical ColumnRef binding stays unchanged.
   function blockQualifier(rel: Rel): string {
@@ -80,7 +82,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           const side = input.inputs.find(([alias]) => alias === e.path[0]);
           const child = side && (plan?.columns?.get(side[1]) ?? outputLeaves(side[1].output)).find(l => JSON.stringify(l.path) === JSON.stringify(e.path.slice(1)));
           if (!side || !child) return fail('unbound_column', e, path);
-          return `${quoteIdentifier(side[0])}.${quoteIdentifier(child.name)}`;
+          return `${joinAlias(input, side[0])}.${quoteIdentifier(child.name)}`;
         }
         const physical = plan?.columns?.get(input);
         if (physical && !physical.some(l => l.name === leaf.name)) return fail('missing_physical_column', e, path);
@@ -148,24 +150,39 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
       default: return fail('unsupported_expression', e, path, e.kind);
     }
   }
-  function renderBlock(rel: Rel, order: readonly string[]): string {
+  function renderBlock(rel: Rel, order: readonly string[], path = 'root'): string {
     const block = plan!.blocks.get(rel)!;
     let from: string;
     if (block.source.kind === 'table') {
       const scan = block.source.scan;
       from = `${quoteIdentifier(scan.table.name)}${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
     } else {
-      from = `(${rendered.get(block.source.rel)!}) AS ${inputAlias}`;
+      from = `(${emit(block.source.rel, `${path}.source`)}) AS ${inputAlias}`;
     }
-    const predicates = block.clauses.filter(node => node.kind === 'Filter').map(node => clauses.get(node)!);
+    // Render only the final block, in textual order. Never eagerly emit folded
+    // children: their discarded SELECTs could allocate Params out of order.
+    const qualifier = blockQualifier(rel);
+    const predicates: string[] = [];
+    const tails: string[] = [];
+    for (const [i, node] of block.clauses.entries()) {
+      const p = `${path}.clauses[${i}]`;
+      if (node.kind === 'Filter') predicates.push(expression(node.pred, node.input, `${p}.pred`, undefined, false, 'row', qualifier));
+      else if (node.kind === 'Sort') tails.push(` ORDER BY ${node.keys.map((key, j) => `${expression(key.expr, node.input, `${p}.keys[${j}].expr`, undefined, false, 'row', qualifier)} ${key.dir.toUpperCase()}${key.nulls === undefined ? '' : ` NULLS ${key.nulls.toUpperCase()}`}`).join(', ')}`);
+      else tails.push(` LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
+    }
     // Expressions already delimit infix operators; calls (including or/and)
     // are atomic SQL expressions. Combining them needs no extra wrappers.
     const where = predicates.length ? ` WHERE ${predicates.join(' AND ')}` : '';
-    const tail = block.clauses.filter(node => node.kind !== 'Filter').map(node => clauses.get(node)!).join('');
-    const qualifier = blockQualifier(rel);
+    const tail = tails.join('');
     return `SELECT ${order.map(k => `${qualifier ? `${qualifier}.` : ''}${quoteIdentifier(k)}`).join(', ')} FROM ${from}${where}${tail}`;
   }
   function emit(rel: Rel, path: string): string {
+    const name = plan?.ctes?.names.get(rel);
+    if (name) {
+      if (!defined.has(rel)) return fail('cte_visibility', rel, path);
+      const leaves = plan?.columns?.get(rel) ?? outputLeaves(rel.output);
+      return `SELECT ${leaves.map(l => `${quoteIdentifier(name)}.${quoteIdentifier(l.name)}`).join(', ')} FROM ${quoteIdentifier(name)}`;
+    }
     const sql = emitNode(rel, path);
     rendered.set(rel, sql);
     return sql;
@@ -187,6 +204,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
       if (order.some(k => base(columns[k]!).kind === 'AggregateFunction')) return fail('aggregate_state_selection', rel, path);
       nodes[path] = rel;
       const list = physicalOrder.map(quoteIdentifier).join(', ');
+      if (plan?.blocks.has(rel)) return renderBlock(rel, physicalOrder, path);
       switch (rel.kind) {
         case 'Union': {
           if (!Array.isArray(rel.inputs) || rel.inputs.length < 2) return fail('union_input_count', rel, `${path}.inputs`);
@@ -252,11 +270,11 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
             const side = rel.inputs.find(([a]) => a === l.path[0])!;
             const child = (plan?.columns?.get(side[1]) ?? outputLeaves(side[1].output)).find(c => JSON.stringify(c.path) === JSON.stringify(l.path.slice(1)));
             if (!child) return fail('missing_physical_column', rel, path, JSON.stringify(l.path));
-            return `${quoteIdentifier(side[0])}.${quoteIdentifier(child.name)} AS ${quoteIdentifier(l.name)}`;
+            return `${joinAlias(rel, side[0])}.${quoteIdentifier(child.name)} AS ${quoteIdentifier(l.name)}`;
           });
           let source = '';
           for (const [i, [alias, child]] of rel.inputs.entries()) {
-            source += `${i ? (rel.joinKind === 'cross' ? ' CROSS JOIN ' : ' INNER ALL JOIN ') : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${quoteIdentifier(alias)}`;
+            source += `${i ? (rel.joinKind === 'cross' ? ' CROSS JOIN ' : ' INNER ALL JOIN ') : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${joinAlias(rel, alias)}`;
             if (i && rel.joinKind !== 'cross') source += ` ON ${clauses[i]!.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}`;
           }
           return `SELECT ${items.join(', ')} FROM ${source}${residuals.length ? ` WHERE ${residuals.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}` : ''}`;
@@ -282,10 +300,10 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           const expected = outputLeaves(expandedOutput(input, rel.alias, type.inner));
           if (JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(expected.map(l => [l.path, print(l.type)])) || Object.keys(rel.columns).length !== order.length || order.some(k => !Object.hasOwn(rel.columns, k) || !same(rel.columns[k]!, columns[k]!))) return fail('invalid_output', rel, path);
           // Internal element aliases cannot capture a user column or the input table alias.
-          let element = '__chql_element';
+          let element = plan?.ctes?.elementAlias ?? '__chql_element';
           while (Object.hasOwn(columns, element) || inputLeaves.some(l => l.name === element)) element += '_';
           const quotedElement = quoteIdentifier(element);
-          let sourceAlias = '__chql_input';
+          let sourceAlias = plan?.ctes?.inputAlias ?? '__chql_input';
           while (Object.hasOwn(columns, sourceAlias) || inputLeaves.some(l => l.name === sourceAlias)) sourceAlias += '_';
           const qualifier = quoteIdentifier(sourceAlias);
           const items = physical.map(leaf => {
@@ -330,6 +348,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           if (JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(inputLeaves.map(l => [l.path, print(l.type)]))) return fail('invalid_output', rel, path);
           const source = emit(rel.input, `${path}.input`);
           if (rel.kind === 'Materialize') {
+            if (plan?.ctes) { materialized.add(rel); return source; }
             // The local WITH is visible throughout its input. Avoid every quoted
             // identifier in that subtree, including physical tables and nested CTEs.
             let name: string;
@@ -371,7 +390,13 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
       return fail('invalid_ir', rel, path, String(error));
     } finally { active.delete(rel); }
   }
-  const body = emit(root, 'root');
+  const definitions: string[] = [];
+  for (const rel of plan?.ctes?.definitions ?? []) {
+    const sql = emitNode(rel, `cte[${definitions.length}]`);
+    definitions.push(`${quoteIdentifier(plan!.ctes!.names.get(rel)!)} AS (${sql})`);
+    defined.add(rel);
+  }
+  const body = `${definitions.length ? `WITH ${definitions.join(', ')} ` : ''}${emit(root, 'root')}`;
   const settings = [
     ...(weekBucketing ? ['enable_extended_results_for_datetime_functions = 1'] : []),
     // Nullable membership's declared result requires the server's default NULL policy.

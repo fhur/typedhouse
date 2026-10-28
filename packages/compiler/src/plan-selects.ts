@@ -1,5 +1,6 @@
 import type { Rel } from '@chql/core';
 import type { ColumnDemand } from './prune-columns.js';
+import type { CtePlan } from './plan-ctes.js';
 
 export type SelectClause = Extract<Rel, { kind: 'Filter' | 'Sort' | 'Limit' }>;
 export interface SelectBlock {
@@ -12,6 +13,7 @@ export interface SqlPlan {
   readonly root: Rel;
   readonly blocks: ReadonlyMap<Rel, SelectBlock>;
   readonly columns?: ColumnDemand;
+  readonly ctes?: CtePlan;
 }
 const rank = { Filter: 1, Sort: 2, Limit: 3 } as const;
 
@@ -28,7 +30,7 @@ function isColumnSelection(rel: Extract<Rel, { kind: 'Project' }>): boolean {
  * sorts/limits and earlier clauses start new blocks. Identity selections can
  * fold before sorting/limiting without changing expression scopes.
  */
-export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDemand): SqlPlan {
+export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDemand, ctes?: CtePlan): SqlPlan {
   const blocks = new Map<Rel, SelectBlock>();
   function plan(rel: Rel): SelectBlock | undefined {
     const cached = blocks.get(rel);
@@ -37,11 +39,11 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
     if (rel.kind === 'Scan') {
       block = { source: Object.freeze({ kind: 'table', scan: rel }), clauses: Object.freeze([]) };
     } else if (rel.kind === 'Project' && isColumnSelection(rel)) {
-      const child = plan(rel.input);
+      const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
       if (!child || child.clauses.some(node => node.kind !== 'Filter')) return undefined;
       block = { source: child.source, clauses: child.clauses };
     } else if (rel.kind === 'Filter' || rel.kind === 'Sort' || rel.kind === 'Limit') {
-      const child = plan(rel.input);
+      const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
       const last = child?.clauses.at(-1);
       block = child && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
         ? { source: child.source, clauses: Object.freeze([...child.clauses, rel]) }
@@ -52,5 +54,5 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
   }
   // The validated node index includes branches and expression subqueries.
   for (const node of nodes) plan(node);
-  return Object.freeze({ root, blocks, ...(columns ? { columns } : {}) });
+  return Object.freeze({ root, blocks, ...(columns ? { columns } : {}), ...(ctes ? { ctes } : {}) });
 }
