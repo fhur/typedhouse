@@ -1,60 +1,43 @@
-import { createClient as createDriver, type ClickHouseClientConfigOptions } from '@clickhouse/client';
-import { compile } from '@chql/compiler';
-import { unwrap, type Caps, type CompiledQuery, type Query, type Rel } from '@chql/core';
-import { rowDecoder } from './decode.js';
-import { QueryError } from './errors.js';
+import type { ClickHouseClientConfigOptions } from '@clickhouse/client';
+import type { Caps, Query, Rel } from '@chql/core';
+import { createClickHouseBackend, type Backend, type Plan } from './backend.js';
+export { createClickHouseBackend, type Backend, type Plan } from './backend.js';
 export { decoder, rowDecoder } from './decode.js';
 export { QueryError } from './errors.js';
-export function createClient(options: ClickHouseClientConfigOptions = {}) {
-  const driver = createDriver(options);
-  const plans = new WeakMap<Rel, { compiled: CompiledQuery; decode: ReturnType<typeof rowDecoder> }>();
-  function prepare(ir: Rel) {
+
+type Executable<R, C extends Caps> = Pick<Query<R, C>, 'ir' | '_rowType' | 'caps'>;
+function facade(backend: Backend, buffered?: (plan: Plan) => Promise<unknown[]>) {
+  const plans = new WeakMap<Rel, Plan>();
+  function prepare(ir: Rel): Plan {
     let plan = plans.get(ir);
-    if (!plan) {
-      const compiled = compile(ir);
-      plan = { compiled, decode: rowDecoder(compiled.columns, compiled.columnPaths) };
-      plans.set(ir, plan);
-    }
+    if (!plan) { plan = backend.compile(ir); plans.set(ir, plan); }
     return plan;
   }
-  function execute(compiled: CompiledQuery) {
-    // Already serialized Arrays must bypass the driver's string escaping.
-    const params: Record<string, string> = {};
-    const containers: Record<string, string> = {};
-    for (const [name, value] of Object.entries(compiled.params)) {
-      const type = compiled.parameterTypes?.[name];
-      if (type && unwrap(type).kind === 'Array') containers[`param_${name}`] = value;
-      else params[name] = value;
-    }
-    return driver.query({ query: compiled.sql, query_params: params, format: 'JSONEachRow', clickhouse_settings: {
-      ...containers,
-      date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1,
-    } });
+  async function* stream<R, C extends Caps>(query: Executable<R, C>): AsyncGenerator<R, void> {
+    // Everything, including preparation, is lazy. The only row assertion is at
+    // the plugin boundary: Backend promises the decoded schema of this Rel.
+    const plan = prepare(query.ir);
+    for await (const batch of backend.run(plan)) for (const row of batch) yield row as R;
   }
   return {
-    async run<R, C extends Caps>(query: Pick<Query<R, C>, 'ir' | '_rowType' | 'caps'>): Promise<R[]> {
-      const { compiled, decode } = prepare(query.ir);
-      try {
-        const result = await execute(compiled);
-        try { return (await result.json<unknown>()).map(decode) as R[]; }
-        finally { result.close(); }
-      } catch (cause) { throw new QueryError(compiled, cause); }
+    async run<R, C extends Caps>(query: Executable<R, C>): Promise<R[]> {
+      if (buffered) return await buffered(prepare(query.ir)) as R[];
+      const rows: R[] = [];
+      for await (const row of stream(query)) rows.push(row);
+      return rows;
     },
-    async *stream<R, C extends Caps>(query: Pick<Query<R, C>, 'ir' | '_rowType' | 'caps'>): AsyncGenerator<R, void> {
-      // Generator bodies are lazy, including compilation and decoder construction.
-      const { compiled, decode } = prepare(query.ir);
-      try {
-        const result = await execute(compiled);
-        try {
-          const stream = result.stream<unknown>();
-          try {
-            for await (const rows of stream) {
-              for (const row of rows) yield decode(row.json()) as R;
-            }
-          } finally { stream.destroy(); }
-        } finally { result.close(); }
-      } catch (cause) { throw new QueryError(compiled, cause); }
-    },
-    close: () => driver.close(),
+    stream,
   };
+}
+/** A non-owning facade: no close method, no ClickHouse-specific dispatch.
+ * Plans are cached by Rel identity only within this facade. Backend errors pass
+ * through unchanged. The caller must keep its backend alive for all executions.
+ */
+export function createClientFromBackend(backend: Backend) { return facade(backend); }
+/** Owns the default planned backend and retains buffered run() compatibility.
+ * Finish/return active iterators before close(); close releases its driver.
+ */
+export function createClient(options: ClickHouseClientConfigOptions = {}) {
+  const backend = createClickHouseBackend(options, 'clickhouse');
+  return { ...facade(backend, backend.runBuffered), close: backend.close };
 }

@@ -56,7 +56,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, toTypeScript, count, sum, max, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
 import { emitNaive } from '@chql/compiler';
-import { createClient, decoder, rowDecoder } from '@chql/client';
+import { createClient, createClientFromBackend, createClickHouseBackend, decoder, rowDecoder } from '@chql/client';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).where(r => r.id.eq(2n)).map(r => ({ id: r.id })).limit(10);
 assert.throws(() => q.toSQL(), /compiler_not_registered/);
 registerCompiler(emitNaive);
@@ -169,6 +169,19 @@ assert.deepEqual(Object.values(expandedPlan.columnPaths), [['a', 'specs'], ['a',
 assert.equal(toTypeScript(expandedPlan.columns[Object.keys(expandedPlan.columns).at(-1)]), 'bigint');
 const plan = joined.toSQL();
 assert.deepEqual(rowDecoder(plan.columns, plan.columnPaths)(Object.fromEntries(Object.keys(plan.columns).map(k => [k, '2']))), { a: { id: 2n }, b: { id: 2n } });
+for (const mode of ['clickhouse', 'clickhouse-naive']) {
+  const backend = createClickHouseBackend({}, mode);
+  assert.equal(backend.name, mode);
+  const plugin = createClientFromBackend(backend);
+  assert.equal('close' in plugin, false);
+  await plugin.stream(nestedExpanded).return();
+  const plan = backend.compile(q.ir);
+  assert.equal(typeof plan.compiled.sql, 'string');
+  await backend.run(plan).return();
+  await backend.close();
+}
+const custom = createClientFromBackend({ name: 'custom', compile: rel => ({ compiled: emitNaive(rel) }), async *run() { yield [{ id: 2n }]; } });
+assert.deepEqual(await custom.run(q), [{ id: 2n }]);
 const streamClient = createClient();
 const lazy = streamClient.stream(nestedExpanded);
 assert.equal(typeof lazy[Symbol.asyncIterator], 'function');
