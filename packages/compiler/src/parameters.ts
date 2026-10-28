@@ -16,7 +16,7 @@ function arrayLiteral(value: unknown, type: CHType): string {
   const encoded = serializeParameter(value, type);
   // Array text uses Bool words, unlike scalar HTTP parameters (1/0).
   if (type.kind === 'scalar' && type.name === 'Bool') return value ? 'true' : 'false';
-  if (type.kind === 'FixedString' || type.kind === 'DateTime64' || (type.kind === 'scalar' && type.name === 'String')) {
+  if (type.kind === 'FixedString' || type.kind === 'DateTime64' || (type.kind === 'scalar' && (type.name === 'String' || type.name === 'Date'))) {
     return "'" + encoded.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t').replaceAll('\0', '\\0') + "'";
   }
   return encoded;
@@ -44,6 +44,12 @@ export function serializeParameter(value: unknown, type: CHType): string {
     if (typeof value === 'number') return String(value);
   } else if (type.kind === 'scalar' && type.name === 'Bool') {
     if (typeof value === 'boolean') return value ? '1' : '0';
+  } else if (type.kind === 'scalar' && type.name === 'Date') {
+    // A Date-only parameter is the UTC calendar day of the supplied instant.
+    if (value instanceof Date && Number.isFinite(value.getTime())) {
+      const day = value.toISOString().slice(0, 10);
+      if (/^\d{4}-\d\d-\d\d$/.test(day) && day >= '1970-01-01' && day <= '2149-06-06') return day;
+    }
   } else if (type.kind === 'DateTime64' && type.precision <= 3) {
     if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().replace('T', ' ').slice(0, type.precision === 0 ? 19 : 20 + type.precision);
   }

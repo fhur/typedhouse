@@ -63,11 +63,11 @@ it('wraps execution, stream creation, read, JSON and decode failures with contex
 });
 it('does not compile abandoned iterators and preserves lazy preparation errors', async () => {
   const client = createClient();
-  const unsupported = from(table('unsupported', { date: col.Date }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const unsupported = from(table('unsupported', { date: col.Date32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
   const abandoned = client.stream(unsupported);
   await abandoned.return();
   expect(driver.query).not.toHaveBeenCalled();
-  await expect(client.stream(unsupported).next()).rejects.toThrow('decode_unsupported: Date');
+  await expect(client.stream(unsupported).next()).rejects.toThrow('decode_unsupported: Date32');
   await expect(client.stream(unsupported).next()).rejects.not.toBeInstanceOf(QueryError);
   expect(driver.query).not.toHaveBeenCalled();
 });

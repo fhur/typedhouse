@@ -6,7 +6,7 @@ import { orderingCatalog } from '../packages/core/src/catalog/ordering.js';
 
 const imports = `import type { Expr, Constant } from './expr.js';\nimport type { Mode, Decimal } from './types.js';\n`;
 const helpers = `import type { SetQuery } from './subquery.js';
-import type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
+import type { WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 type NullResult<T, R> = null extends T ? R | null : R;
 type NumericResult<T> = T extends bigint ? bigint : T extends Decimal ? Decimal : number | bigint;
 type DivideResult<T> = T extends Decimal ? Decimal : number;
@@ -42,6 +42,7 @@ function signature(definition: Definition): string {
   const receiver = (allowed: string) => `this: Expr<${allowed} | null, string, M>`;
   const argument = 'other: Operand<U, NoInfer<M>>';
   switch (surface) {
+    case 'week': return `${name}<D, V extends Date | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & WeekReceiver<D>): WeekResult<V, N, M>;`;
     case 'length': case 'empty': return `${name}<D, V extends string | readonly unknown[] | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'either'>): StructuralResult<V, N, M, '${surface === 'length' ? 'UInt64' : 'Bool'}'>;`;
     // Keep primitives separate from descriptor-checked expressions: a broad Operand
     // fallback would let unsupported decoded strings bypass the byte-string check.

@@ -24,6 +24,121 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('adversarial weekly Date: exhausts every supported day against independent calendar arithmetic and SQL', async () => {
+  await sql('CREATE TABLE adversarial_calendar (day Date) ENGINE=Memory');
+  await sql("INSERT INTO adversarial_calendar SELECT toDate(number) FROM numbers(65536)");
+  const source = from(table('adversarial_calendar', { day: col.Date }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const valid = source.where(r => r.day.ge(new Date('1970-01-04')));
+  const q = valid.map(r => ({ day: r.day, week: r.day.toStartOfWeek(), twice: r.day.toStartOfWeek().toStartOfWeek() })).orderBy(r => r.day);
+  const expected = Array.from({ length: 65533 }, (_, i) => {
+    const day = new Date((i + 3) * 86400000);
+    const week = new Date(day.getTime() - day.getUTCDay() * 86400000);
+    return { day, week, twice: week };
+  });
+  const native = (await sql("SELECT day,toStartOfWeek(day,0) AS week FROM adversarial_calendar WHERE day >= toDate('1970-01-04') ORDER BY day FORMAT JSONEachRow")).trim().split('\n').map(line => {
+    const row = JSON.parse(line); return { day: new Date(row.day), week: new Date(row.week), twice: new Date(row.week) };
+  });
+  expect(native).toEqual(expected);
+  expect(await client.run(q)).toEqual(expected);
+  const streamed = []; for await (const row of client.stream(q)) streamed.push(row); expect(streamed).toEqual(expected);
+  for (const day of ['1970-01-01', '1970-01-02', '1970-01-03']) {
+    const invalid = source.where(r => r.day.eq(new Date(day))).map(r => r.day.toStartOfWeek());
+    await expect(client.run(invalid)).rejects.toMatchObject({ cause: { message: expect.stringContaining('chql_date_out_of_range') } });
+    await expect((async () => { for await (const _row of client.stream(invalid)) { /* drain */ } })()).rejects.toMatchObject({ cause: { message: expect.stringContaining('chql_date_out_of_range') } });
+  }
+}, 30000);
+it('adversarial weekly Date: nullable array transport, repeated union scopes and DST calendar boundaries', async () => {
+  const seed = from(db.entity_ots_component).limit(1);
+  const shared = val(new Date('2024-03-10T23:59:59-07:00'), col.Date);
+  const dates = seed.map(() => ({ dates: val([null, new Date('2024-03-10T23:59:59-07:00'), new Date('2149-06-06T23:59:59Z')], col.Array(col.Nullable(col.Date))) }))
+    .arrayJoin(r => r.dates, 'day').map(r => ({ day: r.day, week: r.day.toStartOfWeek(), shared, equal: val(new Date('2024-03-11'), col.Date) }));
+  const q = unionAll(dates, dates).orderBy(r => r.day.asc().nullsFirst());
+  const compiled = emitNaive(q.ir);
+  expect(Object.values(compiled.params)).toEqual(['2024-03-11', '2024-03-11', "[NULL,'2024-03-11','2149-06-06']"]);
+  expect(compiled.sql).not.toContain('2024-03-11');
+  const expected = [null, null, '2024-03-11', '2024-03-11', '2149-06-06', '2149-06-06'].map(day => ({ day: day === null ? null : new Date(day), week: day === null ? null : new Date(day === '2149-06-06' ? '2149-06-01' : '2024-03-10'), shared: new Date('2024-03-11'), equal: new Date('2024-03-11') }));
+  expect(await client.run(q)).toEqual(expected);
+  const rows = []; for await (const row of client.stream(q)) rows.push(row); expect(rows).toEqual(expected);
+  await sql("CREATE TABLE adversarial_dst (at Nullable(DateTime64(3,'America/New_York'))) ENGINE=Memory");
+  await sql("INSERT INTO adversarial_dst SELECT toDateTime64(instant,3,'UTC') FROM values('instant String',('2024-03-10 04:59:59.999'),('2024-03-10 05:00:00'),('2024-03-10 07:00:00'),('2024-11-03 03:59:59.999'),('2024-11-03 04:00:00'),('2024-11-03 05:30:00'),('2024-11-03 06:30:00'))");
+  await sql('INSERT INTO adversarial_dst VALUES (NULL)');
+  const zoned = from(table('adversarial_dst', { at: col.Nullable(col.DateTime64(3, 'America/New_York')) }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).orderBy(r => r.at.asc().nullsFirst()).map(r => ({ week: r.at.toStartOfWeek() }));
+  const weeks = [null, '2024-03-03', '2024-03-10', '2024-03-10', '2024-10-27', '2024-11-03', '2024-11-03', '2024-11-03'].map(day => ({ week: day === null ? null : new Date(day) }));
+  const direct = (await sql('SELECT toStartOfWeek(at,0) AS week,toTypeName(week) AS type FROM adversarial_dst ORDER BY at NULLS FIRST FORMAT JSONEachRow')).trim().split('\n').map(line => JSON.parse(line));
+  expect(direct.map(row => ({ week: row.week === null ? null : new Date(row.week) }))).toEqual(weeks);
+  expect(direct.map(row => row.type)).toEqual(Array(8).fill('Nullable(Date)'));
+  expect(await client.run(zoned)).toEqual(weeks);
+  const streamed = []; for await (const row of client.stream(zoned)) streamed.push(row); expect(streamed).toEqual(weeks);
+});
+it('runs strict weekly Date means against independent SQL with FINAL, nullable groups and timezone settings', async () => {
+  await sql("CREATE TABLE weekly_history (tenant String, entity String, at DateTime64(3,'America/New_York'), inserted UInt32, stock Nullable(Float64)) ENGINE=ReplacingMergeTree(inserted) ORDER BY (tenant,entity,at)");
+  await sql("INSERT INTO weekly_history VALUES ('acme','cmp_7','2024-02-29 12:00:00',1,2),('acme','cmp_7','2024-03-02 23:30:00',1,99),('acme','cmp_7','2024-03-02 23:30:00',2,6),('acme','cmp_7','2024-03-03 00:00:00',1,NULL),('acme','cmp_7','2024-03-04 00:00:00',1,8),('acme','cmp_7','2024-03-10 00:00:00',1,NULL),('other','cmp_7','2024-03-03',1,900),('acme','other','2024-03-03',1,800)");
+  const source = from(table('weekly_history', { tenant: col.String, entity: col.String, at: col.DateTime64(3, 'America/New_York'), inserted: col.UInt32, stock: col.Nullable(col.Float64) }, { engine: 'ReplacingMergeTree', sortingKey: ['tenant', 'entity', 'at'], partitionKey: [] })).final().where(r => r.tenant.eq('acme')).where(r => r.entity.eq('cmp_7'));
+  const weekly = source.groupBy(r => ({ week: r.at.toStartOfWeek() })).aggregate(g => ({ stock: avg(g.stock) }));
+  const baseline = "SELECT toStartOfWeek(at,0) AS week,avg(stock) AS stock FROM weekly_history FINAL WHERE tenant='acme' AND entity='cmp_7' GROUP BY week";
+  const direct = JSON.parse(await sql(`SELECT groupArray(tuple(toString(week),stock)) AS rows FROM (${baseline} ORDER BY week) FORMAT JSONEachRow`)).rows.map(([day, stock]: [string, number | null]) => ({ week: new Date(`${day}T00:00:00Z`), stock }));
+  expect(direct).toEqual([{ week: new Date('2024-02-25'), stock: 4 }, { week: new Date('2024-03-03'), stock: 8 }, { week: new Date('2024-03-10'), stock: null }]);
+  const compare = async (query: { ir: import('@chql/core').Rel; caps: { live: boolean }; _rowType: { week: Date; stock: number | null } }, expected: typeof direct) => {
+    expect(await client.run(query)).toEqual(expected);
+    const rows = []; for await (const row of client.stream(query)) rows.push(row); expect(rows).toEqual(expected);
+  };
+  await compare(weekly.orderBy(r => r.week), direct);
+  const windowed = source.where(r => r.at.ge(new Date('2024-03-03T05:00:00Z')).and(r.at.lt(new Date('2024-03-10T05:00:00Z'))))
+    .groupBy(r => ({ week: r.at.toStartOfWeek() })).aggregate(g => ({ stock: avg(g.stock) }));
+  const directWindow = JSON.parse(await sql("SELECT toString(toStartOfWeek(at,0)) AS week,avg(stock) AS stock FROM weekly_history FINAL WHERE tenant='acme' AND entity='cmp_7' AND at>=toDateTime64('2024-03-03 05:00:00',3,'UTC') AND at<toDateTime64('2024-03-10 05:00:00',3,'UTC') GROUP BY week FORMAT JSONEachRow"));
+  await compare(windowed, [{ week: new Date(directWindow.week), stock: directWindow.stock }]);
+  const latestWeek = source.aggregate(g => ({ week: max(g.at).toStartOfWeek() }));
+  expect(await client.run(latestWeek)).toEqual([{ week: new Date('2024-03-10') }]);
+  await compare(unionAll(weekly, weekly).where(r => r.week.ge(new Date('2024-03-03T20:00:00Z'))).orderBy(r => r.week).limit(2), [direct[1], direct[1]]);
+  await compare(source.limit(0).groupBy(r => ({ week: r.at.toStartOfWeek() })).aggregate(g => ({ stock: avg(g.stock) })), []);
+  expect(Object.values(emitNaive(weekly.ir).columns).map(print)).toEqual(['Date', 'Nullable(Float64)']);
+  const seed = from(db.entity_ots_component).limit(1);
+  await sql('CREATE TABLE calendar_days (day Date, optional Nullable(Date)) ENGINE=Memory');
+  await sql("INSERT INTO calendar_days VALUES ('1970-01-01',NULL),('2024-02-29','2024-02-29'),('2149-06-06','2149-06-06')");
+  const calendar = from(table('calendar_days', { day: col.Date, optional: col.Nullable(col.Date) }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).orderBy(r => r.day);
+  const calendarExpected = [{ day: new Date('1970-01-01'), optional: null }, { day: new Date('2024-02-29'), optional: new Date('2024-02-29') }, { day: new Date('2149-06-06'), optional: new Date('2149-06-06') }];
+  expect(await client.run(calendar)).toEqual(calendarExpected);
+  const calendarRows = []; for await (const row of client.stream(calendar)) calendarRows.push(row); expect(calendarRows).toEqual(calendarExpected);
+  const dateArray = seed.map(() => ({ days: val([new Date('1970-01-01'), null, new Date('2024-02-29')], col.Array(col.Nullable(col.Date))) }));
+  expect(await client.run(dateArray)).toEqual([{ days: [new Date('1970-01-01'), null, new Date('2024-02-29')] }]);
+  for (const setting of [0, 1]) {
+    for (const day of ['1970-01-04', '2000-02-29', '2023-12-31', '2024-01-01', '2024-03-03', '2024-03-04', '2149-06-06']) {
+      const input = seed.map(() => ({ day: val(new Date(day), col.Date) }));
+      const q = input.map(r => ({ day: r.day, week: r.day.toStartOfWeek() }));
+      const native = JSON.parse(await sql(`SELECT toStartOfWeek(toDate('${day}'),0) AS week,toTypeName(week) AS type SETTINGS enable_extended_results_for_datetime_functions=${setting} FORMAT JSONEachRow`));
+      expect(native.type).toBe('Date');
+      const expected = [{ day: new Date(day), week: new Date(native.week) }];
+      expect(await client.run(q)).toEqual(expected);
+      const rows = []; for await (const row of client.stream(q)) rows.push(row); expect(rows).toEqual(expected);
+    }
+  }
+  for (const day of ['1970-01-01', '1969-12-31', '2150-01-01']) {
+    const q = seed.map(() => ({ week: val(new Date(day), col.DateTime64(3)).toStartOfWeek() }));
+    await expect(client.run(q)).rejects.toMatchObject({ cause: { message: expect.stringContaining('chql_date_out_of_range') } });
+  }
+  const nullWeek = seed.map(() => ({ week: val(null, col.Nullable(col.Date)).toStartOfWeek() }));
+  expect(await client.run(nullWeek)).toEqual([{ week: null }]);
+  for (const extended of [0, 1] as const) {
+    const zoned = createClient({ url, username: 'fixture', password: 'fixture', clickhouse_settings: { session_timezone: 'Asia/Tokyo', enable_extended_results_for_datetime_functions: extended } });
+    try {
+      for (const precision of [0, 1, 2, 3] as const) {
+        const instant = new Date('2024-03-03T01:00:00Z');
+        // A column timezone differs from both the UTC parameter transport and session timezone.
+        await sql(`CREATE TABLE week_zone_${extended}_${precision} (at DateTime64(${precision},'America/New_York')) ENGINE=Memory`);
+        await sql(`INSERT INTO week_zone_${extended}_${precision} VALUES ('2024-03-02 20:00:00')`);
+        const q = from(table(`week_zone_${extended}_${precision}`, { at: col.DateTime64(precision, 'America/New_York') }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).map(r => ({ week: r.at.toStartOfWeek(), constant: val(instant, col.DateTime64(precision)).toStartOfWeek() }));
+        const expected = [{ week: new Date('2024-02-25'), constant: new Date('2024-03-03') }];
+        expect(await zoned.run(q)).toEqual(expected);
+        const rows = []; for await (const row of zoned.stream(q)) rows.push(row); expect(rows).toEqual(expected);
+        const native = JSON.parse(await sql(`SELECT toStartOfWeek(at,0) AS week,toTypeName(week) AS type FROM week_zone_${extended}_${precision} SETTINGS enable_extended_results_for_datetime_functions=${extended} FORMAT JSONEachRow`));
+        expect(native).toEqual({ week: '2024-02-25', type: extended ? 'Date32' : 'Date' });
+        const descriptorQuery = from(table(`week_zone_${extended}_${precision}`, { at: col.DateTime64(precision, 'America/New_York') }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).map(r => ({ week: r.at.toStartOfWeek() }));
+        const descriptors = JSON.parse(await sql(`SELECT toTypeName(week) AS week FROM (${emitNaive(descriptorQuery.ir).sql}) FORMAT JSONEachRow`));
+        expect(descriptors).toEqual({ week: 'Date' });
+      }
+    } finally { await zoned.close(); }
+  }
+});
 it('summarizes bounded tenant history with FINAL and composes mean outputs through union/scalar', async () => {
   await sql('CREATE TABLE mean_history (tenantId String, entityId String, effectiveAt DateTime64(3), inserted UInt32, stock Float64, lead Nullable(Float64)) ENGINE=ReplacingMergeTree(inserted) ORDER BY (tenantId,entityId,effectiveAt)');
   await sql("INSERT INTO mean_history VALUES ('acme','a','2026-01-01',1,100,100),('acme','a','2026-01-02',1,99,99),('acme','a','2026-01-02',2,8,4),('acme','a','2026-01-03',1,16,NULL),('acme','a','2026-01-04',1,200,200),('acme','b','2026-01-02',1,4,NULL),('other','a','2026-01-02',1,900,900)");
@@ -1155,12 +1270,13 @@ it('adversarial repair: typed NULL preserves nested common-type arithmetic and s
 });
 it('runs the documented executable generated-schema example', async () => {
   await sql('CREATE TABLE metric_group_ots_component_indices (tenantId String,entityId String,version UInt32,effectiveAt DateTime64(3),insertedAt DateTime64(3),price_change_log_sum Float64,price_change_count Float64,stock_index Float64,stock_index_warnings Array(String),lead_time_index_part_days Float64,lead_time_index_part_count Float64,lead_time_max_days Nullable(Float64)) ENGINE=ReplacingMergeTree(insertedAt) ORDER BY (tenantId,entityId,version,effectiveAt)');
-  await sql("INSERT INTO metric_group_ots_component_indices (tenantId,entityId,version,stock_index,lead_time_max_days) VALUES ('acme','a',2,30,NULL),('acme','a',1,20,7),('other','a',3,99,99)");
+  await sql("INSERT INTO metric_group_ots_component_indices (tenantId,entityId,version,effectiveAt,stock_index,lead_time_max_days) VALUES ('acme','a',2,'2026-10-27',30,NULL),('acme','a',1,'2026-10-26',20,7),('other','a',3,'2026-10-27',99,99)");
   const { stdout } = await promisify(execFile)('pnpm', ['example:first-query'], { env: { ...process.env, CLICKHOUSE_URL: url, CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'fixture' }, timeout: 120000 });
   expect(stdout).toContain('18446744073709551615n');
   expect(stdout).toContain('2026-10-27T12:00:00.123Z');
   expect(stdout).toContain("streamed latest metric { entityId: 'a', version: 2, stockIndex: 30, leadDays: 7 }");
   expect(stdout).toContain('latest positive stock [ { stock: 30 } ]');
+  expect(stdout).toContain('streamed weekly mean { week: 2026-10-25T00:00:00.000Z, stock: 25 }');
 });
 it('hostile values cannot escape parameters and genuine server errors retain SQL/params/cause', async () => {
   const q = from(db.entity_ots_component).where(c => c.tenantId.eq("acme' OR 1=1 --")).map(c => ({ id: c.entityId }));

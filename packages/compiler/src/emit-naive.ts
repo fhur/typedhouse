@@ -25,6 +25,7 @@ export function emitNaive(root: Rel): CompiledQuery {
   const active = new Set<Rel>();
   const materialized = new Set<Rel>();
   let cteIndex = 0;
+  let weekBucketing = false;
   // Each derived input owns this local SQL scope; ColumnRefs never bind SELECT aliases.
   const inputAlias = quoteIdentifier('__chql_input');
   function fail(code: string, node: unknown, path: string, detail = ''): never { throw new ValidationError(code, node, path, detail); }
@@ -101,6 +102,14 @@ export function emitNaive(root: Rel): CompiledQuery {
           }
           return expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope, qualifier);
         });
+        if (e.fn.name === 'toStartOfWeek') {
+          weekBucketing = true;
+          // Date32 preserves pre-epoch weeks for the explicit range check. Converting
+          // to Date first would silently clamp/wrap. toDate32 retains the input's
+          // calendar timezone; Date output represents that day at UTC midnight.
+          const week = `toStartOfWeek(toDate32(${args[0]}), 0)`;
+          return `addDays(toDate(${week}), throwIf(ifNull((${week} < toDate32('1970-01-01')) OR (${week} > toDate32('2149-06-06')), 0), 'chql_date_out_of_range'))`;
+        }
         // Retain the established equality SQL contract; all other names come from the catalog.
         return e.fn.name === 'eq' ? `(${args[0]} = ${args[1]})` : `${resolved.sqlName}(${args.join(', ')})`;
       }
@@ -287,7 +296,8 @@ export function emitNaive(root: Rel): CompiledQuery {
       return fail('invalid_ir', rel, path, String(error));
     } finally { active.delete(rel); }
   }
-  const sql = emit(root, 'root');
+  const body = emit(root, 'root');
+  const sql = body + (weekBucketing ? ' SETTINGS enable_extended_results_for_datetime_functions = 1' : '');
   // Warn only after successful validation, once per distinct hint per compile.
   for (const _rel of materialized) console.warn('chql: materialization is not yet implemented; materialize() emits an ordinary CTE, which ClickHouse may inline and evaluate repeatedly.');
   const leaves = outputLeaves(root.output);

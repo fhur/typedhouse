@@ -41,6 +41,11 @@ export function decoder(type: CHType): (value: unknown) => unknown {
     if (v === '-inf') return -Infinity;
     return invalid(v);
   };
+  if (type.kind === 'scalar' && type.name === 'Date') return v => {
+    if (typeof v !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(v) || v < '1970-01-01' || v > '2149-06-06') return invalid(v);
+    const date = new Date(`${v}T00:00:00Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === v ? date : invalid(v);
+  };
   if (type.kind === 'DateTime64' && type.precision <= 3) return v => {
     if (typeof v !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(v)) return invalid(v);
     const day = new Date(`${v.slice(0, 10)}T00:00:00Z`);

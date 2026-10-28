@@ -6,12 +6,22 @@ describe('catalog slice', () => {
   it('installs exactly its generated method surface', () => {
     expect(Object.getOwnPropertyNames(Expr.prototype).filter(n => !['constructor', 'as'].includes(n)).sort()).toEqual([...methodCatalog, ...orderingCatalog].map(d => d.name).sort());
     expect(orderingCatalog.map(d => d.name)).toEqual(['asc', 'desc']);
-    expect(methodCatalog).toHaveLength(26);
+    expect(methodCatalog).toHaveLength(27);
     for (const definition of [...methodCatalog, ...aggregateDefinitions]) {
       expect(definition.deterministic).toBe(true);
       expect(definition.origin).toBe('typed'); expect(definition).not.toHaveProperty('js');
       if (typeof definition.returns === 'function') expect(definition.tsReturns).toBeTruthy();
     }
+  });
+  it('retains weekly descriptors, modes and immutable edges', () => {
+    const input = val(new Date('2024-03-04T12:00:00Z'), col.Nullable(col.DateTime64(3)));
+    const result = input.toStartOfWeek();
+    expect(result.ir.type).toEqual(col.Nullable(col.Date).type);
+    expect(result.mode).toBe('row');
+    if (result.ir.kind !== 'Call') throw new Error('expected Call');
+    expect(result.ir.args[0]).toBe(input.ir);
+    expect(Object.isFrozen(result.ir.args)).toBe(true);
+    expect(Object.isFrozen(result.ir.type)).toBe(true);
   });
   it('retains root names and aggregate modes through methods and combinators', () => {
     const x = grouped(col.Float64);

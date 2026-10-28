@@ -1,6 +1,16 @@
 import { expect, it } from 'vitest';
 import { col } from '@chql/core';
 import { decoder, rowDecoder } from '../src/index.js';
+it('decodes Date as strict UTC calendar days within the UInt16 day range', () => {
+  for (const day of ['1970-01-01', '2000-02-29', '2024-02-29', '2149-06-06']) {
+    expect(decoder(col.Date.type)(day)).toEqual(new Date(`${day}T00:00:00Z`));
+  }
+  for (const value of ['1969-12-31', '2149-06-07', '2100-02-29', '2023-02-29', '2024-02-30', '2024-00-01', '2024-13-01', '2024-01-00', '2024-1-01', '2024-01-01T00:00:00Z', '', null, 0, new Date()]) {
+    expect(() => decoder(col.Date.type)(value)).toThrow(/decode_invalid/);
+  }
+  expect(decoder(col.Nullable(col.Date).type)(null)).toBeNull();
+  expect(decoder(col.Array(col.Date).type)(['2024-02-29'])).toEqual([new Date('2024-02-29T00:00:00Z')]);
+});
 it('decodes structural fields, booleans and numerical boundaries strictly', () => {
   expect(decoder({ kind: 'Tuple', items: [] })([])).toEqual([]);
   const type = col.Array(col.Tuple({ ['__proto__']: col.Int64, 'a.b': col.Array(col.Nullable(col.Bool)), '0': col.Float64 })).type;

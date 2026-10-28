@@ -117,8 +117,41 @@ Means use Float64: wide integers can lose precision (9007199254740993 becomes
 9007199254740992), and floating accumulation is not exact decimal arithmetic.
 Decimal, Bool, String, wrappers and containers are rejected; State/Merge are
 not exposed. Aligned means compose with UNION ALL and bounded global scalar
-queries (scalar remains Nullable). Weekly Date bucketing and quantile remain
-backlog. `pnpm example:first-query` runs the analogous indices history query.
+queries (scalar remains Nullable). Quantile remains backlog.
+`pnpm example:first-query` runs the analogous indices history and weekly queries.
+
+Weekly mean stock history (Sunday-start weeks, not ISO/Monday):
+```ts
+const weekly = from(db.metric_group_ots_component_market_availability).final()
+  .where(a => a.tenantId.eq('acme')).where(a => a.entityId.eq('cmp_7'))
+  .groupBy(a => ({ week: a.effectiveAt.toStartOfWeek() }))
+  .aggregate(g => ({ stock: avg(g.market_stock_total) }))
+  .where(r => r.week.ge(new Date('2026-01-04T00:00:00Z')))
+  .orderBy(r => r.week);
+console.log(await client.run(weekly));
+for await (const row of client.stream(weekly)) console.log(row);
+```
+The generated zero-argument method supports retained Date/DateTime64(0–3)
+(and Nullable) descriptors only. It preserves root names and row/grouped/aggregate
+modes; NULL produces NULL. Bucketing uses the input column's calendar timezone
+(or the server/session timezone for unzoned columns). DateTime64 JS parameters
+still represent UTC instants and use UTC wire descriptors, so a standalone
+parameter buckets in UTC. Returned Date days decode to **UTC midnight**, not a
+midnight instant in the source timezone.
+
+On pinned 24.8, native DateTime64 week results change from Date to Date32 with
+`enable_extended_results_for_datetime_functions`. Queries containing this method
+explicitly emit `SETTINGS enable_extended_results_for_datetime_functions = 1`,
+bucket through Date32 with mode 0, check the result range, then normalize to Date.
+Other queries do not acquire this setting. A week before 1970-01-01 or after
+2149-06-06 raises `chql_date_out_of_range` instead of silently wrapping/clamping;
+notably 1970-01-01–03 belong to an unsupported pre-epoch Sunday week.
+Date wire strings must be valid canonical YYYY-MM-DD within 1970-01-01–2149-06-06.
+Date parameters use the UTC calendar day of a valid JS Date (time-of-day discarded),
+with the same range validation, including Array elements. Invalid wire calendar
+days are rejected, never normalized by JavaScript. Date32/DateTime/high-precision
+bucketing and Date scalar/IN subqueries remain unsupported; this is not full
+weekly quantile-series or temporal-catalog acceptance.
 
 Latest metric values do not require a self-join:
 ```ts

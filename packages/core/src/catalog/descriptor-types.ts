@@ -2,6 +2,10 @@ import type { CHType, ScalarName } from '../ch-type.js';
 import type { DescribedExpr, Expr } from '../expr.js';
 import type { Decimal, Mode, ScalarValue } from '../types.js';
 
+type WeekBase = { readonly kind: 'scalar'; readonly name: 'Date' } | { readonly kind: 'DateTime64'; readonly precision: 0 | 1 | 2 | 3 };
+export type WeekReceiver<D> = [D] extends [WeekBase | { readonly kind: 'Nullable'; readonly inner: WeekBase }] ? unknown : never;
+export type WeekResult<T, N extends string, M extends Mode> = DescribedExpr<null extends T ? Date | null : Date, N, M, null extends T ? { readonly kind: 'Nullable'; readonly inner: { readonly kind: 'scalar'; readonly name: 'Date' } } : { readonly kind: 'scalar'; readonly name: 'Date' }>;
+
 /** Sum promotes Decimal32/64/128 storage to Decimal128, and Decimal256 to itself.
  * A nonliteral precision can occupy either storage class. */
 export type SumPrecision<P> = number extends P ? 38 | 76 : P extends

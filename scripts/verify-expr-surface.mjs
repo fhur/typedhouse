@@ -20,6 +20,10 @@ const noArgAggregate = core.defineAggregate({ name: 'customCount', args: [], ret
 const parametricCount = core.defineAggregate({ name: 'customParamCount', params: [col.Float64], args: [], returns: col.UInt64, deterministic: true, linear: true });
 const parametricSum = core.defineAggregate({ name: 'customParamSum', params: [col.Float64], args: [core.numeric], returns: col.UInt64, deterministic: true, linear: true });
 const cases = {
+  ...Object.fromEntries(['row', 'grouped', 'agg'].flatMap(mode => [
+    [`week_${mode}`, `column(col.DateTime64(3), 'at', '${mode}').toStartOfWeek()`],
+    [`week_nullable_${mode}`, `column(col.Nullable(col.Date), 'day', '${mode}').toStartOfWeek()`],
+  ])),
   membershipEmpty: 'id.in([])',
   membershipNullable: 'nullable.notIn([1n, 2n])',
   membershipGrouped: "groupedString.in(['EOL'])",
@@ -151,7 +155,7 @@ try {
   writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery } from '@chql/core';\n");
   writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@chql/core';\n");
   mkdirSync(join(directory, 'catalog'));
-  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");
+  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");
   let source = `import { expectTypeOf } from 'expect-type';
 import { Expr, columnExpr, col, exprNode, count, countIf, sum, max, sumIf, sumState, countState, maxState, countMerge, val, cast, defineFunction, defineAggregate, numeric, extendExpr, stringLike, type Mode, type Column, type NodeId, type AggregateState, type Decimal, type DescribedExpr, sumMerge, maxMerge } from '@chql/core';
 import type { GeneratedExprMethods } from './surface.js';

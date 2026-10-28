@@ -4,6 +4,31 @@ import { createClient } from '@chql/client';
 const t = table('entity', { tenantId: col.String, id: col.UInt64, updatedAt: col.DateTime64(3), category: col.Nullable(col.String), tuple: col.Tuple({ name: col.String }) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 import { cast, crossJoin, unionAll, scalar } from '@chql/core';
 const metrics = from(table('metrics', { entityId: col.String, version: col.UInt32, stock: col.Float32, lead: col.Nullable(col.Float64), label: col.String, enabled: col.Bool, wide: col.UInt256 }, { engine: 'ReplacingMergeTree', sortingKey: [], partitionKey: [] }));
+const weeklyDates = from(t).groupBy(r => r.updatedAt.toStartOfWeek()).aggregate(g => {
+  const groupedWeek = g.updatedAt.toStartOfWeek();
+  expectTypeOf(groupedWeek.mode).toEqualTypeOf<'grouped'>();
+  const latestWeek = max(g.updatedAt).toStartOfWeek();
+  expectTypeOf(latestWeek.mode).toEqualTypeOf<'agg'>();
+  expectTypeOf(latestWeek.ir.type.name).toEqualTypeOf<'Date'>();
+  return { mean: avg(g.id), latestWeek };
+});
+expectTypeOf<Infer<typeof weeklyDates>>().toEqualTypeOf<{ updatedAt: Date; mean: number; latestWeek: Date }>();
+expectTypeOf<Infer<typeof weeklyDates>>().not.toBeAny();
+expectTypeOf(weeklyDates.row.updatedAt.ir.type.name).toEqualTypeOf<'Date'>();
+const nullableWeek = val(null, col.Nullable(col.DateTime64(2))).toStartOfWeek();
+expectTypeOf(nullableWeek.ir.type.inner.name).toEqualTypeOf<'Date'>();
+expectTypeOf(nullableWeek.mode).toEqualTypeOf<'row'>();
+const weeklyAligned = unionAll(weeklyDates, weeklyDates).where(r => r.updatedAt.ge(new Date('2024-01-01')));
+expectTypeOf<Infer<typeof weeklyAligned>>().toEqualTypeOf<{ updatedAt: Date; mean: number; latestWeek: Date }>();
+expectTypeOf<Infer<typeof weeklyAligned>>().not.toBeAny();
+const expandedWeeks = from(t).map(() => ({ days: val([null, new Date('2024-03-11')], col.Array(col.Nullable(col.Date))) }))
+  .arrayJoin(r => r.days, 'day').map(r => ({ week: r.day.toStartOfWeek().toStartOfWeek() }));
+expectTypeOf<Infer<typeof expandedWeeks>>().toEqualTypeOf<{ week: Date | null }>();
+expectTypeOf<Infer<typeof expandedWeeks>>().not.toBeAny();
+expectTypeOf(expandedWeeks.row.week.ir.type.inner.name).toEqualTypeOf<'Date'>();
+const regroupedWeeks = unionAll(expandedWeeks, expandedWeeks).groupBy(r => r.week).aggregate(() => count());
+expectTypeOf<Infer<typeof regroupedWeeks>>().toEqualTypeOf<{ week: Date | null; count: bigint }>();
+expectTypeOf<Infer<typeof regroupedWeeks>>().not.toBeAny();
 const meanMetrics = metrics.final().groupBy(r => r.entityId).aggregate(g => {
   const mean = avg(g.wide);
   expectTypeOf(mean.name).toEqualTypeOf<'wide'>();
