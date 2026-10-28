@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
+import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
 import { compile, emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -45,6 +45,93 @@ it('simple optimizer agrees with naive execution across clause boundaries', asyn
     expect(await execute(compile)).toBe(await execute(emitNaive));
   }
 });
+it('adversarial quantile: fractional levels, mixed nullable predicates and hostile parameters compose across both emitters', async () => {
+  await sql('CREATE TABLE adversarial_quantiles (x Nullable(Float64), selected Nullable(Bool)) ENGINE=Memory');
+  await sql('INSERT INTO adversarial_quantiles VALUES (0,true),(8,true),(16,true),(32,false),(64,NULL),(NULL,true)');
+  const source = from(table('adversarial_quantiles', { x: col.Nullable(col.Float64), selected: col.Nullable(col.Bool) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const hostile = "'\\\\\n\u0000日本語 {p0:Float64} --";
+  for (const level of [-0, Number.MIN_VALUE, 0.25, 0.75, 1 - Number.EPSILON, 1]) {
+    const summary = source.aggregate(g => {
+      const selected = quantileIf(level)(g.x, g.selected);
+      return { selected, shared: selected, equal: quantileIf(level)(g.x, g.selected) };
+    });
+    const direct = JSON.parse(await sql(`SELECT quantileIf(toFloat64('${level}'))(x,selected) AS q,toTypeName(q) AS type FROM adversarial_quantiles FORMAT JSONEachRow`));
+    expect(direct.type).toBe('Nullable(Float64)');
+    expect(direct.q).toBeCloseTo(16 * level, 12);
+    const query = unionAll(summary, summary).map(r => ({ ...r, tag: val(hostile), global: scalar(source.aggregate(g => quantileIf(level)(g.x, g.selected))) }));
+    const expected = Array.from({ length: 2 }, () => ({ selected: direct.q, shared: direct.q, equal: direct.q, tag: hostile, global: direct.q }));
+    expect(await client.run(query)).toEqual(expected);
+    const streamed = []; for await (const row of client.stream(query)) streamed.push(row); expect(streamed).toEqual(expected);
+    for (const emitter of [compile, emitNaive]) {
+      const plan = emitter(query.ir);
+      expect(plan.sql).not.toContain(hostile);
+      expect(plan.parameterTypes).toBeDefined();
+      const levels = Object.entries(plan.parameterTypes!).filter(([, type]) => print(type) === 'Float64');
+      expect(levels).toHaveLength(3); // scalar, shared aggregate, separately constructed equal aggregate
+      expect(levels.map(([name]) => plan.params[name])).toEqual([String(level), String(level), String(level)]);
+      const endpoint = new URL(url);
+      // Raw HTTP needs ClickHouse escaped-text transport (the client driver does this itself).
+      for (const [key, value] of Object.entries(plan.params)) endpoint.searchParams.set(`param_${key}`, value.replaceAll('\\', '\\\\').replaceAll('\n', '\\n').replaceAll('\0', '\\0'));
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: `${plan.sql} FORMAT JSONEachRow` });
+      const text = await response.text();
+      expect(response.ok, text).toBe(true);
+      expect(text.trim().split('\n').map(line => JSON.parse(line))).toEqual(expected);
+    }
+  }
+});
+it('runs weekly quantile history with FINAL isolation, Date windows, unions and scalar composition', async () => {
+  await sql("CREATE TABLE quantile_history (tenant String, entity String, at DateTime64(3), version UInt32, value Nullable(Float64)) ENGINE=ReplacingMergeTree(version) ORDER BY (tenant,entity,at)");
+  await sql("INSERT INTO quantile_history VALUES ('acme','cmp_7','2024-03-03',1,100),('acme','cmp_7','2024-03-03',2,2),('acme','cmp_7','2024-03-04',1,6),('acme','cmp_7','2024-03-10',1,NULL),('acme','cmp_7','2024-03-17',1,20),('other','cmp_7','2024-03-03',1,900),('acme','other','2024-03-03',1,800)");
+  const source = from(table('quantile_history', { tenant: col.String, entity: col.String, at: col.DateTime64(3), version: col.UInt32, value: col.Nullable(col.Float64) }, { engine: 'ReplacingMergeTree', sortingKey: ['tenant', 'entity', 'at'], partitionKey: [] })).final().where(r => r.tenant.eq('acme')).where(r => r.entity.eq('cmp_7')).where(r => r.at.ge(new Date('2024-03-03')).and(r.at.lt(new Date('2024-03-17'))));
+  const weekly = source.groupBy(r => ({ week: r.at.toStartOfWeek() })).aggregate(g => ({ stock: avg(g.value), leadDays: quantile(0.5)(g.value), selected: quantileIf(1)(g.value, g.value.gt(3)) }));
+  const direct = (await sql("SELECT toStartOfWeek(at) AS week,avg(value) AS stock,quantile(0.5)(value) AS leadDays,quantileIf(1)(value,value>3) AS selected,toTypeName(leadDays) AS type FROM quantile_history FINAL WHERE tenant='acme' AND entity='cmp_7' AND at>=toDateTime64('2024-03-03',3) AND at<toDateTime64('2024-03-17',3) GROUP BY week ORDER BY week FORMAT JSONEachRow")).trim().split('\n').map(line => JSON.parse(line));
+  expect(direct.map(r => r.type)).toEqual(['Nullable(Float64)', 'Nullable(Float64)']);
+  const expected = direct.map(({ week, stock, leadDays, selected }) => ({ week: new Date(week), stock, leadDays, selected }));
+  expect(expected).toEqual([{ week: new Date('2024-03-03'), stock: 4, leadDays: 4, selected: 6 }, { week: new Date('2024-03-10'), stock: null, leadDays: null, selected: null }]);
+  const query = unionAll(weekly, weekly).where(r => r.week.ge(new Date('2024-03-03'))).orderBy(r => r.week).limit(3);
+  const rows = [expected[0], expected[0], expected[1]];
+  expect(await client.run(query)).toEqual(rows);
+  const streamed = []; for await (const row of client.stream(query)) streamed.push(row); expect(streamed).toEqual(rows);
+  const scalarQuery = source.limit(1).map(() => ({ median: scalar(source.aggregate(g => quantile(0.5)(g.value))) }));
+  expect(await client.run(scalarQuery)).toEqual([{ median: 4 }]);
+  const scalarRows = []; for await (const row of client.stream(scalarQuery)) scalarRows.push(row); expect(scalarRows).toEqual([{ median: 4 }]);
+});
+it('proves quantile numeric widths, empty/null/If results and nonfinite values on 24.8', async () => {
+  const seed = from(db.entity_ots_component).limit(1);
+  for (const descriptor of [col.UInt8, col.UInt16, col.UInt32, col.UInt64, col.UInt128, col.UInt256, col.Int8, col.Int16, col.Int32, col.Int64, col.Int128, col.Int256, col.Float32, col.Float64]) {
+    const type = print(descriptor.type), wide = /Int(64|128|256)$/.test(type);
+    const column: Column<number | bigint> = descriptor;
+    const values = seed.map(() => ({ values: val(wide ? [0n, 2n, 4n] : [0, 2, 4], col.Array(column)) })).arrayJoin(r => r.values, 'value');
+    const query = values.aggregate(g => ({ low: quantile(0)(g.value), mid: quantile(0.5)(g.value), high: quantile(1)(g.value), missing: quantileIf(0.5)(g.value, val(null, col.Nullable(col.Bool))) }));
+    const direct = JSON.parse(await sql(`SELECT quantile(0)(x) AS low,quantile(0.5)(x) AS mid,quantile(1)(x) AS high,toTypeName(mid) AS type FROM (SELECT CAST(number*2 AS ${type}) AS x FROM numbers(3)) FORMAT JSONEachRow`));
+    expect(direct).toEqual({ low: 0, mid: 2, high: 4, type: 'Float64' });
+    const expected = [{ low: 0, mid: 2, high: 4, missing: NaN }];
+    expect(await client.run(query)).toEqual(expected);
+    const rows = []; for await (const row of client.stream(query)) rows.push(row); expect(rows).toEqual(expected);
+    expect(await client.run(values.limit(0).aggregate(g => quantile(0.5)(g.value)))).toEqual([{ value: NaN }]);
+    const optional: Column<number | bigint | null> = col.Nullable(column);
+    const nullableValues = seed.map(() => ({ xs: val(wide ? [null, 2n, 4n] : [null, 2, 4], col.Array(optional)) })).arrayJoin(r => r.xs, 'x');
+    const nullableQuery = nullableValues.aggregate(g => ({ mid: quantile(0.5)(g.x), missing: quantileIf(0.5)(g.x, val(false)) }));
+    const nullableDirect = JSON.parse(await sql(`SELECT quantile(0.5)(x) AS mid,quantileIf(0.5)(x,false) AS missing,toTypeName(mid) AS type FROM (SELECT arrayJoin([CAST(NULL AS Nullable(${type})),CAST(2 AS Nullable(${type})),CAST(4 AS Nullable(${type}))]) AS x) FORMAT JSONEachRow`));
+    expect(nullableDirect).toEqual({ mid: 3, missing: null, type: 'Nullable(Float64)' });
+    expect(await client.run(nullableQuery)).toEqual([{ mid: 3, missing: null }]);
+    const nullableRows = []; for await (const row of client.stream(nullableQuery)) nullableRows.push(row); expect(nullableRows).toEqual([{ mid: 3, missing: null }]);
+    expect(await client.run(nullableValues.limit(0).aggregate(g => quantile(0.5)(g.x)))).toEqual([{ x: null }]);
+  }
+  for (const [values, expected] of [[[NaN, 2, 4], 3], [[-Infinity, Infinity], NaN], [[Infinity], Infinity], [[-Infinity], -Infinity]] as const) {
+    const query = seed.map(() => ({ xs: val([...values], col.Array(col.Float64)) })).arrayJoin(r => r.xs, 'x').aggregate(g => quantile(0.5)(g.x));
+    expect(await client.run(query)).toEqual([{ x: expected }]);
+    const rows = []; for await (const row of client.stream(query)) rows.push(row); expect(rows).toEqual([{ x: expected }]);
+  }
+  const nullableNan = seed.aggregate(() => quantile(0.5)(val(NaN, col.Nullable(col.Float64))));
+  expect(await client.run(nullableNan)).toEqual([{ quantile: NaN }]);
+  const nullableNanRows = []; for await (const row of client.stream(nullableNan)) nullableNanRows.push(row); expect(nullableNanRows).toEqual([{ quantile: NaN }]);
+  const empty = seed.limit(0).aggregate(() => quantile(0.5)(val(null, col.Nullable(col.Float64))));
+  expect(await client.run(empty)).toEqual([{ quantile: null }]);
+  // Larger than the reservoir: only assert boundedness, not independent random sample equality.
+  const approx = JSON.parse(await sql('SELECT quantile(0.5)(number) AS q FROM numbers(20000) FORMAT JSONEachRow'));
+  expect(approx.q).toBeGreaterThanOrEqual(0); expect(approx.q).toBeLessThanOrEqual(19999);
+}, 30000);
 it('adversarial weekly Date: exhausts every supported day against independent calendar arithmetic and SQL', async () => {
   await sql('CREATE TABLE adversarial_calendar (day Date) ENGINE=Memory');
   await sql("INSERT INTO adversarial_calendar SELECT toDate(number) FROM numbers(65536)");
@@ -1298,6 +1385,7 @@ it('runs the documented executable generated-schema example', async () => {
   expect(stdout).toContain("streamed latest metric { entityId: 'a', version: 2, stockIndex: 30, leadDays: 7 }");
   expect(stdout).toContain('latest positive stock [ { stock: 30 } ]');
   expect(stdout).toContain('streamed weekly mean { week: 2026-10-25T00:00:00.000Z, stock: 25 }');
+  expect(stdout).toContain('streamed weekly quantile { week: 2026-10-25T00:00:00.000Z, stock: 25, leadDays: 7 }');
 });
 it('hostile values cannot escape parameters and genuine server errors retain SQL/params/cause', async () => {
   const q = from(db.entity_ots_component).where(c => c.tenantId.eq("acme' OR 1=1 --")).map(c => ({ id: c.entityId }));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GenericContainer, Wait } from 'testcontainers';
-import { avg, avgIf, argMax, argMaxIf, Expr, aggregateDefinitions, col, count, countIf, countState, defineAggregate, defineFunction, exprNode, extendExpr, max, maxMerge, methodCatalog, orderingCatalog, stringLike, sum, sumIf, sumMerge, sumState, val, parseCHType, type Column, type NodeId } from '../src/index.js';
+import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, Expr, aggregateDefinitions, col, count, countIf, countState, defineAggregate, defineFunction, exprNode, extendExpr, max, maxMerge, methodCatalog, orderingCatalog, stringLike, sum, sumIf, sumMerge, sumState, val, parseCHType, type Column, type NodeId } from '../src/index.js';
 function grouped<T>(column: Column<T>) { return new Expr<T, 'value', 'grouped'>(exprNode({ kind: 'ColumnRef', rel: 1 as NodeId, path: ['value'], type: column.type }), 'value', 'grouped'); }
 describe('catalog slice', () => {
   it('installs exactly its generated method surface', () => {
@@ -8,10 +8,21 @@ describe('catalog slice', () => {
     expect(orderingCatalog.map(d => d.name)).toEqual(['asc', 'desc']);
     expect(methodCatalog).toHaveLength(27);
     for (const definition of [...methodCatalog, ...aggregateDefinitions]) {
-      expect(definition.deterministic).toBe(true);
+      expect(definition.deterministic).toBe(definition.name !== 'quantile');
       expect(definition.origin).toBe('typed'); expect(definition).not.toHaveProperty('js');
       if (typeof definition.returns === 'function') expect(definition.tsReturns).toBeTruthy();
     }
+  });
+  it('retains quantile roots, descriptors and fresh-per-application immutable level Params', () => {
+    const curry = quantile(0.5), value = grouped(col.Nullable(col.Float64));
+    const a = curry(value), b = curry(value);
+    expect(a).toMatchObject({ name: 'value', mode: 'agg', ir: { type: col.Nullable(col.Float64).type, fn: { linear: false, deterministic: false } } });
+    expect(quantileIf(1)(val(2), grouped(col.Bool)).name).toBe('quantile');
+    if (a.ir.kind !== 'Agg' || b.ir.kind !== 'Agg') throw new Error('Agg');
+    expect(a.ir.params[0]).not.toBe(b.ir.params[0]);
+    expect(a.ir.params[0]).toMatchObject({ kind: 'Param', type: col.Float64.type, value: 0.5 });
+    expect(a.ir.args[0]).toBe(value.ir);
+    expect(Object.isFrozen(a.ir.params[0])).toBe(true);
   });
   it('retains weekly descriptors, modes and immutable edges', () => {
     const input = val(new Date('2024-03-04T12:00:00Z'), col.Nullable(col.DateTime64(3)));

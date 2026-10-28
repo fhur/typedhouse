@@ -21,7 +21,14 @@ export function resolveAggregate(e: Extract<ExprNode, { kind: 'Agg' }>, resolve:
   const def = aggregateDefinitions.find(d => d.name === e.fn.name);
   if (!def || e.fn.origin !== 'typed') throw new Error('unsupported_aggregate');
   if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || e.fn.linear !== def.linear || e.fn.argumentPolicies !== undefined) throw new Error('invalid_function_metadata');
-  if (e.params.length || e.combinators.length > 1 || e.combinators.some(c => c !== 'If')) throw new Error('unsupported_aggregate_combinator');
+  if ((!def.params && e.params.length) || e.combinators.length > 1 || e.combinators.some(c => c !== 'If')) throw new Error('unsupported_aggregate_combinator');
+  if (e.params.length !== (def.params?.length ?? 0)) throw new Error('invalid_aggregate_parameters');
+  for (let i = 0; i < e.params.length; i++) {
+    const param = e.params[i]!;
+    if (param.kind !== 'Param' || !param.type || print(param.type) !== print(def.params![i]!.type)) throw new Error('invalid_aggregate_parameter_type');
+    if (typeof param.value !== 'number' || !Number.isFinite(param.value) || param.value < 0 || param.value > 1) throw new Error('invalid_quantile_level');
+    resolve(param);
+  }
   const conditional = e.combinators[0] === 'If';
   if (e.args.length !== def.args.length + Number(conditional)) throw new Error('invalid_argument_arity');
   const types = e.args.map(a => resolve(a));

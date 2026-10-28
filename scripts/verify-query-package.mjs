@@ -54,7 +54,7 @@ expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { avg, avgIf, argMax, argMaxIf, toTypeScript, count, sum, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
+import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, toTypeScript, count, sum, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
 import { emitNaive } from '@chql/compiler';
 import { createClient, decoder, rowDecoder } from '@chql/client';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).where(r => r.id.eq(2n)).map(r => ({ id: r.id })).limit(10);
@@ -68,6 +68,10 @@ assert.match(week.toSQL().sql, /enable_extended_results_for_datetime_functions =
 assert.deepEqual({...week.toSQL().params}, {p0: '2024-02-29', p1: '2'});
 assert.deepEqual(decoder(col.Date.type)('2024-02-29'), new Date('2024-02-29T00:00:00Z'));
 assert.throws(() => decoder(col.Date.type)('2023-02-29'), /decode_invalid/);
+const quantiles = q.aggregate(g => ({ median: quantile(0.5)(g.id), selected: quantileIf(1)(g.id, g.id.gt(0n)) }));
+assert.match(quantiles.toSQL().sql, /quantile/);
+assert.deepEqual({...quantiles.toSQL().params}, { p0: '0.5', p1: '1', p2: '0', p3: '2' });
+assert.equal(Object.values(quantiles.toSQL().columns).map(toTypeScript).join(','), 'number,number');
 const mean = q.aggregate(g => ({ mean: avg(g.id), conditional: avgIf(g.id, g.id.gt(0n)), nullable: avg(val(null, col.Nullable(col.Float64))) }));
 assert.match(mean.toSQL().sql, /avgIf/);
 assert.equal(Object.values(mean.toSQL().columns).map(toTypeScript).join(','), 'number,number,(number) | null');

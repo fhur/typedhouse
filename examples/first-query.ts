@@ -1,4 +1,4 @@
-import { avg, avgIf, argMax, argMaxIf, cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
+import { quantile, avg, avgIf, argMax, argMaxIf, cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
 import { emitNaive } from "@chql/compiler";
 import { createClient } from "@chql/client";
 // Checked-in output of the real codegen integration fixture. For your database,
@@ -44,7 +44,7 @@ try {
   // NULL metric values are skipped independently, so leadDays may be older than version.
   // Different values tied at the maximal version have no deterministic winner.
   const cleanIndices = from(db.metric_group_ots_component_indices).final();
-  // Caller-selected half-open history window; quantile remains unsupported.
+  // Caller-selected half-open history window.
   const historyMeans = cleanIndices.where(i => i.tenantId.eq('acme'))
     .where(i => i.effectiveAt.ge(new Date('2026-01-01T00:00:00Z')).and(i.effectiveAt.lt(new Date('2027-01-01T00:00:00Z'))))
     .groupBy(i => ({ entityId: i.entityId }))
@@ -62,6 +62,14 @@ try {
   console.log('weekly means SQL', weeklyMeans.toSQL());
   console.log('weekly means', await client.run(weeklyMeans));
   for await (const row of client.stream(weeklyMeans)) console.log('streamed weekly mean', row);
+  // Small fixtures are exact; larger reservoirs are approximate, not quantileExact.
+  const weeklyQuantiles = cleanIndices.where(i => i.tenantId.eq('acme')).where(i => i.entityId.eq('a'))
+    .groupBy(i => ({ week: i.effectiveAt.toStartOfWeek() }))
+    .aggregate(g => ({ stock: avg(g.stock_index), leadDays: quantile(0.5)(g.lead_time_max_days) }))
+    .orderBy(r => r.week);
+  console.log('weekly quantiles SQL', weeklyQuantiles.toSQL());
+  console.log('weekly quantiles', await client.run(weeklyQuantiles));
+  for await (const row of client.stream(weeklyQuantiles)) console.log('streamed weekly quantile', row);
   const latestMetrics = cleanIndices.where(i => i.tenantId.eq('acme'))
     .groupBy(i => ({ entityId: i.entityId }))
     .aggregate(g => ({ version: max(g.version), stockIndex: argMax(g.stock_index, g.version), leadDays: argMax(g.lead_time_max_days, g.version) }))

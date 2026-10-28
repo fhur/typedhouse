@@ -1,9 +1,30 @@
 import { expectTypeOf } from 'expect-type';
-import { avg, avgIf, argMax, argMaxIf, count, countIf, sum, sumIf, max, maxIf, col, table, from, val, type Query, type Infer, type Row, type IsLive } from '@chql/core';
+import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, count, countIf, sum, sumIf, max, maxIf, col, table, from, val, type Query, type Infer, type Row, type IsLive } from '@chql/core';
 import { createClient } from '@chql/client';
 const t = table('entity', { tenantId: col.String, id: col.UInt64, updatedAt: col.DateTime64(3), category: col.Nullable(col.String), tuple: col.Tuple({ name: col.String }) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 import { cast, crossJoin, unionAll, scalar } from '@chql/core';
 const metrics = from(table('metrics', { entityId: col.String, version: col.UInt32, stock: col.Float32, lead: col.Nullable(col.Float64), label: col.String, enabled: col.Bool, wide: col.UInt256 }, { engine: 'ReplacingMergeTree', sortingKey: [], partitionKey: [] }));
+const quantiles = metrics.groupBy(r => r.entityId).aggregate(g => {
+  const median = quantile(0.5)(g.wide);
+  expectTypeOf(median.name).toEqualTypeOf<'wide'>();
+  expectTypeOf(median.mode).toEqualTypeOf<'agg'>();
+  expectTypeOf(median.ir.type.name).toEqualTypeOf<'Float64'>();
+  expectTypeOf(median).not.toBeAny();
+  const conditional = quantileIf(0.5)(g.lead, g.enabled);
+  expectTypeOf(conditional.ir.type.inner.name).toEqualTypeOf<'Float64'>();
+  expectTypeOf(conditional).not.toBeAny();
+  expectTypeOf(quantileIf(0)(val(1), g.enabled).name).toEqualTypeOf<'quantile'>();
+  return { median, conditional };
+});
+expectTypeOf<Infer<typeof quantiles>>().toEqualTypeOf<{ entityId: string; median: number; conditional: number | null }>();
+expectTypeOf<Infer<typeof quantiles>>().not.toBeAny();
+const regroupedQuantiles = unionAll(quantiles, quantiles).aggregate(g => ({ median: quantileIf(0.25)(g.conditional, g.conditional.gt(0)) }));
+expectTypeOf<Infer<typeof regroupedQuantiles>>().toEqualTypeOf<{ median: number | null }>();
+expectTypeOf<Infer<typeof regroupedQuantiles>>().not.toBeAny();
+expectTypeOf(regroupedQuantiles.row.median.ir.type.inner.name).toEqualTypeOf<'Float64'>();
+const quantileScalar = metrics.map(() => scalar(metrics.aggregate(g => quantile(0.5)(g.stock))));
+expectTypeOf<Infer<typeof quantileScalar>>().toEqualTypeOf<{ stock: number | null }>();
+expectTypeOf<Infer<typeof quantileScalar>>().not.toBeAny();
 const weeklyDates = from(t).groupBy(r => r.updatedAt.toStartOfWeek()).aggregate(g => {
   const groupedWeek = g.updatedAt.toStartOfWeek();
   expectTypeOf(groupedWeek.mode).toEqualTypeOf<'grouped'>();

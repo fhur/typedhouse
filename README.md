@@ -117,15 +117,16 @@ Means use Float64: wide integers can lose precision (9007199254740993 becomes
 9007199254740992), and floating accumulation is not exact decimal arithmetic.
 Decimal, Bool, String, wrappers and containers are rejected; State/Merge are
 not exposed. Aligned means compose with UNION ALL and bounded global scalar
-queries (scalar remains Nullable). Quantile remains backlog.
+queries (scalar remains Nullable).
 `pnpm example:first-query` runs the analogous indices history and weekly queries.
 
-Weekly mean stock history (Sunday-start weeks, not ISO/Monday):
+Weekly stock/lead-time history (Sunday-start weeks, not ISO/Monday):
 ```ts
+import { quantile } from '@chql/core';
 const weekly = from(db.metric_group_ots_component_market_availability).final()
   .where(a => a.tenantId.eq('acme')).where(a => a.entityId.eq('cmp_7'))
   .groupBy(a => ({ week: a.effectiveAt.toStartOfWeek() }))
-  .aggregate(g => ({ stock: avg(g.market_stock_total) }))
+  .aggregate(g => ({ stock: avg(g.market_stock_total), leadDays: quantile(0.5)(g.market_lead_time_p50_days) }))
   .where(r => r.week.ge(new Date('2026-01-04T00:00:00Z')))
   .orderBy(r => r.week);
 console.log(await client.run(weekly));
@@ -151,7 +152,22 @@ Date parameters use the UTC calendar day of a valid JS Date (time-of-day discard
 with the same range validation, including Array elements. Invalid wire calendar
 days are rejected, never normalized by JavaScript. Date32/DateTime/high-precision
 bucketing and Date scalar/IN subqueries remain unsupported; this is not full
-weekly quantile-series or temporal-catalog acceptance.
+temporal-catalog acceptance.
+
+`quantile(level)(value)` and `quantileIf(level)(value, predicate)` accept finite
+numeric levels in [0, 1], emitted as Float64 parameters (never inlined). Inputs
+are closed integer/float descriptors, optionally Nullable; results are Float64
+or Nullable(Float64). NULL and NaN values are skipped; empty/no-match non-null
+inputs yield NaN, nullable empty/all-null inputs yield NULL (all-NaN nullable
+inputs still yield NaN). False/NULL predicates exclude rows.
+Infinity can propagate or interpolate to NaN; wide integers can lose precision.
+This is ClickHouse's approximate, nondeterministic reservoir quantile, not
+quantileExact; separate executions need not agree on large inputs. Small finite
+fixtures below the reservoir capacity use interpolation (0/1 select endpoints).
+Each application of a curried helper creates a fresh level Param; reusing its
+resulting aggregate expression shares that Param. Equal constructions are not
+merged by value. State/Merge, other parametric/user aggregate execution and
+broader descriptors remain unsupported.
 
 Latest metric values do not require a self-join:
 ```ts
@@ -225,7 +241,7 @@ defaults. Nullable containers are rejected by the server. Enabled regression
 reproductions are in `cross-join.test.ts` and `query.integration.ts`. A decision on
 ordered input evidence and structured null-extension representation is required
 before the specified outer-join API can honestly promise exact rows.
-Grouped and global aggregation execute `count`, `sum`, `avg`, `max`, `argMax` and their `If`
+Grouped and global aggregation execute `count`, `sum`, `avg`, `max`, `argMax`, `quantile(level)` and their `If`
 forms: `q.groupBy(r => r.category).aggregate(() => count())` or
 `q.aggregate(g => ({ total: sum(g.amount) }))`. Keys precede aggregate outputs;
 object forms choose names, single forms retain root names, and collisions fail.

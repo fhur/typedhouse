@@ -108,7 +108,8 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
         if (scope !== 'aggregate') return fail('invalid_aggregate_placement', e, path);
         let resolved: ReturnType<typeof resolveAggregate>;
         try { resolved = resolveAggregate(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_aggregate', e, path); }
-        return `${resolved.sqlName}(${e.args.map((a, i) => expression(a, input, `${path}.args[${i}]`, undefined, false, 'operand', qualifier)).join(', ')})`;
+        const parameters = e.params.length ? `(${e.params.map((p, i) => expression(p, input, `${path}.params[${i}]`, undefined, false, 'operand', qualifier)).join(', ')})` : '';
+        return `${resolved.sqlName}${parameters}(${e.args.map((a, i) => expression(a, input, `${path}.args[${i}]`, undefined, false, 'operand', qualifier)).join(', ')})`;
       }
       case 'Call': {
         let resolved: ReturnType<typeof resolveCall>;
