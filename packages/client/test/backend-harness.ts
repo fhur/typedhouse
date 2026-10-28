@@ -1,6 +1,47 @@
 import { expect } from 'vitest';
 import { canonicalKey, outputLeaves, type Caps, type Query } from '@chql/core';
-import { createClientFromBackend, type Backend } from '../src/index.js';
+import { createClientFromBackend, type Backend, type Plan } from '../src/index.js';
+export function decodedRecord(row: unknown): Record<string, unknown> {
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) throw new Error('expected decoded row object');
+  return Object.fromEntries(Object.entries(row));
+}
+export function multiplicityDiff(left: readonly string[], right: readonly string[]) {
+  const counts = new Map<string, [number, number]>();
+  for (const [side, values] of [left, right].entries()) for (const key of values) {
+    const pair = counts.get(key) ?? [0, 0];
+    if (side === 0) pair[0]++; else pair[1]++;
+    counts.set(key, pair);
+  }
+  return [...counts].filter(([, [a, b]]) => a !== b);
+}
+/** Both plans are prepared before execution so server failures retain both SQLs.
+ * Caller adds fast-check seed/path and the minimized serializable recipe.
+ */
+export async function differential(backends: readonly Backend[], query: { ir: Query<unknown>['ir'] }, ordered = false) {
+  const plans: { backend: Backend; plan?: Plan; error?: unknown }[] = backends.map(backend => {
+    try { return { backend, plan: backend.compile(query.ir) }; }
+    catch (error) { return { backend, error }; }
+  });
+  const diagnostics = plans.map(({ backend, plan, error }) => ({ backend: backend.name, sql: plan?.compiled.sql, params: plan?.compiled.params, compileError: error && String(error) }));
+  try {
+    const results: unknown[][] = [];
+    for (const { backend, plan, error } of plans) {
+      if (!plan) throw new Error(`${backend.name}: ${String(error)}`);
+      try { results.push((await collect(backend.run(plan))).flat()); }
+      catch (cause) { throw new Error(`${backend.name}: ${String(cause)}`, { cause }); }
+    }
+    const first = plans[0]?.plan;
+    if (!first) throw new Error('no backends');
+    const rowKeys = (rows: unknown[]) => rows.map(row => canonicalKey(decodedRecord(row), Object.entries(first.compiled.columns)));
+    for (let i = 1; i < results.length; i++) {
+      expect(plans[i]?.plan?.compiled.columns, 'output descriptors').toEqual(first.compiled.columns);
+      const diff = multiplicityDiff(rowKeys(results[0]!), rowKeys(results[i]!));
+      if (diff.length) throw new Error(`multiplicity diff ${JSON.stringify(diff)}`);
+      if (ordered) expect(rowKeys(results[i]!), 'ordered sequence').toEqual(rowKeys(results[0]!));
+    }
+    return results[0]!;
+  } catch (cause) { throw new Error(`${String(cause)}\n${JSON.stringify(diagnostics)}`, { cause }); }
+}
 export async function collect<R>(rows: AsyncIterable<R>): Promise<R[]> {
   const result: R[] = [];
   for await (const row of rows) result.push(row);
