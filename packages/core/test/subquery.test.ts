@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, table, from, count, sum, scalar, scalarDescriptor, print, flatOutput, deterministic, exprNode, Expr } from '../src/index.js';
+import { col, table, from, count, sum, max, scalar, scalarDescriptor, print, flatOutput, deterministic, exprNode, Expr } from '../src/index.js';
 const q = from(table('s', { stock: col.Float64, n: col.Nullable(col.Int64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 it('retains identity, name and immutable nullable descriptor evidence', () => {
   const total = q.aggregate(g => sum(g.stock));
@@ -13,6 +13,20 @@ it('retains identity, name and immutable nullable descriptor evidence', () => {
   expect(print(scalar(q.aggregate(g => sum(g.n))).ir.type)).toBe('Nullable(Int64)');
   expect(print(scalar(q.aggregate(() => count())).ir.type)).toBe('Nullable(UInt64)');
   expect(q.map(() => e).caps.live).toBe(false);
+});
+it('retains Date and Nullable(Date) evidence without widening temporal families', () => {
+  const dates = from(table('dates', { day: col.Date, maybe: col.Nullable(col.Date) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  for (const e of [scalar(dates.aggregate(g => max(g.day))), scalar(dates.aggregate(g => max(g.maybe)))]) {
+    expect(print(e.ir.type)).toBe('Nullable(Date)');
+    expect(e.mode).toBe('row');
+    expect(e.ir.kind === 'Subquery' && e.ir.rel.kind).toBe('Aggregate');
+    expect(Object.isFrozen(e.ir)).toBe(true);
+  }
+  for (const descriptor of [col.Date32, col.DateTime(), col.DateTime64(3)]) {
+    const total = dates.aggregate(g => max(g.day)).ir;
+    const output = flatOutput([['day', descriptor.type]]);
+    expect(() => scalarDescriptor({ ...total, output, columns: output.columns })).toThrow('unsupported_scalar_type');
+  }
 });
 it('propagates capability through the complete referenced relation', () => {
   const live = from(table('live', { stock: col.Float64 }, { engine: 'Memory', sortingKey: [], partitionKey: [], source: { kind: 'test' } }));

@@ -54,7 +54,7 @@ expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, toTypeScript, count, sum, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
+import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, toTypeScript, count, sum, max, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
 import { emitNaive } from '@chql/compiler';
 import { createClient, decoder, rowDecoder } from '@chql/client';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).where(r => r.id.eq(2n)).map(r => ({ id: r.id })).limit(10);
@@ -108,6 +108,13 @@ const membershipType = Object.entries(membershipQuery.toSQL().columns).map(([k, 
 assert.equal(readFileSync('membership.d.ts', 'utf8'), 'export type MembershipSnapshot = { ' + membershipType + ' };\\n');
 const dates = from(table('dates', { day: col.Nullable(col.Date) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 const dateSet = unionAll(dates, dates.limit(0));
+const newestDate = scalar(dates.aggregate(g => max(g.day)));
+assert.deepEqual(newestDate.ir.type, col.Nullable(col.Date).type);
+assert.equal(newestDate.name, 'day');
+assert.equal(newestDate.mode, 'row');
+assert.deepEqual(dates.map(() => newestDate).toSQL().columns.day, col.Nullable(col.Date).type);
+assert.deepEqual(decoder(newestDate.ir.type)('2149-06-06'), new Date('2149-06-06'));
+assert.equal(decoder(newestDate.ir.type)(null), null);
 const dateMembership = dates.map(r => ({ yes: r.day.in(dateSet), no: r.day.notIn([new Date('2024-02-29T23:00:00Z')]) }));
 assert.match(dateMembership.toSQL().sql, /transform_null_in = 0/);
 assert.deepEqual({...dateMembership.toSQL().params}, { p0: "['2024-02-29']" });

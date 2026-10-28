@@ -78,6 +78,12 @@ try {
   console.log('selected weeks SQL', selectedHistory.toSQL());
   console.log('selected weeks', await client.run(selectedHistory));
   for await (const row of client.stream(selectedHistory)) console.log('streamed selected week', row);
+  const newestWeek = scalar(weeklyQuantiles.aggregate(g => max(g.week)));
+  const newestHistory = weeklyQuantiles.where(r => r.week.eq(newestWeek))
+    .map(r => ({ ...r, newestWeek })).orderBy(r => r.week);
+  console.log('newest week SQL', newestHistory.toSQL());
+  console.log('newest week', await client.run(newestHistory));
+  for await (const row of client.stream(newestHistory)) console.log('streamed newest week', row);
   const latestMetrics = cleanIndices.where(i => i.tenantId.eq('acme'))
     .groupBy(i => ({ entityId: i.entityId }))
     .aggregate(g => ({ version: max(g.version), stockIndex: argMax(g.stock_index, g.version), leadDays: argMax(g.lead_time_max_days, g.version) }))

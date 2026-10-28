@@ -113,6 +113,105 @@ it('adversarial Date sets preserve NULLs through nested sets, scalar counts and 
     expect(JSON.stringify(query.ir)).toBe(snapshot);
   } finally { await configured.close(); }
 });
+it('adversarial Date scalars preserve NULL membership through nested aggregates and root UNION with immutable hostile parameters', async () => {
+  await sql('CREATE TABLE adversarial_scalar_dates (id UInt8, day Nullable(Date)) ENGINE=Memory');
+  await sql("INSERT INTO adversarial_scalar_dates VALUES (0,NULL),(1,'2024-02-29'),(2,'2149-06-06')");
+  const source = from(table('adversarial_scalar_dates', { id: col.UInt8, day: col.Nullable(col.Date) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const day = new Date('2024-03-01T00:30:00+01:00');
+  const shared = val(day, col.Date);
+  const selected = source.where(r => r.day.le(shared));
+  const latest = scalar(selected.aggregate(g => max(g.day)));
+  const nested = scalar(unionAll(selected.map(() => latest), selected.map(() => latest)).aggregate(g => max(g.day)));
+  const missing = scalar(source.where(r => r.id.eq(0)).aggregate(g => max(g.day)));
+  const hostile = "'\\\\\n\u0000日本語 {p0:Date} --";
+  const projection = source.limit(1).map(() => ({ latest, nested, missing, yes: nested.in(selected.map(r => r.day)), no: missing.notIn([]), shared, equal: val(new Date(day), col.Date), tag: val(hostile) }));
+  const query = unionAll(projection, projection).orderBy(r => r.latest).limit(1);
+  const snapshot = JSON.stringify(query.ir);
+  day.setTime(0);
+  const native = JSON.parse(await sql("SELECT (SELECT max(day) FROM adversarial_scalar_dates WHERE day<=toDate('2024-02-29')) AS latest,(SELECT max(day) FROM (SELECT (SELECT max(day) FROM adversarial_scalar_dates WHERE day<=toDate('2024-02-29')) AS day FROM adversarial_scalar_dates WHERE id=1 UNION ALL SELECT toNullable(toDate('2024-02-29')))) AS nested,(SELECT max(day) FROM adversarial_scalar_dates WHERE id=0) AS missing,nested IN (SELECT day FROM adversarial_scalar_dates WHERE day<=toDate('2024-02-29')) AS yes,missing NOT IN [] AS no,toDate('2024-02-29') AS shared,toDate('2024-02-29') AS equal SETTINGS transform_null_in=0 FORMAT JSON"));
+  expect(native.meta.map((r: { type: string }) => r.type)).toEqual(['Nullable(Date)', 'Nullable(Date)', 'Nullable(Date)', 'Nullable(UInt8)', 'Nullable(UInt8)', 'Date', 'Date']);
+  expect(native.data).toEqual([{ latest: '2024-02-29', nested: '2024-02-29', missing: null, yes: 1, no: null, shared: '2024-02-29', equal: '2024-02-29' }]);
+  const expected = [{ latest: new Date('2024-02-29'), nested: new Date('2024-02-29'), missing: null, yes: true, no: null, shared: new Date('2024-02-29'), equal: new Date('2024-02-29'), tag: hostile }];
+  for (const timezone of ['Asia/Tokyo', 'America/Los_Angeles']) {
+    const configured = createClient({ url, username: 'fixture', password: 'fixture', clickhouse_settings: { transform_null_in: 1, session_timezone: timezone } });
+    try {
+      expect(await configured.run(query)).toEqual(expected);
+      const rows = []; for await (const row of configured.stream(query)) rows.push(row); expect(rows).toEqual(expected);
+      for (const emitter of [compile, emitNaive]) {
+        const plan = emitter(query.ir), endpoint = new URL(url);
+        expect(plan.sql).not.toContain(hostile);
+        expect(Object.values(plan.params).filter(value => value === '2024-02-29')).toHaveLength(2);
+        endpoint.searchParams.set('transform_null_in', '1');
+        endpoint.searchParams.set('session_timezone', timezone);
+        for (const [name, value] of Object.entries(plan.params)) endpoint.searchParams.set(`param_${name}`, value.replaceAll('\\', '\\\\').replaceAll('\n', '\\n').replaceAll('\0', '\\0'));
+        const response = await fetch(endpoint, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: `${plan.sql} FORMAT JSON` });
+        const text = await response.text(); expect(response.ok, text).toBe(true);
+        expect(JSON.parse(text).data).toEqual(native.data.map((row: object) => ({ ...row, tag: hostile })));
+        expect(JSON.parse(text).meta).toEqual([...native.meta, { name: 'tag', type: 'String' }]);
+      }
+    } finally { await configured.close(); }
+  }
+  expect(JSON.stringify(query.ir)).toBe(snapshot);
+});
+it('selects newest weekly summaries by Date scalar through native SQL, run, stream and both emitters', async () => {
+  await sql("CREATE TABLE newest_history (tenant String, entity String, at DateTime64(3), version UInt32, value Nullable(Float64)) ENGINE=ReplacingMergeTree(version) ORDER BY (tenant,entity,at)");
+  await sql("INSERT INTO newest_history VALUES ('acme','cmp_7','2023-12-31',1,1),('acme','cmp_7','2024-02-29',1,99),('acme','cmp_7','2024-02-29',2,2),('acme','cmp_7','2024-03-02',1,6),('other','cmp_7','2025-01-01',1,900),('acme','other','2025-01-01',1,800)");
+  const source = from(table('newest_history', { tenant: col.String, entity: col.String, at: col.DateTime64(3), version: col.UInt32, value: col.Nullable(col.Float64) }, { engine: 'ReplacingMergeTree', sortingKey: ['tenant', 'entity', 'at'], partitionKey: [] })).final().where(r => r.tenant.eq('acme')).where(r => r.entity.eq('cmp_7'));
+  const weekly = source.groupBy(r => ({ week: r.at.toStartOfWeek() })).aggregate(g => ({ stock: avg(g.value), leadDays: quantile(0.5)(g.value) }));
+  const baseline = "SELECT toStartOfWeek(at) AS week,avg(value) AS stock,quantile(0.5)(value) AS leadDays FROM newest_history FINAL WHERE tenant='acme' AND entity='cmp_7' GROUP BY week";
+  for (const input of [weekly, unionAll(weekly, weekly)]) {
+    const newest = scalar(input.aggregate(g => max(g.week)));
+    const query = input.where(r => r.week.eq(newest)).map(r => ({ ...r, newest, yes: newest.in(input.map(r => r.week)), no: newest.notIn([]) })).where(r => r.stock.gt(0)).orderBy(r => r.week).limit(2);
+    const native = JSON.parse(await sql(`SELECT *, (SELECT max(week) FROM (${baseline})) AS newest, newest IN (SELECT week FROM (${baseline})) AS yes, newest NOT IN [] AS no FROM (${baseline}) WHERE week=(SELECT max(week) FROM (${baseline})) ORDER BY week FORMAT JSON`));
+    expect(native.meta.map((r: { type: string }) => r.type)).toEqual(['Date', 'Nullable(Float64)', 'Nullable(Float64)', 'Nullable(Date)', 'Nullable(UInt8)', 'Nullable(UInt8)']);
+    expect(native.data).toEqual([{ week: '2024-02-25', stock: 4, leadDays: 4, newest: '2024-02-25', yes: 1, no: 1 }]);
+    const expected = Array.from({ length: input === weekly ? 1 : 2 }, () => ({ week: new Date('2024-02-25'), stock: 4, leadDays: 4, newest: new Date('2024-02-25'), yes: true, no: true }));
+    expect(await client.run(query)).toEqual(expected);
+    const rows = []; for await (const row of client.stream(query)) rows.push(row); expect(rows).toEqual(expected);
+    for (const emitter of [compile, emitNaive]) {
+      const plan = emitter(query.ir), endpoint = new URL(url);
+      endpoint.searchParams.set('session_timezone', 'America/Los_Angeles');
+      for (const [name, value] of Object.entries(plan.params)) endpoint.searchParams.set(`param_${name}`, value);
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: `${plan.sql} FORMAT JSON` });
+      const text = await response.text(); expect(response.ok, text).toBe(true);
+      const actual = JSON.parse(text);
+      expect(actual.meta).toEqual(native.meta);
+      expect(actual.data).toEqual(Array.from({ length: expected.length }, () => native.data[0]));
+    }
+  }
+});
+it('Date scalar max/maxIf expose default days versus NULL under aggregate settings', async () => {
+  await sql('CREATE TABLE scalar_dates (day Date, maybe Nullable(Date)) ENGINE=Memory');
+  await sql("INSERT INTO scalar_dates VALUES ('1970-01-01',NULL),('2023-12-31','2023-12-31'),('2024-02-29','2024-02-29'),('2149-06-06','2149-06-06')");
+  const source = from(table('scalar_dates', { day: col.Date, maybe: col.Nullable(col.Date) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  for (const nullForEmpty of [0, 1] as const) {
+    const configured = createClient({ url, username: 'fixture', password: 'fixture', clickhouse_settings: { aggregate_functions_null_for_empty: nullForEmpty, session_timezone: 'Asia/Tokyo' } });
+    try {
+      for (const [input, where] of [[source, ''], [source.limit(0), ' LIMIT 0'], [source.where(r => r.maybe.isNull()), ' WHERE isNull(maybe)']] as const) {
+        const query = source.limit(1).map(() => ({ day: scalar(input.aggregate(g => max(g.day))), maybe: scalar(input.aggregate(g => max(g.maybe))), missing: scalar(input.aggregate(g => maxIf(g.day, g.day.lt(new Date('1970-01-01'))))), nullableMissing: scalar(input.aggregate(g => maxIf(g.maybe, g.day.lt(new Date('1970-01-01'))))) }));
+        const baseline = `SELECT (SELECT max(day) FROM (SELECT * FROM scalar_dates${where})) AS day,(SELECT max(maybe) FROM (SELECT * FROM scalar_dates${where})) AS maybe,(SELECT maxIf(day,day<toDate('1970-01-01')) FROM (SELECT * FROM scalar_dates${where})) AS missing,(SELECT maxIf(maybe,day<toDate('1970-01-01')) FROM (SELECT * FROM scalar_dates${where})) AS nullableMissing SETTINGS aggregate_functions_null_for_empty=${nullForEmpty}`;
+        const native = JSON.parse(await sql(`${baseline} FORMAT JSON`));
+        expect(native.meta.map((r: { type: string }) => r.type)).toEqual(Array(4).fill('Nullable(Date)'));
+        expect(native.data[0].missing).toBe(nullForEmpty ? null : '1970-01-01');
+        expect(native.data[0].nullableMissing).toBe(null);
+        expect(native.data[0].day).toBe(where === '' ? '2149-06-06' : where.includes('LIMIT') && nullForEmpty ? null : '1970-01-01');
+        expect(native.data[0].maybe).toBe(where === '' ? '2149-06-06' : null);
+        const expected = native.data.map((r: Record<string, string | null>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v === null ? null : new Date(v)])));
+        expect(await configured.run(query)).toEqual(expected);
+        const rows = []; for await (const row of configured.stream(query)) rows.push(row); expect(rows).toEqual(expected);
+        for (const emitter of [compile, emitNaive]) {
+          const plan = emitter(query.ir), endpoint = new URL(url);
+          endpoint.searchParams.set('aggregate_functions_null_for_empty', String(nullForEmpty));
+          for (const [name, value] of Object.entries(plan.params)) endpoint.searchParams.set(`param_${name}`, value);
+          const response = await fetch(endpoint, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: `${plan.sql} FORMAT JSON` });
+          const text = await response.text(); expect(response.ok, text).toBe(true);
+          expect(JSON.parse(text).data).toEqual(native.data);
+          expect(JSON.parse(text).meta).toEqual(native.meta);
+        }
+      }
+    } finally { await configured.close(); }
+  }
+});
 it('selects weekly Date history using lists and UNION-backed queries against independent SQL', async () => {
   await sql("CREATE TABLE selected_history (tenant String, entity String, at DateTime64(3), version UInt32, value Nullable(Float64)) ENGINE=ReplacingMergeTree(version) ORDER BY (tenant,entity,at)");
   await sql("INSERT INTO selected_history VALUES ('acme','cmp_7','2024-02-29',1,100),('acme','cmp_7','2024-02-29',2,2),('acme','cmp_7','2024-03-02',1,6),('acme','cmp_7','2024-03-03',1,8),('acme','cmp_7','2024-03-10',1,NULL),('other','cmp_7','2024-03-03',1,900),('acme','other','2024-03-03',1,800)");
@@ -1474,6 +1573,8 @@ it('runs the documented executable generated-schema example', async () => {
   expect(stdout).toContain('streamed weekly mean { week: 2026-10-25T00:00:00.000Z, stock: 25 }');
   expect(stdout).toContain('streamed weekly quantile { week: 2026-10-25T00:00:00.000Z, stock: 25, leadDays: 7 }');
   expect(stdout).toContain('streamed selected week { week: 2026-10-25T00:00:00.000Z, stock: 25, leadDays: 7 }');
+  expect(stdout).toContain('newest week [\n  {\n    week: 2026-10-25T00:00:00.000Z,\n    stock: 25,\n    leadDays: 7,\n    newestWeek: 2026-10-25T00:00:00.000Z\n  }\n]');
+  expect(stdout).toContain('streamed newest week {\n  week: 2026-10-25T00:00:00.000Z,\n  stock: 25,\n  leadDays: 7,\n  newestWeek: 2026-10-25T00:00:00.000Z\n}');
 });
 it('hostile values cannot escape parameters and genuine server errors retain SQL/params/cause', async () => {
   const q = from(db.entity_ots_component).where(c => c.tenantId.eq("acme' OR 1=1 --")).map(c => ({ id: c.entityId }));
