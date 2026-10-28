@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
+import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
 import { compile, emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -24,6 +24,121 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('exact String rollups distinguish expanded/joined rows from tenant entities through native SQL, run and stream', async () => {
+  await sql('CREATE TABLE exact_components (tenant String, id String, category Nullable(String), ids Array(String)) ENGINE=Memory');
+  await sql("INSERT INTO exact_components VALUES ('acme','a','visible',['p','p','q']),('acme','b','visible',['p']),('acme','c',NULL,['q']),('acme','d','',['missing']),('other','z','visible',['p'])");
+  await sql('CREATE TABLE exact_parts (tenant String, id String, selected Nullable(Bool)) ENGINE=Memory');
+  await sql("INSERT INTO exact_parts VALUES ('acme','p',true),('acme','p',false),('acme','q',NULL),('other','p',true),('other','q',true)");
+  const meta = { engine: 'Memory', sortingKey: [], partitionKey: [] };
+  const components = from(table('exact_components', { tenant: col.String, id: col.String, category: col.Nullable(col.String), ids: col.Array(col.String) }, meta)).where(r => r.tenant.eq('acme'));
+  const parts = from(table('exact_parts', { tenant: col.String, id: col.String, selected: col.Nullable(col.Bool) }, meta));
+  const expanded = components.arrayJoin(r => r.ids, 'part');
+  const query = join({ c: expanded, p: parts }).on(r => [r.c.tenant.eq(r.p.tenant), r.c.part.eq(r.p.id)])
+    .groupBy(r => ({ category: r.c.category.ifNull('uncategorised') }))
+    .aggregate(g => ({ rows: count(), entities: uniqExact(g.c.id), selected: uniqExactIf(g.c.id, g.p.selected) }))
+    .where(r => r.entities.gt(0n)).orderBy(r => r.category).limit(10);
+  const expected = [{ category: 'uncategorised', rows: 1n, entities: 1n, selected: 0n }, { category: 'visible', rows: 7n, entities: 2n, selected: 2n }];
+  const native = JSON.parse(await sql("SELECT ifNull(c.category,'uncategorised') AS category,count() AS rows,uniqExact(c.id) AS entities,uniqExactIf(c.id,p.selected) AS selected FROM (SELECT tenant,id,category,part FROM exact_components ARRAY JOIN ids AS part WHERE tenant='acme') AS c INNER ALL JOIN exact_parts AS p ON c.tenant=p.tenant AND c.part=p.id GROUP BY category HAVING entities>0 ORDER BY category LIMIT 10 FORMAT JSON"));
+  expect(native.meta.map((c: { type: string }) => c.type)).toEqual(['String', 'UInt64', 'UInt64', 'UInt64']);
+  const decode = (r: { category: string; rows: string; entities: string; selected: string }) => ({ category: r.category, rows: BigInt(r.rows), entities: BigInt(r.entities), selected: BigInt(r.selected) });
+  expect(native.data.map(decode)).toEqual(expected);
+  expect(await client.run(query)).toEqual(expected);
+  const rows = []; for await (const row of client.stream(query)) rows.push(row); expect(rows).toEqual(expected);
+  for (const emitter of [compile, emitNaive]) {
+    const plan = emitter(query.ir), endpoint = new URL(url);
+    for (const [name, value] of Object.entries(plan.params)) endpoint.searchParams.set(`param_${name}`, value);
+    const response = await fetch(endpoint, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: `${plan.sql} FORMAT JSON` });
+    const text = await response.text(); expect(response.ok, text).toBe(true);
+    expect(JSON.parse(text).meta).toEqual(native.meta); expect(JSON.parse(text).data.map(decode)).toEqual(expected);
+  }
+});
+it('exact String NULL/empty/If/settings contract, duplicate UNION invariance and Nullable UInt64 scalar', async () => {
+  await sql('CREATE TABLE exact_values (x Nullable(String), p Nullable(Bool)) ENGINE=Memory');
+  await sql("INSERT INTO exact_values VALUES ('',true),('',true),('a',true),('a',false),('b',NULL),(NULL,true),(NULL,NULL)");
+  const source = from(table('exact_values', { x: col.Nullable(col.String), p: col.Nullable(col.Bool) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  for (const setting of [0, 1] as const) {
+    const configured = createClient({ url, username: 'fixture', password: 'fixture', clickhouse_settings: { aggregate_functions_null_for_empty: setting } });
+    try {
+      for (const [input, where, cardinality, selected] of [[source, '1', 3n, 2n], [source.where(r => r.x.isNull()), 'isNull(x)', 0n, 0n], [source.where(r => r.x.eq('missing')), "x='missing'", 0n, 0n]] as const) {
+        for (const duplicate of [false, true]) {
+          const bag = duplicate ? unionAll(input, input) : input;
+          const query = bag.aggregate(g => ({ n: uniqExact(g.x), yes: uniqExactIf(g.x, g.p), no: uniqExactIf(g.x, val(false)), nil: uniqExactIf(g.x, val(null, col.Nullable(col.Bool))) }));
+          const expected = [{ n: cardinality, yes: selected, no: 0n, nil: 0n }];
+          const native = JSON.parse(await sql(`SELECT uniqExact(x) AS n,uniqExactIf(x,p) AS yes,uniqExactIf(x,false) AS no,uniqExactIf(x,CAST(NULL AS Nullable(Bool))) AS nil FROM exact_values WHERE ${where} SETTINGS aggregate_functions_null_for_empty=${setting} FORMAT JSON`));
+          expect(native.meta.map((c: { type: string }) => c.type)).toEqual(['UInt64', 'UInt64', 'UInt64', 'UInt64']);
+          const decode = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, BigInt(v)]));
+          expect(native.data.map(decode)).toEqual(expected);
+          expect(await configured.run(query)).toEqual(expected);
+          const rows = []; for await (const row of configured.stream(query)) rows.push(row); expect(rows).toEqual(expected);
+          for (const emitter of [compile, emitNaive]) {
+            const plan = emitter(query.ir), endpoint = new URL(url);
+            endpoint.searchParams.set('aggregate_functions_null_for_empty', String(setting));
+            for (const [name, value] of Object.entries(plan.params)) endpoint.searchParams.set(`param_${name}`, value);
+            const response = await fetch(endpoint, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: `${plan.sql} FORMAT JSON` });
+            const text = await response.text(); expect(response.ok, text).toBe(true);
+            expect(JSON.parse(text).meta).toEqual(native.meta); expect(JSON.parse(text).data.map(decode)).toEqual(expected);
+          }
+        }
+      }
+      const hostile = "'\\\\\n\u0000日本語 {p0:String} --";
+      const p = val(hostile);
+      const constants = source.aggregate(() => ({ a: uniqExact(p), b: uniqExactIf(p, val(true)), c: uniqExact(val(hostile)) }));
+      expect(await configured.run(constants)).toEqual([{ a: 1n, b: 1n, c: 1n }]);
+      const constantsRows = []; for await (const row of configured.stream(constants)) constantsRows.push(row);
+      expect(constantsRows).toEqual([{ a: 1n, b: 1n, c: 1n }]);
+      expect(await configured.run(source.where(r => r.x.eq('missing')).groupBy(r => r.x).aggregate(() => ({ n: uniqExact(p) })))).toEqual([]);
+      const scalarQuery = source.limit(1).map(() => ({ n: scalar(source.aggregate(g => uniqExact(g.x))) }));
+      expect(scalarQuery.row.n.ir.type).toEqual(col.Nullable(col.UInt64).type);
+      expect(await configured.run(scalarQuery)).toEqual([{ n: 3n }]);
+      const streamed = []; for await (const row of configured.stream(scalarQuery)) streamed.push(row); expect(streamed).toEqual([{ n: 3n }]);
+      for (const [query, nativeSql] of [[scalarQuery, 'SELECT (SELECT uniqExact(x) FROM exact_values) AS n'], [constants, `SELECT uniqExact(unhex('${Buffer.from(hostile).toString('hex')}')) AS a,uniqExactIf(unhex('${Buffer.from(hostile).toString('hex')}'),true) AS b,uniqExact(unhex('${Buffer.from(hostile).toString('hex')}')) AS c FROM exact_values`]] as const) {
+        const native = JSON.parse(await sql(`${nativeSql} SETTINGS aggregate_functions_null_for_empty=${setting} FORMAT JSON`));
+        for (const emitter of [compile, emitNaive]) {
+          const plan = emitter(query.ir), endpoint = new URL(url);
+          expect(plan.sql).not.toContain(hostile);
+          if (query === constants) expect(Object.values(plan.params).filter(v => v === hostile)).toHaveLength(2);
+          endpoint.searchParams.set('aggregate_functions_null_for_empty', String(setting));
+          for (const [name, value] of Object.entries(plan.params)) endpoint.searchParams.set(`param_${name}`, value.replaceAll('\\', '\\\\').replaceAll('\n', '\\n').replaceAll('\0', '\\0'));
+          const response = await fetch(endpoint, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: `${plan.sql} FORMAT JSON` });
+          const text = await response.text(); expect(response.ok, text).toBe(true);
+          expect(JSON.parse(text).meta).toEqual(native.meta); expect(JSON.parse(text).data).toEqual(native.data);
+        }
+      }
+    } finally { await configured.close(); }
+  }
+});
+it('adversarial exact constants preserve first-value names and empty counts through cross joins, aggregate unions and scalars', async () => {
+  const source = from(db.entity_ots_component).where(r => r.tenantId.eq('acme'));
+  const empty = source.limit(0);
+  for (const setting of [0, 1] as const) {
+    const configured = createClient({ url, username: 'fixture', password: 'fixture', clickhouse_settings: { aggregate_functions_null_for_empty: setting } });
+    try {
+      for (const [input, cardinality] of [[source, 1n], [empty, 0n]] as const) {
+        const counts = input.aggregate(g => ({ constant: uniqExactIf(val(''), g.category.isNull()), nil: uniqExact(val(null, col.Nullable(col.String))), n: uniqExact(val('')) }));
+        const duplicated = unionAll(counts, counts);
+        const query = crossJoin({ a: duplicated, b: counts }).map(r => ({ ...r.a, scalar: scalar(input.aggregate(g => uniqExactIf(val(''), g.category.isNull()))) }));
+        const expected = Array.from({ length: 2 }, () => ({ constant: cardinality, nil: 0n, n: cardinality, scalar: cardinality }));
+        const nativeInput = cardinality ? "SELECT * FROM entity_ots_component WHERE tenantId='acme'" : 'SELECT * FROM entity_ots_component LIMIT 0';
+        const nativeCounts = `SELECT uniqExactIf('',isNull(category)) AS constant,uniqExact(CAST(NULL AS Nullable(String))) AS nil,uniqExact('') AS n FROM (${nativeInput})`;
+        const native = JSON.parse(await sql(`SELECT a.*, (SELECT uniqExactIf('',isNull(category)) FROM (${nativeInput})) AS scalar FROM (${nativeCounts} UNION ALL ${nativeCounts}) AS a CROSS JOIN (${nativeCounts}) AS b SETTINGS aggregate_functions_null_for_empty=${setting} FORMAT JSON`));
+        expect(native.meta.map((c: { type: string }) => c.type)).toEqual(['UInt64', 'UInt64', 'UInt64', 'Nullable(UInt64)']);
+        const decode = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, BigInt(v)]));
+        expect(native.data.map(decode)).toEqual(expected);
+        expect(await configured.run(query)).toEqual(expected);
+        const rows = []; for await (const row of configured.stream(query)) rows.push(row); expect(rows).toEqual(expected);
+        expect(input.aggregate(g => uniqExactIf(val(''), g.category.isNull())).row.uniqExact.name).toBe('uniqExact');
+        for (const emitter of [compile, emitNaive]) {
+          const plan = emitter(query.ir), endpoint = new URL(url);
+          endpoint.searchParams.set('aggregate_functions_null_for_empty', String(setting));
+          for (const [name, value] of Object.entries(plan.params)) endpoint.searchParams.set(`param_${name}`, value);
+          const response = await fetch(endpoint, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: `${plan.sql} FORMAT JSON` });
+          const text = await response.text(); expect(response.ok, text).toBe(true);
+          expect(JSON.parse(text).meta).toEqual(native.meta); expect(JSON.parse(text).data.map(decode)).toEqual(expected);
+        }
+      }
+    } finally { await configured.close(); }
+  }
+});
 it('simple optimizer agrees with naive execution across clause boundaries', async () => {
   const source = from(db.entity_ots_component);
   const queries = [
@@ -1563,9 +1678,13 @@ it('adversarial repair: typed NULL preserves nested common-type arithmetic and s
   expect(Object.values(q.toSQL().params).filter(v => v === '4294967295')).toHaveLength(1);
 });
 it('runs the documented executable generated-schema example', async () => {
+  await sql("ALTER TABLE entity_off_the_shelf_part ADD COLUMN tenantId String DEFAULT 'acme', ADD COLUMN lifecycleStatus Nullable(String)");
   await sql('CREATE TABLE metric_group_ots_component_indices (tenantId String,entityId String,version UInt32,effectiveAt DateTime64(3),insertedAt DateTime64(3),price_change_log_sum Float64,price_change_count Float64,stock_index Float64,stock_index_warnings Array(String),lead_time_index_part_days Float64,lead_time_index_part_count Float64,lead_time_max_days Nullable(Float64)) ENGINE=ReplacingMergeTree(insertedAt) ORDER BY (tenantId,entityId,version,effectiveAt)');
   await sql("INSERT INTO metric_group_ots_component_indices (tenantId,entityId,version,effectiveAt,stock_index,lead_time_max_days) VALUES ('acme','a',2,'2026-10-27',30,NULL),('acme','a',1,'2026-10-26',20,7),('other','a',3,'2026-10-27',99,99)");
   const { stdout } = await promisify(execFile)('pnpm', ['example:first-query'], { env: { ...process.env, CLICKHOUSE_URL: url, CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'fixture' }, timeout: 120000 });
+  expect(stdout).toContain('distinct categories [ { categories: 1n } ]');
+  expect(stdout).toContain('streamed distinct categories { categories: 1n }');
+  expect(stdout).toContain('distinct matched components []');
   expect(stdout).toContain('18446744073709551615n');
   expect(stdout).toContain('2026-10-27T12:00:00.123Z');
   expect(stdout).toContain("streamed latest metric { entityId: 'a', version: 2, stockIndex: 30, leadDays: 7 }");

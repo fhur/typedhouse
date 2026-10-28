@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 // (FINAL + tenant + DateTime64 window), Sunday-start weekly Date means/quantiles,
 // checked Date transport/decoding and selected-week Date list/UNION membership,
 // newest-week selection/projection via bounded Nullable(Date) scalar max,
+// exact String categories and tenant-keyed ARRAY JOIN/inner-join distinct entities
+// (count measures multiplicity; uniqExact measures entities), run and stream,
 // and latest metrics via argMax/If
 // and explicit CAST union alignment through run/stream. Requires the generated
 // fixture's component and metric_group_ots_component_indices tables; no core runtime deps.

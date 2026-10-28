@@ -1,4 +1,4 @@
-import { quantile, avg, avgIf, argMax, argMaxIf, cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
+import { uniqExact, uniqExactIf, table, quantile, avg, avgIf, argMax, argMaxIf, cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
 import { emitNaive } from "@chql/compiler";
 import { createClient } from "@chql/client";
 // Checked-in output of the real codegen integration fixture. For your database,
@@ -41,6 +41,19 @@ try {
     .orderBy(r => r.category);
   console.log(rollup.toSQL());
   console.log(await client.run(rollup));
+  const scopedComponents = from(db.entity_ots_component).where(c => c.tenantId.eq('acme'));
+  const categories = scopedComponents.aggregate(g => ({ categories: uniqExact(g.category) }));
+  console.log('distinct categories', await client.run(categories));
+  for await (const row of client.stream(categories)) console.log('streamed distinct categories', row);
+  // A bounded descriptor for the three part columns this example needs.
+  const parts = from(table('entity_off_the_shelf_part', { tenantId: col.String, entityId: col.String, lifecycleStatus: col.Nullable(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const distinctComponents = join({ c: scopedComponents.arrayJoin(c => c.matched_part_ids, 'partId'), p: parts })
+    .on(r => [r.c.tenantId.eq(r.p.tenantId), r.c.partId.eq(r.p.entityId)])
+    .groupBy(r => ({ category: r.c.category.ifNull('uncategorised') }))
+    .aggregate(g => ({ rows: count(), components: uniqExact(g.c.entityId), eol: uniqExactIf(g.c.entityId, g.p.lifecycleStatus.eq('EOL')) }))
+    .where(r => r.components.gt(0n)).orderBy(r => r.category).limit(10);
+  console.log('distinct matched components', await client.run(distinctComponents));
+  for await (const row of client.stream(distinctComponents)) console.log('streamed distinct matched components', row);
   // NULL metric values are skipped independently, so leadDays may be older than version.
   // Different values tied at the maximal version have no deterministic winner.
   const cleanIndices = from(db.metric_group_ots_component_indices).final();

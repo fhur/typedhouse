@@ -282,7 +282,40 @@ defaults. Nullable containers are rejected by the server. Enabled regression
 reproductions are in `cross-join.test.ts` and `query.integration.ts`. A decision on
 ordered input evidence and structured null-extension representation is required
 before the specified outer-join API can honestly promise exact rows.
-Grouped and global aggregation execute `count`, `sum`, `avg`, `max`, `argMax`, `quantile(level)` and their `If`
+### Exact String cardinality
+
+`uniqExact(value)` and `uniqExactIf(value, predicate)` accept String/Nullable(String)
+grouped expressions or `val` constants; predicates are Bool/Nullable(Bool).
+Results retain UInt64 and decode to **bigint**, never nullable. NULL values are
+skipped, empty String is a value, and empty/all-null/no-match inputs return `0n`.
+False/NULL predicates exclude rows. Pinned ClickHouse 24.8 preserves these values
+and UInt64 descriptors with `aggregate_functions_null_for_empty=0` or `1`; no
+setting override or client fallback is applied. Empty grouped inputs produce no groups.
+
+```ts
+import { uniqExact, uniqExactIf, count } from '@chql/core';
+const scoped = components.where(forTenant('acme'));
+const categories = scoped.aggregate(g => ({ categories: uniqExact(g.category) }));
+const matched = join({ c: scoped.arrayJoin(c => c.matched_part_ids, 'partId'), p: parts })
+  .on(r => [r.c.tenantId.eq(r.p.tenantId), r.c.partId.eq(r.p.entityId)])
+  .groupBy(r => ({ category: r.c.category.ifNull('uncategorised') }))
+  .aggregate(g => ({ rows: count(), components: uniqExact(g.c.entityId),
+    eol: uniqExactIf(g.c.entityId, g.p.lifecycleStatus.eq('EOL')) }))
+  .where(r => r.components.gt(0n)).orderBy(r => r.category).limit(10);
+console.log(await client.run(categories));
+for await (const row of client.stream(matched)) console.log(row);
+```
+
+Duplicate matched IDs and duplicate joined part rows increase `rows`, not distinct
+component counts. The runnable small example fixture prints categories `1n` and
+matched components `[]` (its matched arrays are empty); the enabled multiplicity
+fixture asserts visible category `{ rows: 7n, entities: 2n, selected: 2n }` and
+uncategorised `{ rows: 1n, entities: 1n, selected: 0n }` against native SQL.
+Exact distinct **server memory grows with cardinality**. Client streaming and its
+10M-row heap gate do not bound aggregate server memory. Other descriptors,
+approximate uniq, multi-argument distinct and State/Merge remain unsupported.
+
+Grouped and global aggregation execute `count`, `sum`, `avg`, `max`, `argMax`, `uniqExact`, `quantile(level)` and their `If`
 forms: `q.groupBy(r => r.category).aggregate(() => count())` or
 `q.aggregate(g => ({ total: sum(g.amount) }))`. Keys precede aggregate outputs;
 object forms choose names, single forms retain root names, and collisions fail.

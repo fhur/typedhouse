@@ -54,7 +54,7 @@ expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, toTypeScript, count, sum, max, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
+import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, toTypeScript, count, sum, max, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
 import { emitNaive } from '@chql/compiler';
 import { createClient, decoder, rowDecoder } from '@chql/client';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).where(r => r.id.eq(2n)).map(r => ({ id: r.id })).limit(10);
@@ -106,6 +106,11 @@ const membershipSource = from(table('members', { id: col.String, s: col.Nullable
 const membershipQuery = membershipSource.map(r => ({ member: r.id.in(membershipSource.map(r => r.id)), missing: r.s.notIn([]) }));
 const membershipType = Object.entries(membershipQuery.toSQL().columns).map(([k, t]) => JSON.stringify(k) + ': ' + toTypeScript(t)).join('; ');
 assert.equal(readFileSync('membership.d.ts', 'utf8'), 'export type MembershipSnapshot = { ' + membershipType + ' };\\n');
+const exact = membershipSource.aggregate(g => ({ n: uniqExact(g.s), yes: uniqExactIf(g.id, g.s.isNotNull()) }));
+assert.deepEqual(exact.toSQL().columns, { n: col.UInt64.type, yes: col.UInt64.type });
+assert.deepEqual(rowDecoder(exact.toSQL().columns)({ n: '0', yes: '2' }), { n: 0n, yes: 2n });
+assert.match(exact.toSQL().sql, /uniqExactIf/);
+assert.equal(membershipSource.aggregate(g => uniqExactIf(val('x'), g.s.isNotNull())).row.uniqExact.name, 'uniqExact');
 const dates = from(table('dates', { day: col.Nullable(col.Date) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 const dateSet = unionAll(dates, dates.limit(0));
 const newestDate = scalar(dates.aggregate(g => max(g.day)));

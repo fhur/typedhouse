@@ -1,9 +1,38 @@
 import { expectTypeOf } from 'expect-type';
-import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, count, countIf, sum, sumIf, max, maxIf, col, table, from, val, type Query, type Infer, type Row, type IsLive } from '@chql/core';
+import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, count, countIf, sum, sumIf, max, maxIf, col, table, from, val, type Query, type Infer, type Row, type IsLive } from '@chql/core';
 import { createClient } from '@chql/client';
 const t = table('entity', { tenantId: col.String, id: col.UInt64, updatedAt: col.DateTime64(3), category: col.Nullable(col.String), tuple: col.Tuple({ name: col.String }) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 import { cast, crossJoin, unionAll, scalar } from '@chql/core';
 const metrics = from(table('metrics', { entityId: col.String, version: col.UInt32, stock: col.Float32, lead: col.Nullable(col.Float64), label: col.String, enabled: col.Bool, wide: col.UInt256 }, { engine: 'ReplacingMergeTree', sortingKey: [], partitionKey: [] }));
+// Generic/descriptor-erased helpers retain the public bigint/root contract.
+const genericExact = <R extends { category: string | null }>(q: Query<R>) => q.aggregate(g => uniqExact(g.category));
+const genericExactResult = genericExact(from(t));
+expectTypeOf<Infer<typeof genericExactResult>>().toEqualTypeOf<{ category: bigint }>();
+expectTypeOf<Infer<typeof genericExactResult>>().not.toBeAny();
+const exactPredicateUnion = from(table('exact_predicate_union', { s: col.String, p: Math.random() ? col.Bool : col.Nullable(col.Bool) }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).aggregate(g => uniqExactIf(g.s, g.p));
+expectTypeOf<Infer<typeof exactPredicateUnion>>().toEqualTypeOf<{ s: bigint }>();
+expectTypeOf<Infer<typeof exactPredicateUnion>>().not.toBeAny();
+const exactCounts = from(t).aggregate(g => {
+  const n = uniqExact(g.category);
+  expectTypeOf(n).not.toBeAny();
+  expectTypeOf(n.name).toEqualTypeOf<'category'>();
+  expectTypeOf(n.mode).toEqualTypeOf<'agg'>();
+  expectTypeOf(n.ir.type.kind).toEqualTypeOf<'scalar'>();
+  expectTypeOf(n.ir.type.name).toEqualTypeOf<'UInt64'>();
+  expectTypeOf(uniqExactIf(val('constant'), g.category.isNotNull()).name).toEqualTypeOf<'uniqExact'>();
+  return { n, selected: uniqExactIf(g.category, g.category.eq('a')) };
+});
+expectTypeOf<Infer<typeof exactCounts>>().toEqualTypeOf<{ n: bigint; selected: bigint }>();
+expectTypeOf<Infer<typeof exactCounts>>().not.toBeAny();
+expectTypeOf(exactCounts.row.n.ir.type.name).toEqualTypeOf<'UInt64'>();
+const exactScalar = scalar(from(t).aggregate(g => uniqExact(g.category)));
+expectTypeOf(exactScalar.name).toEqualTypeOf<'category'>();
+expectTypeOf(exactScalar.mode).toEqualTypeOf<'row'>();
+expectTypeOf<Infer<typeof exactScalar>>().toEqualTypeOf<{ category: bigint | null }>();
+expectTypeOf(exactScalar).not.toBeAny();
+const exactUnion = from(table('exact_union', { s: Math.random() ? col.String : col.Nullable(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).aggregate(g => uniqExact(g.s));
+expectTypeOf<Infer<typeof exactUnion>>().toEqualTypeOf<{ s: bigint }>();
+expectTypeOf<Infer<typeof exactUnion>>().not.toBeAny();
 const quantiles = metrics.groupBy(r => r.entityId).aggregate(g => {
   const median = quantile(0.5)(g.wide);
   expectTypeOf(median.name).toEqualTypeOf<'wide'>();
