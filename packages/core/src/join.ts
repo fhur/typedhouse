@@ -48,3 +48,10 @@ export class JoinBuilder<I extends Record<string, Input>> {
   }
 }
 export function join<const I extends Record<string, Input>>(inputs: I & AtLeastTwo<I>): JoinBuilder<I> { return new JoinBuilder<I>(inputs); }
+
+/** Cartesian product: no ON stage and no null extension. */
+export function crossJoin<const I extends Record<string, Input>>(inputs: I & AtLeastTwo<I>): JoinQuery<Values<I>, JoinCaps<I>, Rows<I>> {
+  const builder = new JoinBuilder<I>(inputs);
+  const ir = relNode({ kind: 'Join', joinKind: 'cross', inputs: builder.inputs, on: [], output: { shape: 'nested', inputs: builder.inputs.map(([alias, rel]) => [alias, rel.output] as const) } });
+  return new JoinQuery(ir, builder.caps);
+}

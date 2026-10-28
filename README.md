@@ -44,7 +44,19 @@ callbacks preserve nested structure. Transport names are collision-free internal
 ordinals, never dotted paths. Shared inputs retain IR identity; the naive emitter
 repeats them rather than extracting CTEs. ON references use an explicit occurrence
 scope (`Join.scope`) so same-input self-joins cannot accidentally bind both sides
-to one alias. Outer/cross joins are not implemented by this bounded preview.
+to one alias. `crossJoin({ a: queryA, b: queryB, ... })` directly returns a Query
+(no `.on` stage), retaining Cartesian multiplicity and returning no rows if any
+input is empty. It supports the same nested rows, descriptors and composition.
+
+Outer joins are owner-deferred unresolved v1 backlog, not a blocker for cross
+joins or independent features. Two explicit contract issues remain, without silently widened
+types: structural TypeScript records do not encode first/last insertion order
+(`{ a, b }` and `{ b, a }` have the same type), and ClickHouse 24.8 with
+`join_use_nulls=1` still fills unmatched Array/Tuple/Map columns with non-null
+defaults. Nullable containers are rejected by the server. Enabled regression
+reproductions are in `cross-join.test.ts` and `query.integration.ts`. A decision on
+ordered input evidence and structured null-extension representation is required
+before the specified outer-join API can honestly promise exact rows.
 Grouped and global aggregation execute `count`, `sum`, `max` and their `If`
 forms: `q.groupBy(r => r.category).aggregate(() => count())` or
 `q.aggregate(g => ({ total: sum(g.amount) }))`. Keys precede aggregate outputs;
@@ -64,8 +76,9 @@ The client decodes String/FixedString, Bool, integer widths, floats (including
 non-finite values), DateTime64(0–3), recursive Array and named/unnamed Tuple,
 Nullable and LowCardinality. Decimal, other dates/high-precision timestamps,
 Map, Enum, addresses, opaque states and unknown descriptors remain explicitly
-unsupported. Full catalog, outer/cross joins, optimizations, streaming and Part 4 backend
-plugins remain backlog.
+unsupported. Full catalog, outer joins, optimizations, streaming and Part 4 backend
+plugins remain backlog. M3–M6 and the remaining Part 4 constraints are incomplete;
+this preview is not full v1 acceptance. M7–M8 remain deferred.
 
 Against a ClickHouse database with the fixture's `entity_ots_component` schema:
 

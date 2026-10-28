@@ -95,7 +95,9 @@ export function emitNaive(root: Rel): CompiledQuery {
       const list = order.map(quoteIdentifier).join(', ');
       switch (rel.kind) {
         case 'Join': {
-          if (rel.joinKind !== 'inner') return fail('unsupported_join', rel, path);
+          if (rel.joinKind !== 'inner' && rel.joinKind !== 'cross') return fail('unsupported_join', rel, path);
+          if (!Array.isArray(rel.on)) return fail('invalid_join_condition', rel, `${path}.on`);
+          if (rel.joinKind === 'cross' && rel.on.length) return fail('join_condition_arity', rel, `${path}.on`, 'CROSS JOIN has no ON condition');
           if (!Array.isArray(rel.inputs) || rel.inputs.length < 2 || new Set(rel.inputs.map(([a]) => a)).size !== rel.inputs.length) return fail('join_input_count', rel, `${path}.inputs`);
           const expected = { shape: 'nested', inputs: rel.inputs.map(([a, r]) => [a, r.output]) };
           if (JSON.stringify(expected) !== JSON.stringify(rel.output)) return fail('invalid_output', rel, path);
@@ -131,7 +133,7 @@ export function emitNaive(root: Rel): CompiledQuery {
             if (left.length !== 1 || right.length !== 1 || left[0] === right[0]) return fail('join_condition_arity', e, p);
             clauses[Math.max(left[0]!, right[0]!)]!.push({ e, path: p });
           }
-          for (let i = 1; i < clauses.length; i++) if (!clauses[i]!.length) return fail('join_condition_arity', rel, `${path}.inputs[${i}]`, 'no equality connects this input to an earlier input');
+          for (let i = 1; i < clauses.length; i++) if (rel.joinKind !== 'cross' && !clauses[i]!.length) return fail('join_condition_arity', rel, `${path}.inputs[${i}]`, 'no equality connects this input to an earlier input');
           const items = leaves.map(l => {
             const side = rel.inputs.find(([a]) => a === l.path[0])!;
             const child = outputLeaves(side[1].output).find(c => JSON.stringify(c.path) === JSON.stringify(l.path.slice(1)))!;
@@ -139,8 +141,8 @@ export function emitNaive(root: Rel): CompiledQuery {
           });
           let source = '';
           for (const [i, [alias, child]] of rel.inputs.entries()) {
-            source += `${i ? ' INNER ALL JOIN ' : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${quoteIdentifier(alias)}`;
-            if (i) source += ` ON ${clauses[i]!.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}`;
+            source += `${i ? (rel.joinKind === 'cross' ? ' CROSS JOIN ' : ' INNER ALL JOIN ') : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${quoteIdentifier(alias)}`;
+            if (i && rel.joinKind !== 'cross') source += ` ON ${clauses[i]!.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}`;
           }
           return `SELECT ${items.join(', ')} FROM ${source}${residuals.length ? ` WHERE ${residuals.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}` : ''}`;
         }

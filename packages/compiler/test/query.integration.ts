@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@chql/client';
-import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, type Query } from '@chql/core';
+import { count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, type Query } from '@chql/core';
 import { emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@chql/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -24,6 +24,55 @@ beforeAll(async () => {
   await sql("INSERT INTO entity_ots_component (tenantId,entityId,category,countOfParts,updatedAt) VALUES ('acme','a',NULL,18446744073709551615,'2026-10-27 12:00:00.123'),('other','b','hidden',2,'2026-10-27 00:00:00'),('acme','c','visible',0,'1970-01-01 00:00:00')");
 }, 120000);
 afterAll(async () => { await client?.close(); await container?.stop(); });
+it('executes ordered Cartesian products, nested joins and empty sides without null extension', async () => {
+  const source = from(db.entity_ots_component).where(r => r.tenantId.eq('acme'));
+  const product = crossJoin({ a: source, b: source, c: source });
+  expect(await client.run(product.aggregate(() => count()))).toEqual([{ count: 8n }]);
+  const flat = product.map(r => ({ a: r.a.entityId, b: r.b.entityId, c: r.c.entityId })).orderBy(r => r.a).thenBy(r => r.b).thenBy(r => r.c);
+  const baseline = (await sql("SELECT a.entityId AS a,b.entityId AS b,c.entityId AS c FROM entity_ots_component a CROSS JOIN entity_ots_component b CROSS JOIN entity_ots_component c WHERE a.tenantId='acme' AND b.tenantId='acme' AND c.tenantId='acme' ORDER BY a,b,c FORMAT JSONEachRow")).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(await client.run(flat)).toEqual(baseline);
+  const direct = await client.run(crossJoin({ a: source, b: source }).orderBy(r => r.a.entityId).thenBy(r => r.b.entityId));
+  const originals = await client.run(source.orderBy(r => r.entityId));
+  expect(direct).toEqual(originals.flatMap(a => originals.map(b => ({ a, b }))));
+  expect(await client.run(crossJoin({ a: source.limit(0), b: source }))).toEqual([]);
+  expect(await client.run(crossJoin({ a: source, b: source.limit(0) }))).toEqual([]);
+  const duplicate = source.map(() => ({ n: val(1, col.UInt32), nullable: val(null, col.Nullable(col.String)) }));
+  expect(await client.run(crossJoin({ a: duplicate, b: duplicate }).aggregate(() => count()))).toEqual([{ count: 4n }]);
+  expect(await client.run(crossJoin({ a: duplicate, b: duplicate }).distinct().map(r => ({ ...r.a })))).toEqual([{ n: 1, nullable: null }]);
+  const nested = crossJoin({ ab: join({ a: source, b: source }).on(r => r.a.entityId.eq(r.b.entityId)), c: source });
+  expect(await client.run(nested.where(r => r.ab.a.entityId.eq('a')).groupBy(r => r.c.category).aggregate(() => count()).orderBy(r => r.category.asc().nullsFirst()))).toEqual([{ category: null, count: 1n }, { category: 'visible', count: 1n }]);
+  expect(await client.run(join({ ab: crossJoin({ a: source, b: source }), c: source }).on(r => r.ab.a.entityId.eq(r.c.entityId)).limit(1).map(r => ({ ...r.c })))).toHaveLength(1);
+});
+it('composes Cartesian products with repeated nullable LEFT expansion and hostile nested paths', async () => {
+  await sql('CREATE TABLE cross_expansion_probe (id UInt32, xs Array(Nullable(Int32))) ENGINE=Memory');
+  await sql('INSERT INTO cross_expansion_probe VALUES (1,[NULL,7,7]),(2,[])');
+  const side = from(table('cross_expansion_probe', { id: col.UInt32, xs: col.Array(col.Nullable(col.Int32)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const expanded = crossJoin({ ['__proto__']: side, '__chql_leaf_0': side })
+    .leftArrayJoin(r => r.__proto__.xs, 'x')
+    .leftArrayJoin(r => r.__chql_leaf_0.xs, 'y');
+  const ordered = expanded.map(r => ({ a: r.__proto__.id, b: r.__chql_leaf_0.id, x: r.x, y: r.y }))
+    .orderBy(r => r.a).thenBy(r => r.b).thenBy(r => r.x.asc().nullsFirst()).thenBy(r => r.y.asc().nullsFirst());
+  const baseline = (await sql('SELECT a.id AS a,b.id AS b,a.x AS x,b.y AS y FROM (SELECT id,arrayJoin(emptyArrayToSingle(xs)) AS x FROM cross_expansion_probe) a CROSS JOIN (SELECT id,arrayJoin(emptyArrayToSingle(xs)) AS y FROM cross_expansion_probe) b ORDER BY a,b,x NULLS FIRST,y NULLS FIRST FORMAT JSONEachRow')).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(baseline).toHaveLength(16);
+  expect(await client.run(ordered)).toEqual(baseline);
+  expect(await client.run(expanded.aggregate(() => count()))).toEqual([{ count: 16n }]);
+  const empty = await client.run(expanded.where(r => r.__proto__.id.eq(2).and(r.__chql_leaf_0.id.eq(2))));
+  expect(empty).toEqual([{ ['__proto__']: { id: 2, xs: [] }, __chql_leaf_0: { id: 2, xs: [] }, x: null, y: null }]);
+  expect(Object.hasOwn(empty[0]!, '__proto__')).toBe(true);
+  const nested = crossJoin({ nested: expanded, other: side.limit(0) });
+  expect(await client.run(nested)).toEqual([]);
+});
+it.each(['RIGHT', 'FULL'])('independently checks %s ALL structured defaults under join_use_nulls', async kind => {
+  const rows = (await sql(`SELECT l.id AS l,r.id AS r,l.arr AS la,r.arr AS ra FROM (SELECT 1 AS id,[7] AS arr) l ${kind} ALL JOIN (SELECT 2 AS id,[8] AS arr) r ON l.id=r.id ORDER BY r NULLS FIRST SETTINGS join_use_nulls=1 FORMAT JSONEachRow`)).trim().split('\n').map(line => JSON.parse(line) as unknown);
+  expect(rows).toEqual(kind === 'RIGHT' ? [{ l: null, r: 2, la: [], ra: [8] }] : [{ l: 1, r: null, la: [7], ra: [] }, { l: null, r: 2, la: [], ra: [8] }]);
+});
+it('records actual outer-join structured defaults instead of promising Nullable containers', async () => {
+  const query = "SELECT r.arr AS arr,r.tup AS tup,r.mp AS mp,toTypeName(r.arr) AS arrType,toTypeName(r.tup) AS tupType,toTypeName(r.mp) AS mapType,r.id AS id FROM (SELECT 1 AS id) l LEFT ALL JOIN (SELECT 2 AS id,[7] AS arr,tuple('x',7) AS tup,map('x',7) AS mp) r ON l.id=r.id SETTINGS join_use_nulls=1 FORMAT JSONEachRow";
+  expect(JSON.parse(await sql(query))).toEqual({ arr: [], tup: ['', 0], mp: {}, arrType: 'Array(UInt8)', tupType: 'Tuple(String, UInt8)', mapType: 'Map(String, UInt8)', id: null });
+  for (const type of ['Array(UInt8)', 'Tuple(String, UInt8)', 'Map(String, UInt8)']) {
+    await expect(sql(`SELECT CAST(NULL AS Nullable(${type}))`)).rejects.toThrow('cannot be inside Nullable type');
+  }
+});
 it('executes inner ALL self/three-way/nested joins with residuals, nullable keys and empty inputs', async () => {
   await sql('CREATE TABLE inner_probe (tenantId String, id UInt32, key Nullable(UInt32), labels Array(String)) ENGINE=Memory');
   await sql("INSERT INTO inner_probe VALUES ('acme',1,7,['a']),('acme',2,7,['b']),('acme',3,NULL,[]),('other',4,7,['secret'])");
