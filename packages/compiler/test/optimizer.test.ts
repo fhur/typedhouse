@@ -9,7 +9,7 @@ it('folds scan/filter/sort/limit without changing metadata, parameters or IR', (
   const q = from(products).where(r => r.category.eq('books')).orderBy(r => r.stock.desc()).limit(10);
   const before = JSON.stringify(q.ir);
   const result = compile(q.ir);
-  expect(result.sql).toBe('SELECT `__chql_input`.`id`, `__chql_input`.`category`, `__chql_input`.`stock` FROM `products` AS `__chql_input` WHERE (`__chql_input`.`category` = {p0:String}) ORDER BY `__chql_input`.`stock` DESC LIMIT 10');
+  expect(result.sql).toBe('SELECT `id`, `category`, `stock` FROM `products` WHERE (`category` = {p0:String}) ORDER BY `stock` DESC LIMIT 10');
   const naive = emitNaive(q.ir);
   expect(selects(naive.sql)).toBe(4);
   expect({ ...result, sql: '' }).toEqual({ ...naive, sql: '' });
@@ -45,7 +45,7 @@ it('preserves shared parameter identity and textual allocation order', () => {
 
 it('preserves scan hints and rejects foreign references and invalid limits', () => {
   const q = from(products).final().sample(0.5).limit(1);
-  expect(compile(q.ir).sql).toContain('FROM `products` AS `__chql_input` FINAL SAMPLE 0.5 LIMIT 1');
+  expect(compile(q.ir).sql).toContain('FROM `products` FINAL SAMPLE 0.5 LIMIT 1');
   expect(() => compile(from(products).where(() => from(products).row.stock.eq(1n)).ir)).toThrow(/unbound_column/);
   expect(() => compile(from(products).limit(-1).ir)).toThrow(/invalid_limit/);
 });

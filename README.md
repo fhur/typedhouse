@@ -310,7 +310,9 @@ Your table must have the demo columns; adjust the projection for another schema.
 
 The default `compile` pipeline validates relational IR, lowers it into SELECT blocks,
 then emits SQL and allocates parameters. It folds scan → filter → sort → limit
-into one SELECT. Consecutive filters combine with AND. Simple same-name column
+into one SELECT. Blocks reading directly from a physical table omit the internal
+table alias and column qualifiers; derived-table and join scopes retain explicit
+qualification. Identifiers remain quoted. Consecutive filters combine with AND. Simple same-name column
 selections (for example `.map(p => ({ id: p.id, stock: p.stock }))`) fold before
 sorting/limiting, including filters on columns omitted by the selection. Repeated
 sorts/limits and out-of-order clauses start a derived table. Renamed/computed

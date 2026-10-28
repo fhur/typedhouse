@@ -47,6 +47,11 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
   let dateMembership = false;
   // Each derived input owns this local SQL scope; ColumnRefs never bind SELECT aliases.
   const inputAlias = quoteIdentifier('__chql_input');
+  // A physical-table block has no competing input or SELECT aliases. Derived
+  // scopes retain qualification; logical ColumnRef binding stays unchanged.
+  function blockQualifier(rel: Rel): string {
+    return plan?.blocks.get(rel)?.source.kind === 'table' ? '' : inputAlias;
+  }
   function fail(code: string, node: unknown, path: string, detail = ''): never { throw new ValidationError(code, node, path, detail); }
   function resolvedType(e: ExprNode, expected?: CHType): CHType {
     if (e.kind === 'Subquery') {
@@ -77,7 +82,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           if (!side || !child) return fail('unbound_column', e, path);
           return `${quoteIdentifier(side[0])}.${quoteIdentifier(child.name)}`;
         }
-        return `${qualifier}.${quoteIdentifier(leaf.name)}`;
+        return `${qualifier ? `${qualifier}.` : ''}${quoteIdentifier(leaf.name)}`;
       }
       case 'Param': {
         const type = e.type ?? expected;
@@ -146,7 +151,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     let from: string;
     if (block.source.kind === 'table') {
       const scan = block.source.scan;
-      from = `${quoteIdentifier(scan.table.name)} AS ${inputAlias}${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
+      from = `${quoteIdentifier(scan.table.name)}${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
     } else {
       from = `(${rendered.get(block.source.rel)!}) AS ${inputAlias}`;
     }
@@ -155,7 +160,8 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     // are atomic SQL expressions. Combining them needs no extra wrappers.
     const where = predicates.length ? ` WHERE ${predicates.join(' AND ')}` : '';
     const tail = block.clauses.filter(node => node.kind !== 'Filter').map(node => clauses.get(node)!).join('');
-    return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM ${from}${where}${tail}`;
+    const qualifier = blockQualifier(rel);
+    return `SELECT ${order.map(k => `${qualifier ? `${qualifier}.` : ''}${quoteIdentifier(k)}`).join(', ')} FROM ${from}${where}${tail}`;
   }
   function emit(rel: Rel, path: string): string {
     const sql = emitNode(rel, path);
@@ -332,7 +338,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
             const keys = rel.keys.map((key, i) => {
               const keyPath = `${path}.keys[${i}]`;
               if (!key || (key.dir !== 'asc' && key.dir !== 'desc') || (key.nulls !== undefined && key.nulls !== 'first' && key.nulls !== 'last')) return fail('invalid_sort_key', rel, keyPath);
-              return `${expression(key.expr, rel.input, `${keyPath}.expr`)} ${key.dir.toUpperCase()}${key.nulls === undefined ? '' : ` NULLS ${key.nulls.toUpperCase()}`}`;
+              return `${expression(key.expr, rel.input, `${keyPath}.expr`, undefined, false, 'row', blockQualifier(rel))} ${key.dir.toUpperCase()}${key.nulls === undefined ? '' : ` NULLS ${key.nulls.toUpperCase()}`}`;
             });
             if (plan) return renderClause(` ORDER BY ${keys.join(', ')}`);
             return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias} ORDER BY ${keys.join(', ')}`;
@@ -340,7 +346,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           if (rel.kind === 'Filter') {
             const type = rel.pred?.type && base(rel.pred.type);
             if (!type || type.kind !== 'scalar' || type.name !== 'Bool') return fail('invalid_predicate', rel, path);
-            const predicate = expression(rel.pred, rel.input, `${path}.pred`);
+            const predicate = expression(rel.pred, rel.input, `${path}.pred`, undefined, false, 'row', blockQualifier(rel));
             if (plan) return renderClause(predicate);
             return `SELECT ${list} FROM (${source}) AS ${inputAlias} WHERE ${predicate}`;
           }

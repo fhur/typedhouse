@@ -20,7 +20,7 @@ it('emits explicit deterministic collision-safe CTEs, warning once per identity 
   const optimized = compile(query.ir);
   expect({ ...optimized, sql: '' }).toEqual({ ...plan, sql: '' });
   expect(optimized.sql).toContain('WITH `t3` AS');
-  expect(optimized.sql).toContain('ORDER BY `__chql_input`.`id` ASC LIMIT 2');
+  expect(optimized.sql).toContain('ORDER BY `id` ASC LIMIT 2');
   expect(warn).toHaveBeenCalledTimes(4);
 });
 it('retains shared/equal Params and first textual numbering across nested sets and scalar inputs', () => {

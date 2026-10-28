@@ -13,7 +13,7 @@ it('folds the available-products example into one SELECT', () => {
   const before = JSON.stringify(query.ir);
   const naive = emitNaive(query.ir);
   const result = compile(query.ir);
-  expect(result.sql).toBe('SELECT `__chql_input`.`id`, `__chql_input`.`stock` FROM `products` AS `__chql_input` WHERE greater(`__chql_input`.`stock`, {p0:UInt32}) AND (`__chql_input`.`category` = {p1:String}) ORDER BY `__chql_input`.`stock` DESC LIMIT 10');
+  expect(result.sql).toBe('SELECT `id`, `stock` FROM `products` WHERE greater(`stock`, {p0:UInt32}) AND (`category` = {p1:String}) ORDER BY `stock` DESC LIMIT 10');
   expect({ ...result, sql: '' }).toEqual({ ...naive, sql: '' });
   expect(JSON.stringify(query.ir)).toBe(before);
   expect(countSelects(compile(available.ir).sql)).toBe(1);
@@ -28,7 +28,7 @@ it('folds repeated selections and filters while keeping parameter identities', (
     .map(r => ({ id: r.id })).where(r => r.id.eq(shared)).orderBy(r => r.id).limit(0);
   const plan = compile(query.ir);
   expect(countSelects(plan.sql)).toBe(1);
-  expect(plan.sql).toContain('WHERE or(greater(`__chql_input`.`stock`, {p0:UInt32}), (`__chql_input`.`id` = {p1:UInt32})) AND less(`__chql_input`.`stock`, {p2:UInt32}) AND (`__chql_input`.`id` = {p0:UInt32})');
+  expect(plan.sql).toContain('WHERE or(greater(`stock`, {p0:UInt32}), (`id` = {p1:UInt32})) AND less(`stock`, {p2:UInt32}) AND (`id` = {p0:UInt32})');
   expect(plan.params).toEqual(emitNaive(query.ir).params);
   expect(Object.values(plan.params)).toEqual(['2', '0', '10']);
   expect(plan.columns).toEqual({ id: col.UInt32.type });
