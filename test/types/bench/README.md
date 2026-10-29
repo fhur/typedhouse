@@ -1,0 +1,136 @@
+# M3 stress repair — locally passing; full performance gate still open
+
+## Repair evidence
+
+The original stress files and generator are unchanged (hashes below). Both now
+pass actual TS **5.8.3 / 5.5.4 / 7.0.2**, against built public declarations and
+against source (`-p test/types/bench/tsconfig.source.json`). No intermediates were
+annotated and no compiler budget, suppression, or descriptor erasure was added.
+
+Before editing, freshly rebuilt declarations reproduced TS2590 at chain step5
+and in the original `/tmp/chql-m3-minimal.mts`. The fresh default failure used
+1,856,858 instantiations, 513,377K memory, 3.28s check / 3.41s total.
+
+The single-precise-proxy change alone **did not fix it**: 1,827,814 instantiations,
+501,173K, 3.23s check / 3.36s total, still TS2590. Descriptor intersections from
+`ExprNode['type']` were also accumulating across projection boundaries. Reifying
+concrete descriptors with a homomorphic mapped type removed this accumulation.
+Shallow reconstruction passed the chain but exposed TS2590 in existing nullable
+scalar and tuple tests; recursively reconstructing nested descriptors at map and
+aggregate boundaries passed those unchanged tests too. Broad CHType stays opaque.
+The repair preserves descriptor fields/unions, nominal Expr identity, decoded
+rows, names/modes, Query defaults, nested grouping and aggregate IR refinement.
+
+Final fresh-process measurements (one run/version/path, warm filesystem caches;
+external time includes pnpm startup, build excluded; same host as below):
+
+| TS | Input | Instantiations | Check / total s | External s | Memory K |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 5.8.3 | built | 625,664 | 1.12 / 1.26 | 1.50 | 286,032 |
+| 5.5.4 | built | 624,822 | 1.05 / 1.18 | 1.47 | 277,345 |
+| 7.0.2 | built | 513,821 | 0.328 / 0.348 | 1.15 | 190,444 |
+| 5.8.3 | source | 845,063 | 1.29 / 1.44 | 1.67 | 270,661 |
+| 5.5.4 | source | 843,995 | 1.29 / 1.43 | 1.71 | 258,809 |
+| 7.0.2 | source | 674,339 | 0.351 / 0.375 | 0.96 | 223,104 |
+
+Logs: `/tmp/chql-repair-bench-{default,5.5.4,latest}-{tsconfig.json,tsconfig.source.json}.log`.
+These are diagnostic measurements, **not** initial 200+2 budget baselines.
+No repeated-run budgeting policy or ceiling has been fabricated.
+
+New exact/not-any tests in `../query-proxy.ts` also run in the existing built
+package verifier. Runtime twins are checked in core `query-proxy.test.ts`.
+Sequential final full check:all matrices default/selected minimum/latest pass:
+773 runtime + 7 codegen + 154 integration tests, 225 precise negatives each.
+Explicit root CLIs separately passed fresh non-incremental checks at all three
+actual versions. Existing latest float/integer/erased fallback, copied-operand,
+mode and nested-arithmetic regressions are unchanged and pass.
+Every matrix ran the prior bounded 500-case suites and actual 10M stream;
+see TODO for logs/counts. The full 200-query corpus, coverage ledger, independent
+runtime/declaration snapshots and enforced budget remain follow-on work.
+
+## Historical preflight — blocker reproduced before repair
+
+These are the original two stress inputs, preserved without casts, descriptor erasure,
+intermediate query annotations, or diagnostic suppressions. `chain25.ts` has 25
+map/join steps after its seed projection (13 arithmetic maps and 12 join/map steps).
+`join10.ts` has ten simultaneous inputs covering all six fixture tables. Both consume
+the inferred decoded output with exact/not-any assertions. The 200-query corpus,
+coverage ledger, readable declarations, budget enforcement and failure controls
+remain unimplemented; do not treat this directory as closing M3.
+
+```sh
+pnpm --filter @chql/core build
+node scripts/generate-type-stress.mjs # check only; --refresh explicitly regenerates
+pnpm exec tsc -p test/types/bench/tsconfig.json --extendedDiagnostics --pretty false
+pnpm --package typescript@5.5.4 dlx tsc -p test/types/bench/tsconfig.json --extendedDiagnostics --pretty false
+pnpm --package typescript@latest dlx tsc -p test/types/bench/tsconfig.json --extendedDiagnostics --pretty false
+```
+
+The isolated config resolves built core declarations, not root source aliases.
+The root typecheck also includes these deliberately unsuppressed `.ts`
+inputs (failing at the historical preflight, now passing). No root config or existing acceptance gate was changed to exclude them.
+
+## Reproduced blocker
+
+Actual CLI versions 5.8.3, 5.5.4 and 7.0.2 all report TS2590 at
+`chain25.ts(12,15)` (step5): “Expression produces a union type that is too complex
+to represent.” This is not TS2589, nor an absent API. A separate default-CLI run
+of `join10.ts` passes. A smaller public-package reproduction is:
+
+```ts
+import { col, table, from, join } from '@chql/core';
+const q = from(table('counter', { id: col.String, countOfParts: col.UInt64 },
+  { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const a = q.map(r => ({ id: r.id, count: r.countOfParts }));
+const b = a.map(r => ({ id: r.id, count: r.count.plus(1n) }));
+const c = join({ a: b, b: q }).on(r => r.a.id.eq(r.b.id))
+  .map(r => ({ id: r.a.id, count: r.a.count }));
+const d = c.map(r => ({ id: r.id, count: r.count.plus(1n) }));
+const e = join({ a: d, b: q }).on(r => r.a.id.eq(r.b.id))
+  .map(r => ({ id: r.a.id, count: r.a.count }));
+export const f = e.map(r => ({ id: r.id, count: r.count.plus(1n) })); // TS2590
+```
+
+Default CLI reproduction: `/tmp/chql-m3-minimal.mts`, config
+`/tmp/chql-m3-minimal-config.json`, log `/tmp/chql-m3-minimal.log`.
+Six maps without joins, and the version without renaming countOfParts to count,
+did not reproduce in exploratory probes. The original stress input is unchanged.
+
+Candidate repair investigation: `Query.map` and `JoinQuery.map` currently return
+`Query<Infer<P>, ...> & { row: ProjectionRow<P> }`, intersecting the default row
+proxy with descriptor-bearing proxy evidence. Investigate representing one exact
+proxy through the existing Query Proxy parameter, and normalizing descriptor
+intersections at projection boundaries, without erasing descriptors, decoded-row
+precision, names, modes, nominal operand identity or capability evidence. This is
+a hypothesis, not a tested fix; no production types were edited. Preserve approved
+latest float/integer/erased-input behavior and copied-operand/nested-arithmetic
+negative checks when evaluating a repair. Readability may need additional work.
+
+## Failed-run diagnostics (not budget baselines)
+
+One fresh non-incremental compiler process per version, sequential on Apple M3 Max,
+36 GiB RAM, Darwin 23.6.0 arm64, Node v24.11.0. OS filesystem caches were warm;
+no cold-machine/cache-flush claim. External wall time includes pnpm/CLI startup;
+TS check/total time is separately reported. Core build is outside these timings.
+
+| Actual TS | Instantiations | TS check / total seconds | External seconds | TS memory K |
+| --- | ---: | ---: | ---: | ---: |
+| 5.8.3 | 1,856,858 | 3.31 / 3.43 | 3.69 | 508,328 |
+| 5.5.4 | 1,856,016 | 3.30 / 3.45 | 3.77 | 533,791 |
+| 7.0.2 | 643,901 | 1.026 / 1.057 | 1.65 | 349,571 |
+
+TS7 is the actual native CLI, not a JS API fallback. Its instantiation counts are
+not directly comparable to TS5. Logs: `/tmp/chql-m3-stress-{default,5.5.4,latest}.log`.
+The small failing reproduction uses 1,384,999 instantiations, 1.69s check / 1.80s
+total, 339,671K TS memory on 5.8.3. No budget is created from a failed compile.
+Initial unresolved-package setup errors were fixed by the isolated built-package
+paths mapping; those erroneous runs are not performance evidence.
+
+SHA256 of the tested inputs:
+
+- chain25.ts: `7bdc0d22fa3f1d1267c261b987b76d551cccb22e86e87b73aa46ee1dc4a83a47`
+- join10.ts: `ab665f29aacaa8a258946cabac2aaab9b84ff60bea8ccd5c6da3eca41481798b`
+- built core index.d.ts: `1fc506c49a326298c9fd48c993770844ddeac682bc13e0d2fecbec16bc157c77`
+
+No full check:all matrices, real-SQL 500 suites, 10M stream, or corpus snapshot
+gates were rerun in this blocked attempt. Existing suites remain unchanged.

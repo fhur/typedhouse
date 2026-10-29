@@ -13,6 +13,7 @@ try {
   for (const name of ['expect-type', '@types']) symlinkSync(resolve(`node_modules/${name}`), join(directory, `node_modules/${name}`), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
   writeFileSync(join(directory, 'consumer.ts'), readFileSync('test/types/query.ts', 'utf8') + '\nimport type { AggregationSnapshot } from "./aggregation.d.ts";\nconst snapshotQuery = q.groupBy(r => r.id).aggregate(g => ({ total: sum(g.id), count: count() }));\nexpectTypeOf<Infer<typeof snapshotQuery>>().toEqualTypeOf<AggregationSnapshot>();\nexpectTypeOf<Infer<typeof snapshotQuery>>().not.toBeAny();\n');
+  writeFileSync(join(directory, 'query-proxy.ts'), readFileSync('test/types/query-proxy.ts', 'utf8'));
   writeFileSync(join(directory, 'expansion.ts'), `import { expectTypeOf } from 'expect-type';
 import { from, table, col, join, crossJoin, unionAll, sum, scalar, type Infer } from '@chql/core';
 import type { JoinSnapshot } from './join.d.ts';
@@ -50,7 +51,7 @@ expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
   writeFileSync(join(directory, 'join.d.ts'), readFileSync('test/types/snapshots/join.d.ts', 'utf8'));
   writeFileSync(join(directory, 'array-join.d.ts'), readFileSync('test/types/snapshots/array-join.d.ts', 'utf8'));
   writeFileSync(join(directory, 'aggregation.d.ts'), readFileSync('test/types/snapshots/aggregation.d.ts', 'utf8'));
-  writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, types: ['node'] }, include: ['consumer.ts', 'expansion.ts'] }));
+  writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, types: ['node'] }, include: ['consumer.ts', 'expansion.ts', 'query-proxy.ts'] }));
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": { "@chql/core": ["../../../packages/core/src/index.ts"] }
+  }
+}

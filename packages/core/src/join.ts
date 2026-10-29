@@ -11,7 +11,7 @@ type JoinCaps<I extends Record<string, Input>> = { readonly live: false extends 
 
 /** The homomorphic side-spread overload preserves generic R without conditional Infer<Row<R>>. */
 export class JoinQuery<R, C extends Caps, Proxy> extends Query<R, C, Proxy, true> {
-  override map<P extends Projection | Expr<unknown, string>>(projection: (row: this['row']) => P & ValidProjection<P>): Query<Infer<P>, ExpressionCaps<C>> & { readonly row: ProjectionRow<P> };
+  override map<P extends Projection | Expr<unknown, string>>(projection: (row: this['row']) => P & ValidProjection<P>): Query<Infer<P>, ExpressionCaps<C>, ProjectionRow<P>>;
   override map<S>(projection: (row: this['row']) => Row<S>): Query<S, ExpressionCaps<C>>;
   override map(projection: (row: this['row']) => unknown): unknown { return super.map(projection as (row: this['row']) => Projection); }
 }

@@ -40,7 +40,12 @@ type ExpandedRow<R, E extends Expr<readonly unknown[], string>, A extends string
   ? R & Partial<Record<string, R[keyof R] | (Expr<ArrayValue<E>, string> & { readonly ir: ExprNode & { readonly type: ArrayChild<E> } })>>
   : OptionalAlias<A> extends true ? R & Partial<{ [K in A]: R[Extract<keyof R, A>] | DescribedRow<{ [P in K]: ArrayValue<E> }, { [P in K]: ArrayChild<E> }>[K] }>
   : R & DescribedRow<{ [K in A]: ArrayValue<E> }, { [K in A]: ArrayChild<E> }>;
-type ProjectRow<P extends Projection> = DescribedRow<Infer<P>, { [K in keyof P]: NonNullable<P[K]['ir']['type']> }>;
+/** Reify descriptor intersections at projection boundaries, including tuple/array
+ * children. Reusing ExprNode['type'] intersections accumulates distributive union
+ * products across renamed arithmetic/join chains (TS2590). Keep erased CHType
+ * opaque; reconstruct concrete evidence without changing its fields or unions. */
+type ProjectDescriptor<D> = CHType extends D ? D : D extends object ? { [K in keyof D]: ProjectDescriptor<D[K]> } : D;
+type ProjectRow<P extends Projection> = DescribedRow<Infer<P>, { [K in keyof P]: ProjectDescriptor<NonNullable<P[K]['ir']['type']>> }>;
 type NamedProjection<E extends Expr<unknown, string>> = { [K in E['name']]: E };
 export type ValidProjection<P> = P extends Expr<unknown, string> ? [P['name']] extends [never] ? { readonly unnamed_expression: never } : unknown : unknown;
 export type ProjectionRow<P extends Projection | Expr<unknown, string>> = P extends Expr<unknown, string> ? ProjectRow<NamedProjection<P>> : P extends Projection ? ProjectRow<P> : never;
@@ -51,7 +56,7 @@ type NestedGroupedInput<R> = { readonly [K in keyof R]: R[K] extends Expr<infer 
 type GroupedInput<R, Nested extends boolean> = Nested extends true ? NestedGroupedInput<R> : FlatGroupedInput<R>;
 type QueryGrouped<R, P, N extends boolean> = N extends true ? NestedGroupedInput<P> : { readonly [K in keyof R]: Expr<R[K], K & string, 'grouped'> & { readonly ir: K extends keyof P ? P[K] extends { readonly ir: infer I extends ExprNode } ? I : ExprNode : ExprNode } };
 type AggregateRow<K, A> = { [P in keyof (Infer<K> & Infer<A>)]: (Infer<K> & Infer<A>)[P] };
-type OutputRow<K, A> = DescribedRow<AggregateRow<K, A>, { [P in keyof (Named<K> & Named<A>)]: (Named<K> & Named<A>)[P] extends { ir: { type: infer D } } ? D : CHType }>;
+type OutputRow<K, A> = DescribedRow<AggregateRow<K, A>, { [P in keyof (Named<K> & Named<A>)]: (Named<K> & Named<A>)[P] extends { ir: { type: infer D } } ? ProjectDescriptor<D> : CHType }>;
 type ValidNamed<P> = P extends { readonly name: infer N } ? [N] extends [never] ? { readonly unnamed_expression: never } : unknown : unknown;
 type Unique<K, A> = Extract<keyof Named<K>, keyof Named<A>> extends never ? unknown : { readonly duplicate_column: never };
 function expressions(value: unknown, mode: 'row' | 'agg'): [string, Expr<unknown, string, typeof mode>][] {
@@ -72,13 +77,13 @@ export class GroupedQuery<R, K, C extends Caps = Caps, Nested extends boolean = 
     Object.freeze(this.caps);
     Object.freeze(this);
   }
-  aggregate<A extends AggregateProjection>(f: (row: G) => A & ValidNamed<A> & Unique<K, A>): Query<AggregateRow<K, A>, ExpressionCaps<C>> & { readonly row: OutputRow<K, A> } {
+  aggregate<A extends AggregateProjection>(f: (row: G) => A & ValidNamed<A> & Unique<K, A>): Query<AggregateRow<K, A>, ExpressionCaps<C>, OutputRow<K, A>> {
     const row = rowOf(this.input, 'grouped');
     const aggs = expressions(f(row as G), 'agg');
     const entries = [...this.keys, ...aggs];
     const output = flatOutput(entries.map(([name, e]) => [name, e.ir.type!]));
     const ir = relNode({ kind: 'Aggregate', input: this.input, keys: Object.fromEntries(this.keys.map(([k, e]) => [k, e.ir])), aggs: Object.fromEntries(aggs.map(([k, e]) => [k, e.ir])), columns: output.columns, output });
-    return new Query<AggregateRow<K, A>, ExpressionCaps<C>>(ir, { live: this.caps.live && entries.every(([, e]) => deterministic(e.ir)) } as ExpressionCaps<C>) as Query<AggregateRow<K, A>, ExpressionCaps<C>> & { readonly row: OutputRow<K, A> };
+    return new Query<AggregateRow<K, A>, ExpressionCaps<C>, OutputRow<K, A>>(ir, { live: this.caps.live && entries.every(([, e]) => deterministic(e.ir)) } as ExpressionCaps<C>);
   }
 }
 type SortResult = Expr<unknown, string, 'row'> | Ordering<'row'>;
@@ -160,7 +165,7 @@ export class Query<R, C extends Caps = Caps, Proxy = Row<R>, Nested extends bool
     if (!(pred instanceof Expr) || pred.mode !== 'row') throw new Error('invalid_predicate');
     return new Query(relNode({ kind: 'Filter', input: this.ir, pred: pred.ir, output: this.ir.output }), { live: this.caps.live && deterministic(pred.ir) } as ExpressionCaps<C>);
   }
-  map<P extends Projection | Expr<unknown, string>>(projection: (row: this['row']) => P & ValidProjection<P>): Query<Infer<P>, ExpressionCaps<C>> & { readonly row: ProjectionRow<P> } {
+  map<P extends Projection | Expr<unknown, string>>(projection: (row: this['row']) => P & ValidProjection<P>): Query<Infer<P>, ExpressionCaps<C>, ProjectionRow<P>> {
     let result: Projection | Expr<unknown, string> = projection(this.row);
     if (result instanceof Expr) {
       if (result.name === undefined) throw new Error('unnamed_expression: use the object form');
@@ -171,13 +176,13 @@ export class Query<R, C extends Caps = Caps, Proxy = Row<R>, Nested extends bool
     for (const [name, e] of entries) if (!(e instanceof Expr) || e.mode !== 'row' || !e.ir.type) throw new Error(`nested_projection or param_untyped: ${name}`);
     const output = flatOutput(entries.map(([name, e]) => [name, e.ir.type!]));
     const ir = relNode({ kind: 'Project', input: this.ir, exprs: Object.fromEntries(entries.map(([name, e]) => [name, e.ir])), columns: output.columns, output });
-    return new Query<Infer<P>, ExpressionCaps<C>>(ir, { live: this.caps.live && entries.every(([, e]) => deterministic(e.ir)) } as ExpressionCaps<C>) as Query<Infer<P>, ExpressionCaps<C>> & { readonly row: ProjectionRow<P> };
+    return new Query<Infer<P>, ExpressionCaps<C>, ProjectionRow<P>>(ir, { live: this.caps.live && entries.every(([, e]) => deterministic(e.ir)) } as ExpressionCaps<C>);
   }
   groupBy<K extends Projection | Expr<unknown, string>>(f: (row: this['row']) => K & ValidProjection<K>): GroupedQuery<this['row'], K, C, Nested, QueryGrouped<R, this['row'], Nested>> {
     return new GroupedQuery(this.ir, expressions(f(this.row), 'row') as [string, Expr<unknown, string>][], this.caps);
   }
-  aggregate<A extends AggregateProjection>(f: (row: QueryGrouped<R, this['row'], Nested>) => A & ValidNamed<A>): Query<AggregateRow<{}, A>, ExpressionCaps<C>> & { readonly row: OutputRow<{}, A>; readonly ir: Extract<Rel, { kind: 'Aggregate' }> } {
-    return new GroupedQuery<this['row'], {}, C, Nested, QueryGrouped<R, this['row'], Nested>>(this.ir, [], this.caps).aggregate<A>(f) as Query<AggregateRow<{}, A>, ExpressionCaps<C>> & { readonly row: OutputRow<{}, A>; readonly ir: Extract<Rel, { kind: 'Aggregate' }> };
+  aggregate<A extends AggregateProjection>(f: (row: QueryGrouped<R, this['row'], Nested>) => A & ValidNamed<A>): Query<AggregateRow<{}, A>, ExpressionCaps<C>, OutputRow<{}, A>> & { readonly ir: Extract<Rel, { kind: 'Aggregate' }> } {
+    return new GroupedQuery<this['row'], {}, C, Nested, QueryGrouped<R, this['row'], Nested>>(this.ir, [], this.caps).aggregate<A>(f) as Query<AggregateRow<{}, A>, ExpressionCaps<C>, OutputRow<{}, A>> & { readonly ir: Extract<Rel, { kind: 'Aggregate' }> };
   }
   arrayJoin<E extends Expr<readonly unknown[], string, 'row'>, A extends string>(f: (row: this['row']) => E, alias: A & (A extends keyof R ? { readonly duplicate_column: never } : unknown)): WithRow<Query<Expanded<R, E, A>, ExpressionCaps<C>, ExpandedRow<this['row'], E, A>, Nested>, ExpandedRow<this['row'], E, A>> {
     return this.expand<E, A>(f, alias, false);
@@ -228,17 +233,17 @@ export class OrderedQuery<R, C extends Caps = Caps, Proxy = Row<R>, Nested exten
   }
 }
 /** Scan hints retain descriptor evidence without adding fields to the frozen wrapper. */
-export class TableQuery<R, C extends Caps = Caps> extends Query<R, C> {
-  final(): WithRow<TableQuery<R, C>, this['row']> { return this.hint({ final: true }); }
-  sample(fraction: number): WithRow<TableQuery<R, C>, this['row']> { return this.hint({ sample: fraction }); }
-  private hint(hint: { final?: boolean; sample?: number }): WithRow<TableQuery<R, C>, this['row']> {
+export class TableQuery<R, C extends Caps = Caps, Proxy = Row<R>> extends Query<R, C, Proxy> {
+  final(): TableQuery<R, C, this['row']> { return this.hint({ final: true }); }
+  sample(fraction: number): TableQuery<R, C, this['row']> { return this.hint({ sample: fraction }); }
+  private hint(hint: { final?: boolean; sample?: number }): TableQuery<R, C, this['row']> {
     if (this.ir.kind !== 'Scan') throw new Error('invalid_scan_hint');
     const { id: _id, ...fields } = this.ir;
-    return new TableQuery(relNode({ ...fields, ...hint }), this.caps) as WithRow<TableQuery<R, C>, this['row']>;
+    return new TableQuery(relNode({ ...fields, ...hint }), this.caps);
   }
 }
 type SourceLive<T extends TableDef> = T extends { readonly source: object } ? true : T['source'] extends undefined ? false : boolean;
-export function from<T extends TableDef>(table: T): TableQuery<Infer<T>, { live: SourceLive<T> }> & { readonly row: DescribedRow<Infer<T>, T['columns']> } {
+export function from<T extends TableDef>(table: T): TableQuery<Infer<T>, { live: SourceLive<T> }, DescribedRow<Infer<T>, T['columns']>> {
   const output = flatOutput(Object.entries(table.columns));
-  return new TableQuery(relNode({ kind: 'Scan', table, columns: output.columns, output }), { live: table.source !== undefined }) as TableQuery<Infer<T>, { live: SourceLive<T> }> & { readonly row: DescribedRow<Infer<T>, T['columns']> };
+  return new TableQuery<Infer<T>, { live: SourceLive<T> }, DescribedRow<Infer<T>, T['columns']>>(relNode({ kind: 'Scan', table, columns: output.columns, output }), { live: table.source !== undefined } as { live: SourceLive<T> });
 }
