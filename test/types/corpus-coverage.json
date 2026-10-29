@@ -6,7 +6,7 @@
   "gates": {
     "1": "Exact/not-any supported subset only; missing API examples remain below.",
     "2": "Existing precise negative harness, 225 historical cases; outer-join example deferred.",
-    "3": "248 runtime-CHType-derived ordered rows compared exactly to inferred output; not live execution of every new composition.",
+    "3": "248 frozen runtime-CHType-derived ordered rows plus additive componentsLatest correspondence; not live execution of every composition.",
     "4": "200 independent compositions plus original two stress cases, cold-process source/built per-version budgets; local enforcement.",
     "5": "Readability repaired by the authorized ColumnsRow<C> & {} type-only change; actual emitted declarations and focused controls pass on 5.8.3 / 5.5.4 / 7.0.2. Full sequential verification remains pending; not universal M3 acceptance.",
     "6": "Existing standalone deterministic generated-surface verifier; incomplete catalog remains a separate contract."
@@ -37,7 +37,7 @@
     { "id": "versioned/argMax", "status": "supported", "queries": ["argMaxIndices"] },
     { "id": "versioned/weekly", "status": "supported", "queries": ["weeklySeries"] },
     { "id": "entities/latest-inputs", "status": "owner-approved adaptation", "queries": ["latestAvailability", "latestIndices"] },
-    { "id": "entities/componentsLatest", "status": "API-blocked", "missing": ["greatest"], "source": "packages/core/src/index.ts and catalog", "remaining": "Full three-way projection with greatest(effectiveAt) must compile/run unchanged." },
+    { "id": "entities/componentsLatest", "status": "owner-approved adaptation", "queries": ["componentsLatest"], "source": "packages/compiler/test/fixtures/corpus/components-latest.ts", "evidence": "Exact three-input predicates/projection; approved descriptor-preserving latest helper. Native independently authored SQL and expected rows versus naive/optimized ClickHouse 24.8 pass. Temporal greatest only: non-null DateTime64(0..3), homogeneous literal timezone metadata, same mode. Numeric/nullable/broader greatest remains backlog, not a full-spec waiver." },
     { "id": "entities/optional-snapshot", "status": "deferred outer join", "missing": ["leftJoin"], "source": "packages/core/src/join.ts", "remaining": "Owner deferral, not full v1 acceptance." },
     { "id": "entities/history", "status": "supported", "queries": ["history"], "evidence": "stock-history.ts fixed clock arguments; full version/window/order topology retained" },
     { "id": "entities/scopedLatest", "status": "owner-approved adaptation", "queries": ["scopedLatest"] },

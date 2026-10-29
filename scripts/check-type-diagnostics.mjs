@@ -56,6 +56,10 @@ try {
     });
   }
   const config = { compilerOptions: { strict: true, exactOptionalPropertyTypes: true, noEmit: true, target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', types: [], skipLibCheck: false }, include: ['*.ts'] };
+  if (process.argv.includes('--source')) {
+    config.compilerOptions.paths = { '@chql/core': [resolve('packages/core/src/index.ts')] };
+  }
+  console.log(`Checking ${process.argv.includes('--source') ? 'source' : 'built'} declarations.`);
   writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify(config));
   let diagnostics;
   if (api?.createProgram) {

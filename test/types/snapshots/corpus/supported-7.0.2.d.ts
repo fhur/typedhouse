@@ -143,9 +143,10 @@ export declare const filterTenantActive: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -295,9 +296,10 @@ export declare const filterCategory: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -447,9 +449,10 @@ export declare const filterMatched: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -599,9 +602,10 @@ export declare const filterPart: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -751,9 +755,10 @@ export declare const filterUpdated: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -903,9 +908,10 @@ export declare const filterCount: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -1059,9 +1065,10 @@ export declare const filterLifecycle: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -1215,9 +1222,10 @@ export declare const filterOrigin: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -1371,9 +1379,10 @@ export declare const filterYteol: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -1527,9 +1536,10 @@ export declare const filterPath: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -1577,18 +1587,20 @@ export declare const filterWarnings: import("@chql/core").Query<{
     readonly effectiveAt: import("@chql/core").Expr<Date, "effectiveAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
     readonly insertedAt: import("@chql/core").Expr<Date, "insertedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -1800,9 +1812,10 @@ export declare const filterMembership: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -1950,7 +1963,7 @@ export declare const projectionFragment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2044,18 +2057,20 @@ export declare const cleanIndices: import("@chql/core").TableQuery<{
     readonly effectiveAt: import("@chql/core").Expr<Date, "effectiveAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
     readonly insertedAt: import("@chql/core").Expr<Date, "insertedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -2167,7 +2182,7 @@ export declare const latestIndices: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2176,7 +2191,7 @@ export declare const latestIndices: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2287,7 +2302,7 @@ export declare const latestAvailability: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2296,7 +2311,7 @@ export declare const latestAvailability: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2401,7 +2416,7 @@ export declare const latestPartIndices: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2410,7 +2425,7 @@ export declare const latestPartIndices: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2495,7 +2510,7 @@ export declare const latestPrices: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2504,7 +2519,7 @@ export declare const latestPrices: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2625,7 +2640,7 @@ export declare const history: import("@chql/core").OrderedQuery<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3115,9 +3130,10 @@ export declare const singleMembership: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -3285,9 +3301,10 @@ export declare const componentParts: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -3431,9 +3448,10 @@ export declare const componentParts: import("@chql/core").Query<{
         readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
             readonly ir: import("@chql/core").ExprNode & {
                 readonly type: {
-                    readonly kind: "DateTime64";
+                    readonly kind: 'DateTime64';
                     readonly precision: 3;
-                    readonly tz?: string;
+                } & {
+                    readonly tz?: never;
                 };
             };
         };
@@ -3705,9 +3723,10 @@ export declare const leftArray: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -3851,9 +3870,10 @@ export declare const leftArray: import("@chql/core").Query<{
         readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
             readonly ir: import("@chql/core").ExprNode & {
                 readonly type: {
-                    readonly kind: "DateTime64";
+                    readonly kind: 'DateTime64';
                     readonly precision: 3;
-                    readonly tz?: string;
+                } & {
+                    readonly tz?: never;
                 };
             };
         };
@@ -4072,9 +4092,10 @@ export declare const orderedComponents: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -4228,9 +4249,10 @@ export declare const orderedNullable: import("@chql/core").OrderedQuery<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -4384,9 +4406,10 @@ export declare const orderedBare: import("@chql/core").OrderedQuery<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -4573,9 +4596,10 @@ export declare const sampleOnly: import("@chql/core").TableQuery<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };
@@ -4726,9 +4750,10 @@ export declare const explicitCte: import("@chql/core").Query<{
     readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
         readonly ir: import("@chql/core").ExprNode & {
             readonly type: {
-                readonly kind: "DateTime64";
+                readonly kind: 'DateTime64';
                 readonly precision: 3;
-                readonly tz?: string;
+            } & {
+                readonly tz?: never;
             };
         };
     };

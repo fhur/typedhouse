@@ -855,7 +855,7 @@ export declare const componentPayload_entityEnrichment: import("@chql/core").Que
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -1465,7 +1465,7 @@ export declare const partPayload_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -1944,7 +1944,7 @@ export declare const tupleExtraction_entityEnrichment: import("@chql/core").Quer
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2288,7 +2288,7 @@ export declare const matchedParts_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -2668,7 +2668,7 @@ export declare const leftMatchedParts_entityEnrichment: import("@chql/core").Que
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3078,7 +3078,7 @@ export declare const componentPartJoin_entityEnrichment: import("@chql/core").Qu
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3416,7 +3416,7 @@ export declare const priceJoin_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3559,7 +3559,7 @@ export declare const history_project: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3600,7 +3600,7 @@ export declare const history_distinctFilter: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3633,7 +3633,7 @@ export declare const history_orderedPage: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3686,7 +3686,7 @@ export declare const history_semiJoin: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3719,7 +3719,7 @@ export declare const history_repeatedUnion: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3752,7 +3752,7 @@ export declare const history_sharedCte: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3787,7 +3787,7 @@ export declare const history_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3812,7 +3812,7 @@ export declare const history_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -3838,7 +3838,7 @@ export declare const history_arrayEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -4232,7 +4232,7 @@ export declare const availabilityLatest_entityEnrichment: import("@chql/core").Q
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -4654,7 +4654,7 @@ export declare const componentLatest_entityEnrichment: import("@chql/core").Quer
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -5055,7 +5055,7 @@ export declare const partLatest_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -5474,7 +5474,7 @@ export declare const priceLatest_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -5896,7 +5896,7 @@ export declare const argMaxLatest_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -6360,7 +6360,7 @@ export declare const weekly_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -6986,7 +6986,7 @@ export declare const versionTotals_entityEnrichment: import("@chql/core").Query<
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -7407,7 +7407,7 @@ export declare const scalarShare_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -7736,7 +7736,7 @@ export declare const membership_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -8083,7 +8083,7 @@ export declare const entityUnion_entityEnrichment: import("@chql/core").Query<{
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -8850,7 +8850,7 @@ export declare const manufacturerStock_entityEnrichment: import("@chql/core").Qu
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };
@@ -9432,7 +9432,7 @@ export declare const categoryStock_entityEnrichment: import("@chql/core").Query<
             readonly type: {
                 kind: 'DateTime64';
                 precision: 3;
-                tz?: string;
+                tz?: never;
             };
         };
     };

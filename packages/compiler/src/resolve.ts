@@ -1,4 +1,4 @@
-import { setDescriptor, membershipBase, aggregateDefinitions, methodCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
+import { setDescriptor, membershipBase, aggregateDefinitions, functionCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
 
 /** Closed descriptor grammar: no raw/Unknown type text ever reaches CAST syntax.
  * Nullable -> non-null is deliberately unsupported: cast_keep_nullable changes
@@ -20,7 +20,7 @@ export function resolveCast(e: Extract<ExprNode, { kind: 'Cast' }>, resolve: (e:
 export function resolveAggregate(e: Extract<ExprNode, { kind: 'Agg' }>, resolve: (e: ExprNode, expected?: CHType) => CHType): { result: CHType; sqlName: string } {
   const def = aggregateDefinitions.find(d => d.name === e.fn.name);
   if (!def || e.fn.origin !== 'typed') throw new Error('unsupported_aggregate');
-  if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || e.fn.linear !== def.linear || e.fn.argumentPolicies !== undefined) throw new Error('invalid_function_metadata');
+  if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || e.fn.linear !== def.linear || e.fn.argumentPolicies !== undefined || e.fn.repeatedArgs !== undefined) throw new Error('invalid_function_metadata');
   if ((!def.params && e.params.length) || e.combinators.length > 1 || e.combinators.some(c => c !== 'If')) throw new Error('unsupported_aggregate_combinator');
   if (e.params.length !== (def.params?.length ?? 0)) throw new Error('invalid_aggregate_parameters');
   for (let i = 0; i < e.params.length; i++) {
@@ -54,10 +54,12 @@ function compatible(a: CHType, b: CHType): boolean {
 
 /** Catalog evidence, not caller-supplied Call metadata, determines argument/result types. */
 export function resolveCall(e: Extract<ExprNode, { kind: 'Call' }>, resolve: (e: ExprNode, expected?: CHType) => CHType): { types: CHType[]; result: CHType; sqlName: string } {
-  const def = methodCatalog.find(d => d.name === e.fn.name);
+  const def = functionCatalog.find(d => d.name === e.fn.name);
   if (!def || e.fn.origin !== 'typed') throw new Error('unsupported_expression');
-  if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || JSON.stringify(e.fn.argumentPolicies) !== JSON.stringify(def.argumentPolicies)) throw new Error('invalid_function_metadata');
-  if (e.args.length !== def.args.length) throw new Error('invalid_argument_arity');
+  if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || JSON.stringify(e.fn.argumentPolicies) !== JSON.stringify(def.argumentPolicies) || e.fn.repeatedArgs !== def.repeatedArgs) throw new Error('invalid_function_metadata');
+  const repeated = def.name === 'greatest' && def.repeatedArgs === 'temporalGreatest';
+  if (repeated ? e.args.length < 2 : e.args.length !== def.args.length) throw new Error('invalid_argument_arity');
+  if (repeated && e.args.some(arg => arg.type === null)) throw new Error('incompatible_operands');
   if (def.surface === 'membership') {
     const left = resolve(e.args[0]!);
     const base = membershipBase(left);
@@ -98,7 +100,7 @@ export function resolveCall(e: Extract<ExprNode, { kind: 'Call' }>, resolve: (e:
       expected = expected.inner;
     }
     const type = resolve(a, a.kind === 'Param' && a.type === null ? expected : undefined);
-    const matcher = def.args[i]!;
+    const matcher = def.args[repeated ? 0 : i]!;
     if (!('match' in matcher ? matcher.match(type) : print(matcher.type) === print(type))) throw new Error('incompatible_operands');
     if (policy === 'numericIndex') {
       const t = unwrap(type);

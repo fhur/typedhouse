@@ -5,7 +5,7 @@ const q = from(table('ranges', { n: col.UInt64, lo: col.UInt64, hi: col.Nullable
 it('resolves both bounds from the receiver, uses UTC wire types and never inlines values', () => {
   for (const emit of [compile, emitNaive]) {
     const compiled = emit(q.where(r => r.at.between(new Date('2026-03-29T00:59:59.123Z'), new Date('2026-03-29T01:00:00.456Z'))).ir);
-    expect(compiled.sql).toContain("BETWEEN ({p0:DateTime64(3, 'UTC')}) AND ({p1:DateTime64(3, 'UTC')})");
+    expect(compiled.sql).toContain("BETWEEN (CAST({p0:DateTime64(3, 'UTC')} AS DateTime64(3, 'Europe/Amsterdam'))) AND (CAST({p1:DateTime64(3, 'UTC')} AS DateTime64(3, 'Europe/Amsterdam')))");
     expect(compiled.params).toEqual({ p0: '2026-03-29 00:59:59.123', p1: '2026-03-29 01:00:00.456' });
     expect(compiled.sql).not.toContain('2026-03-29');
     expect(emit(q.where(r => r.text.between("a' OR 1=1", 'z')).ir).params).toEqual({ p0: "a' OR 1=1", p1: 'z' });

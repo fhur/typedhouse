@@ -1,0 +1,45 @@
+{
+  "shape": "flat",
+  "columns": {
+    "entityId": {
+      "kind": "scalar",
+      "name": "String"
+    },
+    "category": {
+      "kind": "Nullable",
+      "inner": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "stockTotal": {
+      "kind": "scalar",
+      "name": "Float64"
+    },
+    "stockP50": {
+      "kind": "scalar",
+      "name": "Float64"
+    },
+    "leadDays": {
+      "kind": "scalar",
+      "name": "Float64"
+    },
+    "stockIndex": {
+      "kind": "scalar",
+      "name": "Float64"
+    },
+    "asOf": {
+      "kind": "DateTime64",
+      "precision": 3
+    }
+  },
+  "order": [
+    "entityId",
+    "category",
+    "stockTotal",
+    "stockP50",
+    "leadDays",
+    "stockIndex",
+    "asOf"
+  ]
+}

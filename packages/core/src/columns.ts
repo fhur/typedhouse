@@ -15,11 +15,19 @@ type EnumDescriptor<V, B extends 8 | 16> = { readonly kind: 'Enum'; readonly bit
 type TupleItems<C> = C extends readonly Column[] ? { -readonly [K in keyof C]: { readonly type: C[K] extends Column ? C[K]['type'] : never } } : keyof C extends never ? [] : { [K in keyof C]: C[K] extends Column ? { readonly name: `${K & (string | number)}`; readonly type: C[K]['type'] } : never }[keyof C][];
 type TupleDescriptor<C> = { readonly kind: 'Tuple'; readonly items: TupleItems<C> };
 type NamedTupleDescriptor<C extends readonly (readonly [string, Column])[]> = { readonly kind: 'Tuple'; readonly items: { -readonly [K in keyof C]: { readonly name: C[K][0]; readonly type: C[K][1]['type'] } } };
+type TemporalValue<P extends number> = number extends P ? Date | string : P extends 0 | 1 | 2 | 3 ? Date : string;
+type TemporalType<P extends number, Z> = { readonly kind: 'DateTime64'; readonly precision: P } & (Z extends string ? { readonly tz: Z } : { readonly tz?: never });
+function dateTime64<P extends number>(precision: P): Column<TemporalValue<P>, false, TemporalType<P, undefined>>;
+// Explicit P prevents inference of defaulted Z: keep its zone conservative, not absent or literal.
+function dateTime64<P extends number, Z extends string | undefined = string | undefined>(precision: P, tz: Z): Column<TemporalValue<P>, false, TemporalType<P, Z>>;
+function dateTime64(precision: number, tz?: string): Column<Date | string> {
+  return descriptor({ kind: 'DateTime64', precision, ...(tz === undefined ? {} : { tz }) });
+}
 export const col = {
   ...scalars,
   FixedString: <N extends number>(n: N): Column<string, true, { readonly kind: 'FixedString'; readonly n: N }> => descriptor({ kind: 'FixedString', n }),
   DateTime: (tz?: string): Column<Date, false, { readonly kind: 'DateTime'; readonly tz?: string }> => descriptor({ kind: 'DateTime', ...(tz === undefined ? {} : { tz }) }),
-  DateTime64: <P extends number>(precision: P, tz?: string): Column<number extends P ? Date | string : P extends 0 | 1 | 2 | 3 ? Date : string, false, { readonly kind: 'DateTime64'; readonly precision: P; readonly tz?: string }> => descriptor({ kind: 'DateTime64', precision, ...(tz === undefined ? {} : { tz }) }),
+  DateTime64: dateTime64,
   Decimal: <P extends number, S extends number>(precision: P, scale: S): Column<Decimal<P, S>, false, { readonly kind: 'Decimal'; readonly precision: P; readonly scale: S }> => descriptor({ kind: 'Decimal', precision, scale }),
   Decimal32: <S extends number>(scale: S): Column<Decimal<9, S>, false, { readonly kind: 'Decimal'; readonly precision: 9; readonly scale: S }> => descriptor({ kind: 'Decimal', precision: 9, scale }),
   Decimal64: <S extends number>(scale: S): Column<Decimal<18, S>, false, { readonly kind: 'Decimal'; readonly precision: 18; readonly scale: S }> => descriptor({ kind: 'Decimal', precision: 18, scale }),

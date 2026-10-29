@@ -11,6 +11,8 @@ export interface Definition<A extends readonly Argument[] = readonly Argument[],
   readonly sqlName?: string;
   readonly args: A;
   readonly argumentPolicies?: readonly ArgumentPolicy[];
+  /** Closed standalone policy; not permission for arbitrary variadic functions. */
+  readonly repeatedArgs?: 'temporalGreatest';
   readonly returns: Column<R> | 'arg0' | ((args: readonly CHType[], values: readonly unknown[]) => CHType);
   readonly tsReturns?: string;
   readonly nullable?: 'propagate' | 'never';
@@ -38,7 +40,7 @@ export interface DefinedFunction<A extends readonly Argument[], R, P extends 'pr
 }
 /** Metadata is copied explicitly: executable matchers/resolvers never enter the owned IR snapshot. */
 export function metadata(def: Definition): FunctionMetadata {
-  return { name: def.name, ...(def.sqlName === undefined ? {} : { sqlName: def.sqlName }), deterministic: def.deterministic, origin: def.origin ?? 'user', ...(def.argumentPolicies ? { argumentPolicies: Object.freeze([...def.argumentPolicies]) } : {}) };
+  return { ...(def.repeatedArgs ? { repeatedArgs: def.repeatedArgs } : {}), name: def.name, ...(def.sqlName === undefined ? {} : { sqlName: def.sqlName }), deterministic: def.deterministic, origin: def.origin ?? 'user', ...(def.argumentPolicies ? { argumentPolicies: Object.freeze([...def.argumentPolicies]) } : {}) };
 }
 const unknownType: CHType = { kind: 'Unknown', raw: 'unresolved' };
 export function resolveReturn(def: Definition, args: readonly unknown[]): CHType {

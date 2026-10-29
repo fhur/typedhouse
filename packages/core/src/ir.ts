@@ -10,6 +10,7 @@ export type OutputSchema =
   | { readonly shape: 'deferred'; readonly reason: 'raw'; readonly declaredNames: readonly string[] };
 export type ArgumentPolicy = 'set' | 'sibling' | 'arrayElement' | 'array' | 'numericIndex' | 'constantSelector';
 export interface FunctionMetadata {
+  readonly repeatedArgs?: 'temporalGreatest';
   readonly argumentPolicies?: readonly ArgumentPolicy[];
   readonly name: string;
   readonly sqlName?: string;

@@ -80,7 +80,7 @@ expectTypeOf(richCopy.row.decimal.ir.type.scale).toEqualTypeOf<4>();
 expectTypeOf(richCopy.row.status.ir.type.inner.values[0]!.name).toEqualTypeOf<'open' | 'closed'>();
 expectTypeOf(richCopy.row.status.ir.type.inner.bits).toEqualTypeOf<16>();
 expectTypeOf(richCopy.row.date.ir.type.precision).toEqualTypeOf<3>();
-expectTypeOf(richCopy.row.date.ir.type.tz).toEqualTypeOf<string | undefined>();
+expectTypeOf(richCopy.row.date.ir.type.tz).toEqualTypeOf<'UTC'>();
 expectTypeOf(richCopy.row.precise.ir.type.precision).toEqualTypeOf<6>();
 expectTypeOf(richCopy.row.opaque.ir.type).toEqualTypeOf<CHType>();
 expectTypeOf(richCopy.row.tuple.ir.type.items[0].type.name).toEqualTypeOf<'UInt64'>();

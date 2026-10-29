@@ -1,6 +1,6 @@
 import { print, scalarDescriptor, outputLeaves, expandedOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
 import type { SqlPlan } from './plan-selects.js';
-import { parameterWireType, serializeParameter } from './parameters.js';
+import { parameterExpression, parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
 
 import { validateStructure } from './validate-structure.js';
@@ -103,7 +103,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         if (e.value === null) return `CAST(NULL AS ${print(type)})`;
         const name = previous?.name ?? `p${assigned.size}`;
         assigned.set(e, { name, type }); params[name] = value; parameterTypes[name] = parameterWireType(type);
-        return `{${name}:${print(parameterWireType(type))}}`;
+        return parameterExpression(name, type);
       }
       case 'Subquery': {
         if (scope !== 'row') return fail('invalid_expression_mode', e, path);

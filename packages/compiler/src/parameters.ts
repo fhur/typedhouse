@@ -1,13 +1,22 @@
 import { print as printType, type CHType } from '@chql/core';
 
 /** Date values are instants: parse our UTC text in UTC, not the sibling/server timezone.
- * Keep the resolved sibling descriptor on the IR and for identity checks; only the
- * wire placeholder differs. This also preserves DateTime64 precision and wrappers.
+ * Keep the resolved sibling descriptor on the IR and for identity checks. The
+ * placeholder differs; parameterExpression restores its declared SQL metadata.
  */
 export function parameterWireType(type: CHType): CHType {
   if (type.kind === 'Nullable' || type.kind === 'LowCardinality' || type.kind === 'Array') return { ...type, inner: parameterWireType(type.inner) };
   if (type.kind === 'DateTime64' && type.precision <= 3) return { ...type, tz: 'UTC' };
   return type;
+}
+
+/** UTC text is parsed first; only then restore the SQL descriptor. A temporal
+ * cast preserves epoch ticks (including arrays/nullable wrappers), unlike parsing
+ * the same text directly in a non-UTC timezone. Both emitters share this path. */
+export function parameterExpression(name: string, type: CHType): string {
+  const wire = parameterWireType(type);
+  const placeholder = `{${name}:${printType(wire)}}`;
+  return printType(wire) === printType(type) ? placeholder : `CAST(${placeholder} AS ${printType(type)})`;
 }
 
 function arrayLiteral(value: unknown, type: CHType): string {
@@ -22,8 +31,17 @@ function arrayLiteral(value: unknown, type: CHType): string {
   return encoded;
 }
 
+function temporal(t: CHType): boolean {
+  return t.kind === 'DateTime64' || ((t.kind === 'Array' || t.kind === 'Nullable' || t.kind === 'LowCardinality') && temporal(t.inner));
+}
+function invalidLowCardinality(t: CHType): boolean {
+  return t.kind === 'LowCardinality' ? temporal(t.inner) : (t.kind === 'Array' || t.kind === 'Nullable') && invalidLowCardinality(t.inner);
+}
 /** Values are serialized here, never delegated to the driver's inferred formatter. */
 export function serializeParameter(value: unknown, type: CHType): string {
+  // CH 24.8 rejects LowCardinality(DateTime64), including Nullable nesting.
+  // Use the existing parameter error rather than claim a type that cannot exist.
+  if (invalidLowCardinality(type)) throw new Error(`param_incompatible: ${printType(type)}`);
   if (type.kind === 'Array') {
     if (!Array.isArray(value)) throw new Error(`param_incompatible: ${printType(type)}`);
     return '[' + value.map(v => arrayLiteral(v, type.inner)).join(',') + ']';
