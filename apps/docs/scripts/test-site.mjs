@@ -10,6 +10,8 @@ let links = 0;
 for (const entry of await readdir(dist, { recursive: true })) {
   if (!entry.endsWith('.html')) continue;
   const html = await readFile(join(dist, entry), 'utf8');
+  assert.equal(html.split('https://www.googletagmanager.com/gtag/js?id=G-DNEY4MRCR4').length - 1, 1, `${entry}: expected one Google tag loader`);
+  assert.equal(html.split("gtag('config', 'G-DNEY4MRCR4')").length - 1, 1, `${entry}: expected one GA configuration`);
   for (const match of html.matchAll(/href="(\/[^"?#]*)(?:[?#][^"]*)?"/g)) {
     if (match[1].startsWith('//')) continue;
     assert.ok(!base || match[1] === base || match[1].startsWith(`${base}/`), `${entry}: link omits base: ${match[1]}`);

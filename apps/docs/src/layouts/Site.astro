@@ -1,5 +1,6 @@
 ---
 import '../styles/site.css';
+import GoogleAnalytics from '../components/GoogleAnalytics.astro';
 import { withBase, withoutBase } from '../lib/urls';
 interface Props { title: string; description: string; fullPage?: boolean }
 const { title, description, fullPage = false } = Astro.props;
@@ -14,6 +15,7 @@ const links = [
 <!doctype html>
 <html lang="en">
   <head>
+    <GoogleAnalytics />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
     <link rel="icon" type="image/svg+xml" href={withBase('/favicon.svg')} />

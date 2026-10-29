@@ -17,7 +17,7 @@ export default defineConfig({
       title: 'chql',
       description: 'Typed, composable queries for ClickHouse. Explicit APIs. Typed constraints. Inspectable SQL.',
       customCss: ['./src/styles/docs.css'],
-      components: { PageTitle: './src/components/DocTitle.astro' },
+      components: { Head: './src/components/Head.astro', PageTitle: './src/components/DocTitle.astro' },
       sidebar: [
         { label: 'Start here', items: [{ label: 'Build your first query', slug: 'docs/getting-started' }] },
         { label: 'Tutorials', autogenerate: { directory: 'docs/tutorials' } },
