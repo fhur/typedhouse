@@ -138,6 +138,9 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           const base = receiver.kind === 'Nullable' ? receiver.inner : receiver;
           if (base.kind === 'scalar' && base.name === 'Date') dateMembership = true;
         }
+        // Parenthesize every operand: planned children may be infix expressions.
+        // The catalog resolver has already checked arity, families and repeatability.
+        if (e.fn.name === 'between') return `((${args[0]}) BETWEEN (${args[1]}) AND (${args[2]}))`;
         if (e.fn.name === 'toStartOfWeek') {
           weekBucketing = true;
           // Date32 preserves pre-epoch weeks for the explicit range check. Converting

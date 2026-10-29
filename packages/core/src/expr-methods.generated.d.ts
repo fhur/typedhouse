@@ -3,7 +3,7 @@ import type { Expr, Constant, ExprOperand, ConstantOperand } from './expr.js';
 import type { Mode, Decimal } from './types.js';
 import { Ordering } from './ordering.js';
 import type { SetQuery, DateSetQuery, DateMembershipDescriptor } from './subquery.js';
-import type { ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
+import type { BetweenReceiver, ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 type NullResult<T, R> = null extends T ? R | null : R;
 type NumericResult<T> = T extends bigint ? bigint : T extends Decimal ? Decimal : number | bigint;
 type DivideResult<T> = T extends Decimal ? Decimal : number;
@@ -40,6 +40,7 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
   le<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
   gt<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
   ge<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  between<D, L, H, U extends NonNullable<T> | null, V extends NonNullable<T> | null>(this: ExprOperand<string | number | bigint | Date | null, string, M> & { readonly ir: { readonly type: D } } & BetweenReceiver<D>, lower: U | ((ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>) & { readonly ir: { readonly type: L } } & BetweenReceiver<L>), upper: V | ((ExprOperand<V, string, NoInfer<M>> | ConstantOperand<V>) & { readonly ir: { readonly type: H } } & BetweenReceiver<H>)): Expr<NullResult<T | U | V, boolean>, N, M>;
   in(this: Expr<Date | null, N, M> & { readonly ir: { readonly type: DateMembershipDescriptor } }, values: readonly Date[]): Expr<NullResult<T, boolean>, N, M>;
   in<R>(this: Expr<Date | null, N, M> & { readonly ir: { readonly type: DateMembershipDescriptor } }, query: DateSetQuery<R>): Expr<NullResult<T, boolean>, N, M>;
   in(this: Expr<string | number | bigint | boolean | null, string, M>, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;

@@ -6,7 +6,7 @@ describe('catalog slice', () => {
   it('installs exactly its generated method surface', () => {
     expect(Object.getOwnPropertyNames(Expr.prototype).filter(n => !['constructor', 'as'].includes(n)).sort()).toEqual([...methodCatalog, ...orderingCatalog].map(d => d.name).sort());
     expect(orderingCatalog.map(d => d.name)).toEqual(['asc', 'desc']);
-    expect(methodCatalog).toHaveLength(28);
+    expect(methodCatalog).toHaveLength(29);
     for (const definition of [...methodCatalog, ...aggregateDefinitions]) {
       expect(definition.deterministic).toBe(definition.name !== 'quantile');
       expect(definition.origin).toBe('typed'); expect(definition).not.toHaveProperty('js');

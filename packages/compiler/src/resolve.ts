@@ -106,6 +106,22 @@ export function resolveCall(e: Extract<ExprNode, { kind: 'Call' }>, resolve: (e:
     }
     return type;
   });
+  if (def.surface === 'between') {
+    // Do not admit decoded number/bigint mixing through hand-built IR either.
+    const family = (type: CHType) => {
+      const t = unwrap(type);
+      if (dateLike.match(t)) return 'date';
+      if (t.kind === 'FixedString' || t.kind === 'scalar' && t.name === 'String') return 'string';
+      return t.kind === 'scalar' && /^U?Int(64|128|256)$/.test(t.name) ? 'bigint' : 'number';
+    };
+    if (types.some(t => family(t) !== family(types[0]!))) throw new Error('incompatible_operands');
+    // ClickHouse lowers BETWEEN into two comparisons. Never duplicate an
+    // opaque, scalar-subquery or volatile receiver, even if future catalogs grow.
+    const repeatable = (arg: ExprNode): boolean => arg.kind === 'ColumnRef' || arg.kind === 'Param' ||
+      (arg.kind === 'Cast' && repeatable(arg.expr)) ||
+      ((arg.kind === 'Call' || arg.kind === 'Agg') && arg.fn.deterministic === true && arg.args.every(repeatable));
+    if (!repeatable(e.args[0]!)) throw new Error('unsupported_between_receiver');
+  }
   if (def.surface === 'comparison' && !compatible(types[0]!, types[1]!)) throw new Error('incompatible_operands');
   if (def.surface === 'has' || def.surface === 'hasAny') {
     const a = unwrap(types[0]!);

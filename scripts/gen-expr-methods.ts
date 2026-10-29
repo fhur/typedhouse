@@ -6,7 +6,7 @@ import { orderingCatalog } from '../packages/core/src/catalog/ordering.js';
 
 const imports = `import type { Expr, Constant, ExprOperand, ConstantOperand } from './expr.js';\nimport type { Mode, Decimal } from './types.js';\n`;
 const helpers = `import type { SetQuery, DateSetQuery, DateMembershipDescriptor } from './subquery.js';
-import type { ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
+import type { BetweenReceiver, ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 type NullResult<T, R> = null extends T ? R | null : R;
 type NumericResult<T> = T extends bigint ? bigint : T extends Decimal ? Decimal : number | bigint;
 type DivideResult<T> = T extends Decimal ? Decimal : number;
@@ -52,6 +52,7 @@ function signature(definition: Definition): string {
     case 'arrayElement': return `${name}<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, index: Operand<number | bigint, NoInfer<M>>): ${definition.tsReturns?.replace(/\bT\b/g, 'V')};`;
     case 'element': return `${name}<D, V, const K extends ElementKeys<D>>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } }, key: K & (string extends K ? never : unknown)): ${definition.tsReturns};`;
     case 'membership': return `${name}(this: Expr<Date | null, N, M> & { readonly ir: { readonly type: DateMembershipDescriptor } }, values: readonly Date[]): Expr<NullResult<T, boolean>, N, M>;\n  ${name}<R>(this: Expr<Date | null, N, M> & { readonly ir: { readonly type: DateMembershipDescriptor } }, query: DateSetQuery<R>): Expr<NullResult<T, boolean>, N, M>;\n  ${name}(${receiver('string | number | bigint | boolean')}, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;\n  ${name}<R>(${receiver('string | number | bigint | boolean')}, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;`;
+    case 'between': return `${name}<D, L, H, U extends NonNullable<T> | null, V extends NonNullable<T> | null>(this: ExprOperand<string | number | bigint | Date | null, string, M> & { readonly ir: { readonly type: D } } & BetweenReceiver<D>, lower: U | ((ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>) & { readonly ir: { readonly type: L } } & BetweenReceiver<L>), upper: V | ((ExprOperand<V, string, NoInfer<M>> | ConstantOperand<V>) & { readonly ir: { readonly type: H } } & BetweenReceiver<H>)): Expr<NullResult<T | U | V, boolean>, N, M>;`;
     case 'comparison': return `${name}<U extends NonNullable<T> | null>(${receiver('string | number | bigint | boolean | Date')}, ${argument}): Expr<NullResult<T | U, boolean>, N, M>;`;
     case 'boolean': return `${name}<U extends boolean | null>(${receiver('boolean')}, ${argument}): Expr<NullResult<T | U, boolean>, N, M>;`;
     case 'not': return `${name}(${receiver('boolean')}): Expr<NullResult<T, boolean>, N, M>;`;

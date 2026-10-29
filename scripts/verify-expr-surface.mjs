@@ -24,6 +24,9 @@ const cases = {
     [`week_${mode}`, `column(col.DateTime64(3), 'at', '${mode}').toStartOfWeek()`],
     [`week_nullable_${mode}`, `column(col.Nullable(col.Date), 'day', '${mode}').toStartOfWeek()`],
   ])),
+  between: 'id.between(1n, 3n)',
+  betweenGrouped: 'grouped.between(val(1n), null)',
+  betweenDate: "column(col.DateTime64(3, 'Europe/Amsterdam'), 'at', 'row').between(new Date(0), new Date(1000))",
   membershipEmpty: 'id.in([])',
   membershipNullable: 'nullable.notIn([1n, 2n])',
   membershipGrouped: "groupedString.in(['EOL'])",
@@ -155,7 +158,7 @@ try {
   writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery, DateSetQuery, DateMembershipDescriptor } from '@chql/core';\n");
   writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@chql/core';\n");
   mkdirSync(join(directory, 'catalog'));
-  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");
+  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { BetweenReceiver, ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");
   let source = `import { expectTypeOf } from 'expect-type';
 import { Expr, columnExpr, col, exprNode, count, countIf, sum, max, sumIf, sumState, countState, maxState, countMerge, val, cast, defineFunction, defineAggregate, numeric, extendExpr, stringLike, type Mode, type Column, type NodeId, type AggregateState, type Decimal, type DescribedExpr, sumMerge, maxMerge } from '@chql/core';
 import type { GeneratedExprMethods } from './surface.js';
