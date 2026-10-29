@@ -100,7 +100,7 @@ it('retains shared materialized rollups across scalar and IN scopes with conflic
   const planned = backends[0]!.compile(q.ir).compiled;
   expect(planned.sql).toContain('WITH ');
   expect(planned.sql).not.toContain('HAVING'); // Materialize is a block boundary, including in the IN scope.
-  expect(planned.sql).toContain('WHERE greater(`__chql_input`.`total`, {p2:UInt64})');
+  expect(planned.sql).toContain('WHERE `__chql_input`.`total` > {p2:UInt64}');
   expect([...new Set([...planned.sql.matchAll(/\{(p\d+):/g)].map(m => m[1]))]).toEqual(Object.keys(planned.params));
 });
 it('retains fallible aggregate operands and real conversion errors', async () => {

@@ -16,14 +16,22 @@ declare const exprValue: unique symbol;
 declare const exprName: unique symbol;
 declare const exprMode: unique symbol;
 export type ExprValue<E extends Expr<unknown, string, Mode>> = E[typeof exprValue];
-/** The only expression wrapper. The graph owns values; this wrapper owns no mutable state. */
-export class Expr<T, N extends string = never, M extends Mode = 'row'> {
+/** A private base brand preserves instance evidence without the generated methods.
+ * Unlike public symbol phantoms, it cannot survive an object spread. */
+class ExprIdentity {
   declare private readonly brand: void;
+}
+/** Compare nominal identity and exact value/name/mode evidence, not recursive
+ * generated overloads and their promoted results. */
+export type ExprOperand<T, N extends string, M extends Mode> = ExprIdentity & Pick<Expr<T, N, M>, typeof exprValue | typeof exprName | typeof exprMode | 'ir' | 'name' | 'mode'>;
+export type ConstantOperand<T> = ExprOperand<T, never, 'row'> & Pick<Constant<T>, typeof constant>;
+/** The only expression wrapper. The graph owns values; this wrapper owns no mutable state. */
+export class Expr<T, N extends string = never, M extends Mode = 'row'> extends ExprIdentity {
   // Private field types are erased by declaration emit. Symbol phantoms survive packaging.
   declare readonly [exprValue]: T;
   declare readonly [exprName]: N;
   declare readonly [exprMode]: M;
-  constructor(readonly ir: ExprNode, readonly name: N, readonly mode: M) { Object.freeze(this); }
+  constructor(readonly ir: ExprNode, readonly name: N, readonly mode: M) { super(); Object.freeze(this); }
   as<C extends Column>(this: Constant<T>, descriptor: C): DescribedConstant<C>;
   as<C extends Column>(descriptor: C): DescribedExpr<Value<C>, N, M, C['type']>;
   as<U>(descriptor: Column<U>): Expr<U, string, Mode> {

@@ -112,7 +112,12 @@ describe('physical source-ordered demand', () => {
     if (subset.ir.kind !== 'Project') throw new Error('expected project');
     expect(names(subset.ir, subset.ir.input)).toEqual([['10'], ['2']]);
     expect(compile(subset.ir).sql).toContain('SELECT `10`, `2` FROM `odd`');
-    expect(compile(q.ir).sql).toContain('__chql_leaf__'); metadata(q.ir);
+    expect(compile(q.ir).sql).toContain('SELECT `source`.`a.b` AS `x`, `other`.`__chql_leaf_0` AS `y`');
+    // The direct selection now bypasses transport aliases; the logical nested
+    // output still reserves collision-free transport names for derived uses.
+    if (q.ir.kind !== 'Project') throw new Error('shape');
+    expect(outputLeaves(q.ir.input.output).map(l => l.name).every(n => n.startsWith('__chql_leaf__'))).toBe(true);
+    metadata(q.ir);
   });
   it('keeps nested expansion dependencies and output aliases through sort/limit scopes', () => {
     const joined = crossJoin({ a: wide, b: wide });

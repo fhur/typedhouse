@@ -10,3 +10,4 @@ export { orderingCatalog } from './ordering.js';
 export * from './define.js';
 export * from './matchers.js';
 export * from './aggregate.js';
+export { exp } from './arithmetic.js';

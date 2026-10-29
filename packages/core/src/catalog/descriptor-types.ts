@@ -2,6 +2,9 @@ import type { CHType, ScalarName } from '../ch-type.js';
 import type { DescribedExpr, Expr } from '../expr.js';
 import type { Decimal, Mode, ScalarValue } from '../types.js';
 
+type ExpBase = { readonly kind: 'scalar'; readonly name: `${'UInt' | 'Int'}${8 | 16 | 32 | 64}` | 'Float32' | 'Float64' };
+export type ExpReceiver<D> = CHType extends D ? unknown : [D] extends [ExpBase | { readonly kind: 'Nullable'; readonly inner: ExpBase }] ? unknown : never;
+export type ExpResult<T, N extends string, M extends Mode> = DescribedExpr<number | Extract<T, null>, N, M, null extends T ? { readonly kind: 'Nullable'; readonly inner: { readonly kind: 'scalar'; readonly name: 'Float64' } } : { readonly kind: 'scalar'; readonly name: 'Float64' }>;
 type WeekBase = { readonly kind: 'scalar'; readonly name: 'Date' } | { readonly kind: 'DateTime64'; readonly precision: 0 | 1 | 2 | 3 };
 export type WeekReceiver<D> = [D] extends [WeekBase | { readonly kind: 'Nullable'; readonly inner: WeekBase }] ? unknown : never;
 export type WeekResult<T, N extends string, M extends Mode> = DescribedExpr<null extends T ? Date | null : Date, N, M, null extends T ? { readonly kind: 'Nullable'; readonly inner: { readonly kind: 'scalar'; readonly name: 'Date' } } : { readonly kind: 'scalar'; readonly name: 'Date' }>;

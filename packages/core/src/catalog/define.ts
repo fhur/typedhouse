@@ -5,7 +5,7 @@ import { exprNode, type FunctionMetadata, type AggregateMetadata, type ArgumentP
 import type { Column, Mode } from '../types.js';
 import { isNullable, nullable, type Argument, type Matched, unwrap } from './matchers.js';
 
-export type Surface = 'week' | 'membership' | 'comparison' | 'boolean' | 'not' | 'arithmetic' | 'divide' | 'nullTest' | 'ifNull' | 'length' | 'empty' | 'startsWith' | 'has' | 'hasAny' | 'arrayElement' | 'element';
+export type Surface = 'exp' | 'week' | 'membership' | 'comparison' | 'boolean' | 'not' | 'arithmetic' | 'divide' | 'nullTest' | 'ifNull' | 'length' | 'empty' | 'startsWith' | 'has' | 'hasAny' | 'arrayElement' | 'element';
 export interface Definition<A extends readonly Argument[] = readonly Argument[], R = unknown> {
   readonly name: string;
   readonly sqlName?: string;

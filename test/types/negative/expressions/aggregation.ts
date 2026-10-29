@@ -7,4 +7,4 @@ q.groupBy(r => r.id).aggregate(g => sum(g.id)); // expect: TS2322 duplicate_colu
 q.aggregate(g => ({ id: g.id })); // expect: TS2322 Type '"grouped"' is not assignable to type '"agg"'.
 q.aggregate(() => ({ id: q.row.id })); // expect: TS2322 Type '"row"' is not assignable to type '"agg"'.
 q.aggregate(() => sum(count())); // expect: TS2345 Type '"agg"' is not assignable to type '"grouped"'.
-q.aggregate(g => sum(g.id).plus(g.id)); // expect: TS2769 is not assignable to parameter of type 'Operand<bigint, "agg">'.
+q.aggregate(g => sum(g.id).plus(g.id)); // expect: TS2769 Type '"grouped"' is not assignable to type '"agg"'. // expect-ts7: TS2769 ExprOperand<bigint | null, string, "agg">

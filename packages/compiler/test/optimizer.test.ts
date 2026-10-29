@@ -9,7 +9,7 @@ it('folds scan/filter/sort/limit without changing metadata, parameters or IR', (
   const q = from(products).where(r => r.category.eq('books')).orderBy(r => r.stock.desc()).limit(10);
   const before = JSON.stringify(q.ir);
   const result = compile(q.ir);
-  expect(result.sql).toBe('SELECT `id`, `category`, `stock` FROM `products` WHERE (`category` = {p0:String}) ORDER BY `stock` DESC LIMIT 10');
+  expect(result.sql).toBe('SELECT `id`, `category`, `stock` FROM `products` WHERE `category` = {p0:String} ORDER BY `stock` DESC LIMIT 10');
   const naive = emitNaive(q.ir);
   expect(selects(naive.sql)).toBe(4);
   expect({ ...result, sql: '' }).toEqual({ ...naive, sql: '' });

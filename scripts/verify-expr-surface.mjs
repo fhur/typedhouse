@@ -151,11 +151,11 @@ try {
   writeFileSync(join(directory, 'surface.d.ts'), declaration);
   // Only published type re-exports, not core source or a fake expression implementation.
   writeFileSync(join(directory, 'ordering.d.ts'), "export { Ordering } from '@chql/core';\n");
-  writeFileSync(join(directory, 'expr.d.ts'), "export type { Expr, Constant } from '@chql/core';\n");
+  writeFileSync(join(directory, 'expr.d.ts'), "export type { Expr, Constant, ExprOperand, ConstantOperand } from '@chql/core';\n");
   writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery, DateSetQuery, DateMembershipDescriptor } from '@chql/core';\n");
   writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@chql/core';\n");
   mkdirSync(join(directory, 'catalog'));
-  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");
+  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");
   let source = `import { expectTypeOf } from 'expect-type';
 import { Expr, columnExpr, col, exprNode, count, countIf, sum, max, sumIf, sumState, countState, maxState, countMerge, val, cast, defineFunction, defineAggregate, numeric, extendExpr, stringLike, type Mode, type Column, type NodeId, type AggregateState, type Decimal, type DescribedExpr, sumMerge, maxMerge } from '@chql/core';
 import type { GeneratedExprMethods } from './surface.js';

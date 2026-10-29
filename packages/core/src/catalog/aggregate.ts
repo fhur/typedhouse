@@ -38,6 +38,7 @@ export const aggregateDefinitions: readonly AggregateDefinition[] = [
   { name: 'avg', args: [Object.freeze({ match: (t: CHType) => argMaxVersion.match(t.kind === 'Nullable' ? t.inner : t) })], returns: col.Float64, nullable: 'propagate', deterministic: true, origin: 'typed', linear: true },
   { name: 'quantile', params: [col.Float64], args: [Object.freeze({ match: (t: CHType) => argMaxVersion.match(t.kind === 'Nullable' ? t.inner : t) })], returns: col.Float64, nullable: 'propagate', deterministic: false, origin: 'typed', linear: false },
   { name: 'uniqExact', args: [exactString], returns: col.UInt64, nullable: 'never', deterministic: true, origin: 'typed', linear: false },
+  { name: 'uniq', args: [exactString], returns: col.UInt64, nullable: 'never', deterministic: true, origin: 'typed', linear: false },
 ].map(d => Object.freeze(d)) as readonly AggregateDefinition[];
 
 interface Count {
@@ -50,6 +51,7 @@ type ExactInput<S extends 'String' | 'Bool'> = { readonly kind: 'scalar'; readon
 // Non-distributive: every retained alternative must belong to the bounded family.
 type ExactOperand<D, S extends 'String' | 'Bool'> = CHType extends D ? unknown : [D] extends [ExactInput<S>] ? unknown : never;
 type ExactResult<E> = DescribedExpr<bigint, OperandName<E, 'uniqExact'>, 'agg', { readonly kind: 'scalar'; readonly name: 'UInt64' }>;
+interface Uniq { <E extends AggregateOperand<string | null>>(value: E & ExactOperand<E['ir']['type'], 'String'>): DescribedExpr<bigint, OperandName<E, 'uniq'>, 'agg', { readonly kind: 'scalar'; readonly name: 'UInt64' }> }
 interface UniqExact { <E extends AggregateOperand<string | null>>(value: E & ExactOperand<E['ir']['type'], 'String'>): ExactResult<E> }
 interface UniqExactIf { <E extends AggregateOperand<string | null>, P extends AggregateOperand<boolean | null>>(value: E & ExactOperand<E['ir']['type'], 'String'>, predicate: P & ExactOperand<P['ir']['type'], 'Bool'>): ExactResult<E> }
 interface CountIf { <E extends AggregateOperand<boolean | null>>(predicate: E): Expr<bigint, OperandName<E, 'count'>, 'agg'> }
@@ -97,7 +99,7 @@ export function deriveAggregate(def: AggregateDefinition, rootName?: 'first') {
   });
 }
 // Selector aggregates name from the value operand, not a later version/predicate.
-const derived = aggregateDefinitions.map(def => deriveAggregate(def, def.name === 'argMax' || def.name === 'uniqExact' ? 'first' : undefined));
+const derived = aggregateDefinitions.map(def => deriveAggregate(def, def.name === 'argMax' || def.name === 'uniqExact' || def.name === 'uniq' ? 'first' : undefined));
 export const count = derived[0]!.base as Count;
 export const countIf = derived[0]!.If as CountIf;
 export const countState = derived[0]!.State as () => Expr<AggregateState<'count'>, 'count', 'agg'>;
@@ -120,6 +122,8 @@ export const avgIf = derived[4]!.If as AvgIf;
 // avg State/Merge execution is deliberately not exposed.
 /** Exact String cardinality, skipping NULL; empty/all-null input returns 0n. */
 export const uniqExact = derived[6]!.base as UniqExact;
+/** Approximate String cardinality, skipping NULL; not countDistinct/uniqExact. */
+export const uniq = derived[7]!.base as Uniq;
 export const uniqExactIf = derived[6]!.If as UniqExactIf;
 // Exact distinct State/Merge and non-String operands are deliberately not exposed.
 /** Approximate reservoir quantile. Each application creates a fresh level Param;

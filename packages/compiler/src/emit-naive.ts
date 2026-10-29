@@ -69,20 +69,22 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     if (!type) throw new Error('param_untyped');
     return e.kind === 'Param' && e.value === null && type.kind !== 'Nullable' ? { kind: 'Nullable', inner: type } : type;
   }
-  function expression(e: ExprNode, input: Rel, path: string, expected?: CHType, index = false, scope: 'row' | 'aggregate' | 'operand' = 'row', qualifier = inputAlias): string {
+  function expression(e: ExprNode, input: Rel, path: string, expected?: CHType, index = false, scope: 'row' | 'aggregate' | 'operand' = 'row', qualifier = inputAlias, binding?: Extract<Rel, { kind: 'Join' }>): string {
     if (!e || typeof e !== 'object') return fail('invalid_expression', e, path);
     switch (e.kind) {
       case 'ColumnRef': {
         if (scope === 'aggregate' || (e.mode === 'grouped' && scope !== 'operand') || (e.mode === 'row' && scope === 'operand')) return fail('invalid_expression_mode', e, path);
-        const scopeId = qualifier === '' && input.kind === 'Join' ? input.scope ?? input.id : input.id;
+        const scopeId = !binding && qualifier === '' && input.kind === 'Join' ? input.scope ?? input.id : input.id;
         if (e.rel !== scopeId) return fail('unbound_column', e, path, `reference ${e.rel}, input ${scopeId}`);
         const leaf = outputLeaves(input.output).find(l => JSON.stringify(l.path) === JSON.stringify(e.path));
         if (!leaf || !same(e.type, leaf.type)) return fail('unbound_column', e, path, JSON.stringify(e.path));
-        if (qualifier === '' && input.kind === 'Join') {
-          const side = input.inputs.find(([alias]) => alias === e.path[0]);
+        if (binding || (qualifier === '' && input.kind === 'Join')) {
+          const join = binding ?? input;
+          if (join.kind !== 'Join') return fail('unbound_column', e, path);
+          const side = join.inputs.find(([alias]) => alias === e.path[0]);
           const child = side && (plan?.columns?.get(side[1]) ?? outputLeaves(side[1].output)).find(l => JSON.stringify(l.path) === JSON.stringify(e.path.slice(1)));
           if (!side || !child) return fail('unbound_column', e, path);
-          return `${joinAlias(input, side[0])}.${quoteIdentifier(child.name)}`;
+          return `${joinAlias(join, side[0])}.${quoteIdentifier(child.name)}`;
         }
         const physical = plan?.columns?.get(input);
         if (physical && !physical.some(l => l.name === leaf.name)) return fail('missing_physical_column', e, path);
@@ -112,14 +114,14 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
         let target: CHType;
         try { target = resolveCast(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_cast', e, path); }
         // The operand retains its own descriptor/Param identity and original scope.
-        return `CAST(${expression(e.expr, input, `${path}.expr`, undefined, false, scope, qualifier)} AS ${print(target)})`;
+        return `CAST(${expression(e.expr, input, `${path}.expr`, undefined, false, scope, qualifier, binding)} AS ${print(target)})`;
       }
       case 'Agg': {
         if (scope !== 'aggregate') return fail('invalid_aggregate_placement', e, path);
         let resolved: ReturnType<typeof resolveAggregate>;
         try { resolved = resolveAggregate(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_aggregate', e, path); }
-        const parameters = e.params.length ? `(${e.params.map((p, i) => expression(p, input, `${path}.params[${i}]`, undefined, false, 'operand', qualifier)).join(', ')})` : '';
-        return `${resolved.sqlName}${parameters}(${e.args.map((a, i) => expression(a, input, `${path}.args[${i}]`, undefined, false, 'operand', qualifier)).join(', ')})`;
+        const parameters = e.params.length ? `(${e.params.map((p, i) => expression(p, input, `${path}.params[${i}]`, undefined, false, 'operand', qualifier, binding)).join(', ')})` : '';
+        return `${resolved.sqlName}${parameters}(${e.args.map((a, i) => expression(a, input, `${path}.args[${i}]`, undefined, false, 'operand', qualifier, binding)).join(', ')})`;
       }
       case 'Call': {
         let resolved: ReturnType<typeof resolveCall>;
@@ -129,7 +131,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           if ((e.fn.name === 'in' || e.fn.name === 'notIn') && i === 1 && arg.kind === 'Subquery') {
             return `(${emit(arg.rel, `${path}.args[${i}].rel`)})`;
           }
-          return expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope, qualifier);
+          return expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope, qualifier, binding);
         });
         if (e.fn.name === 'in' || e.fn.name === 'notIn') {
           const receiver = resolved.types[0]!;
@@ -144,36 +146,99 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           const week = `toStartOfWeek(toDate32(${args[0]}), 0)`;
           return `addDays(toDate(${week}), throwIf(ifNull((${week} < toDate32('1970-01-01')) OR (${week} > toDate32('2149-06-06')), 0), 'chql_date_out_of_range'))`;
         }
-        // Retain the established equality SQL contract; all other names come from the catalog.
+        if (plan) {
+          const operators: Record<string, readonly [string, number]> = { or: ['OR', 1], and: ['AND', 2], eq: ['=', 3], ne: ['!=', 3], lt: ['<', 3], le: ['<=', 3], gt: ['>', 3], ge: ['>=', 3], plus: ['+', 4], minus: ['-', 4], multiply: ['*', 5], divide: ['/', 5] };
+          const operator = operators[e.fn.name];
+          if (operator) return args.map((sql, i) => {
+            const child = e.args[i]!;
+            const inner = child.kind === 'Call' ? operators[child.fn.name] : undefined;
+            // Preserve the expression tree, including floating point association.
+            return inner && (inner[1] < operator[1] || inner[1] === operator[1] && (operator[1] === 3 || i > 0 && operator[1] >= 4)) ? `(${sql})` : sql;
+          }).join(` ${operator[0]} `);
+        }
+        // Retain the permanent naive equality SQL contract.
         return e.fn.name === 'eq' ? `(${args[0]} = ${args[1]})` : `${resolved.sqlName}(${args.join(', ')})`;
       }
       default: return fail('unsupported_expression', e, path, e.kind);
     }
   }
+  /** Clause-level AND has the same precedence as expression-level AND. Only
+   * planned OR is non-atomic here; naive calls retain their permanent spelling. */
+  function conjunction(predicates: readonly { expr: ExprNode; sql: string }[]): string {
+    return predicates.map(({ expr, sql }) => plan && predicates.length > 1 && expr.kind === 'Call' && expr.fn.name === 'or' ? `(${sql})` : sql).join(' AND ');
+  }
+  /** Physical occurrences retain source order and full child transport paths. */
+  function joinSource(join: Extract<Rel, { kind: 'Join' }>, path: string, separator: string): string {
+    const conditions = join.inputs.map(() => [] as ExprNode[]);
+    for (const e of join.on) {
+      if (e.kind !== 'Call') return fail('invalid_join_condition', e, path);
+      const indices = e.args.map(a => a.kind === 'ColumnRef' ? join.inputs.findIndex(([alias]) => alias === a.path[0]) : -1);
+      const position = Math.max(...indices);
+      if (position < 1) return fail('join_condition_arity', e, path);
+      conditions[position]!.push(e);
+    }
+    return join.inputs.map(([alias, child], i) => {
+      const cte = plan?.ctes?.names.get(child);
+      if (cte && !defined.has(child)) return fail('cte_visibility', child, path);
+      const full = outputLeaves(child.output);
+      const physical = plan?.columns?.get(child) ?? full;
+      const source = cte ? quoteIdentifier(cte) : child.kind === 'Scan' && physical.length === full.length
+        ? quoteIdentifier(child.table.name)
+        : `(${emit(child, `${path}.inputs[${i}]`)})`;
+      const hints = !cte && child.kind === 'Scan' && physical.length === full.length ? `${child.final ? ' FINAL' : ''}${child.sample === undefined ? '' : ` SAMPLE ${child.sample}`}` : '';
+      const on = i && join.joinKind !== 'cross' ? ` ON ${conditions[i]!.map((e, j) => expression(e, join, `${path}.on[${j}]`, undefined, false, 'row', '')).join(' AND ')}` : '';
+      return `${i ? `${separator}${join.joinKind === 'cross' ? 'CROSS JOIN' : 'INNER ALL JOIN'} ` : ''}${source} AS ${joinAlias(join, alias)}${hints}${on}`;
+    }).join('');
+  }
   function renderBlock(rel: Rel, order: readonly string[], path = 'root'): string {
     const block = plan!.blocks.get(rel)!;
+    const binding = block.source.kind === 'join' ? block.source.rel : undefined;
+    const separator = binding && rel === root ? '\n' : ' ';
     if (block.aggregate) {
       const aggregate = block.aggregate;
+      const qualifier = block.source.kind === 'cte' ? '' : inputAlias;
       // SELECT precedes even a derived FROM in final textual parameter order.
       // Qualify source references; HAVING/ORDER deliberately use output aliases.
-      const keys = Object.entries(aggregate.keys).map(([name, e]) => [name, expression(e, aggregate.input, `${path}.keys.${name}`, undefined, false, 'row', inputAlias)] as const);
-      const items = [...keys.map(([name, sql]) => `${sql} AS ${quoteIdentifier(name)}`),
-        ...Object.entries(aggregate.aggs).map(([name, e]) => `${expression(e, aggregate.input, `${path}.aggs.${name}`, undefined, false, 'aggregate', inputAlias)} AS ${quoteIdentifier(name)}`)];
+      const keys = Object.entries(aggregate.keys).map(([name, e]) => [name, expression(e, aggregate.input, `${path}.keys.${name}`, undefined, false, 'row', qualifier, binding)] as const);
+      const items = [...keys.map(([name, sql]) => sql === quoteIdentifier(name) ? sql : `${sql} AS ${quoteIdentifier(name)}`),
+        ...Object.entries(aggregate.aggs).map(([name, e]) => `${expression(e, aggregate.input, `${path}.aggs.${name}`, undefined, false, 'aggregate', qualifier, binding)} AS ${quoteIdentifier(name)}`)];
       const source = block.source.kind === 'table'
         ? `${quoteIdentifier(block.source.scan.table.name)} AS ${inputAlias}${block.source.scan.final ? ' FINAL' : ''}${block.source.scan.sample === undefined ? '' : ` SAMPLE ${block.source.scan.sample}`}`
+        : block.source.kind === 'join' ? joinSource(block.source.rel, path, separator)
+        : block.source.kind === 'cte' ? quoteIdentifier(plan!.ctes!.names.get(block.source.rel)!)
         : `(${emit(block.source.rel, `${path}.source`)}) AS ${inputAlias}`;
       const where = (block.where ?? []).map((node, i) => {
         if (node.kind !== 'Filter') throw new Error('invalid_aggregate_where');
-        return expression(node.pred, node.input, `${path}.where[${i}]`, undefined, false, 'row', inputAlias);
+        return { expr: node.pred, sql: expression(node.pred, node.input, `${path}.where[${i}]`, undefined, false, 'row', qualifier, binding) };
       });
-      const having: string[] = [], tails: string[] = [];
+      const having: { expr: ExprNode; sql: string }[] = [], tails: string[] = [];
       for (const [i, node] of block.clauses.entries()) {
         const p = `${path}.clauses[${i}]`;
-        if (node.kind === 'Filter') having.push(expression(node.pred, node.input, `${p}.pred`, undefined, false, 'row', ''));
+        if (node.kind === 'Filter') having.push({ expr: node.pred, sql: expression(node.pred, node.input, `${p}.pred`, undefined, false, 'row', '') });
         else if (node.kind === 'Sort') tails.push(` ORDER BY ${node.keys.map((k, j) => `${expression(k.expr, node.input, `${p}.keys[${j}]`, undefined, false, 'row', '')} ${k.dir.toUpperCase()}${k.nulls === undefined ? '' : ` NULLS ${k.nulls.toUpperCase()}`}`).join(', ')}`);
         else tails.push(` LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
       }
-      return `SELECT ${items.join(', ')} FROM ${source}${where.length ? ` WHERE ${where.join(' AND ')}` : ''}${keys.length ? ` GROUP BY ${keys.map(([, sql]) => sql).join(', ')}` : ''}${having.length ? ` HAVING ${having.join(' AND ')}` : ''}${tails.join('')}`;
+      return `SELECT ${items.join(', ')}${separator}FROM ${source}${where.length ? `${separator}WHERE ${conjunction(where)}` : ''}${keys.length ? `${separator}GROUP BY ${keys.map(([, sql]) => sql).join(', ')}` : ''}${having.length ? `${separator}HAVING ${conjunction(having)}` : ''}${tails.map(t => separator + t.slice(1)).join('')}`;
+    }
+    if (binding) {
+      const selected = plan?.columns?.get(rel) ?? outputLeaves(rel.output);
+      const items = selected.map(leaf => {
+        if (block.project) {
+          const e = block.project.exprs[leaf.name]!;
+          return `${expression(e, block.project.input, `${path}.exprs.${leaf.name}`, undefined, false, 'row', inputAlias, binding)} AS ${quoteIdentifier(leaf.name)}`;
+        }
+        const side = binding.inputs.find(([alias]) => alias === leaf.path[0])!;
+        const child = outputLeaves(side[1].output).find(l => JSON.stringify(l.path) === JSON.stringify(leaf.path.slice(1)))!;
+        return `${joinAlias(binding, side[0])}.${quoteIdentifier(child.name)} AS ${quoteIdentifier(leaf.name)}`;
+      });
+      const source = joinSource(binding, path, separator);
+      const predicates: string[] = [], tails: string[] = [];
+      for (const node of block.clauses) {
+        if (node.kind === 'Filter') predicates.push(`(${expression(node.pred, node.input, path, undefined, false, 'row', inputAlias, binding)})`);
+        else if (node.kind === 'Sort') tails.push(`${separator}ORDER BY ${node.keys.map(k => `${expression(k.expr, node.input, path, undefined, false, 'row', inputAlias, binding)} ${k.dir.toUpperCase()}${k.nulls ? ` NULLS ${k.nulls.toUpperCase()}` : ''}`).join(', ')}`);
+        else tails.push(`${separator}LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
+      }
+      return `SELECT ${items.join(', ')}${separator}FROM ${source}${predicates.length ? `${separator}WHERE ${predicates.join(' AND ')}` : ''}${tails.join('')}`;
     }
     let from: string;
     if (block.source.kind === 'table') {
@@ -185,17 +250,15 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     // Render only the final block, in textual order. Never eagerly emit folded
     // children: their discarded SELECTs could allocate Params out of order.
     const qualifier = blockQualifier(rel);
-    const predicates: string[] = [];
+    const predicates: { expr: ExprNode; sql: string }[] = [];
     const tails: string[] = [];
     for (const [i, node] of block.clauses.entries()) {
       const p = `${path}.clauses[${i}]`;
-      if (node.kind === 'Filter') predicates.push(expression(node.pred, node.input, `${p}.pred`, undefined, false, 'row', qualifier));
+      if (node.kind === 'Filter') predicates.push({ expr: node.pred, sql: expression(node.pred, node.input, `${p}.pred`, undefined, false, 'row', qualifier) });
       else if (node.kind === 'Sort') tails.push(` ORDER BY ${node.keys.map((key, j) => `${expression(key.expr, node.input, `${p}.keys[${j}].expr`, undefined, false, 'row', qualifier)} ${key.dir.toUpperCase()}${key.nulls === undefined ? '' : ` NULLS ${key.nulls.toUpperCase()}`}`).join(', ')}`);
       else tails.push(` LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
     }
-    // Expressions already delimit infix operators; calls (including or/and)
-    // are atomic SQL expressions. Combining them needs no extra wrappers.
-    const where = predicates.length ? ` WHERE ${predicates.join(' AND ')}` : '';
+    const where = predicates.length ? ` WHERE ${conjunction(predicates)}` : '';
     const tail = tails.join('');
     return `SELECT ${order.map(k => `${qualifier ? `${qualifier}.` : ''}${quoteIdentifier(k)}`).join(', ')} FROM ${from}${where}${tail}`;
   }
@@ -300,7 +363,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
             source += `${i ? (rel.joinKind === 'cross' ? ' CROSS JOIN ' : ' INNER ALL JOIN ') : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${joinAlias(rel, alias)}`;
             if (i && rel.joinKind !== 'cross') source += ` ON ${clauses[i]!.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}`;
           }
-          return `SELECT ${items.join(', ')} FROM ${source}${residuals.length ? ` WHERE ${residuals.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}` : ''}`;
+          return `SELECT ${items.join(', ')} FROM ${source}${residuals.length ? ` WHERE ${conjunction(residuals.map(c => ({ expr: c.e, sql: expression(c.e, rel, c.path, undefined, false, 'row', '') })))}` : ''}`;
         }
         case 'Scan': {
           if (rel.final !== undefined && typeof rel.final !== 'boolean') return fail('invalid_scan_hint', rel, `${path}.final`);
@@ -419,7 +482,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     definitions.push(`${quoteIdentifier(plan!.ctes!.names.get(rel)!)} AS (${sql})`);
     defined.add(rel);
   }
-  const body = `${definitions.length ? `WITH ${definitions.join(', ')} ` : ''}${emit(root, 'root')}`;
+  const body = `${definitions.length ? `WITH ${definitions.join(', ')}${plan?.blocks.get(root)?.source.kind === 'join' ? '\n' : ' '}` : ''}${emit(root, 'root')}`;
   const settings = [
     ...(weekBucketing ? ['enable_extended_results_for_datetime_functions = 1'] : []),
     // Nullable membership's declared result requires the server's default NULL policy.

@@ -43,7 +43,7 @@ describe('identity CTE planning', () => {
     expect(columns.get(shared.ir)?.map(l => l.name)).toEqual(['id', 'amount']);
     expect(plan.blocks.has(q.ir.kind === 'Join' ? q.ir.inputs[0]![1] : q.ir)).toBe(false);
     const sql = compile(q.ir).sql;
-    expect(sql).toContain('WITH `t0` AS (SELECT `id`, `amount` FROM `items` WHERE (`id` = {p0:String}))');
+    expect(sql).toContain('WITH `t0` AS (SELECT `id`, `amount` FROM `items` WHERE `id` = {p0:String})');
     expect(sql.match(/FROM `t0`/g)).toHaveLength(2);
     expect(sql).not.toContain('unused');
   });
@@ -143,8 +143,8 @@ describe('identity CTE planning', () => {
     const newest = q.groupBy(r => ({ id: r.id })).aggregate(g => ({ version: max(g.version) }));
     const latest = join({ m: q, v: newest }).on(r => [r.m.id.eq(r.v.id), r.m.version.eq(r.v.version)]).map(r => ({ id: r.m.id }));
     const sql = compile(latest.ir).sql;
-    expect(sql).toBe('WITH `t0` AS (SELECT `id`, `version` FROM `items` WHERE (`id` = {p0:String})) SELECT `__chql_input`.`__chql_leaf_0` AS `id` FROM (SELECT `m`.`id` AS `__chql_leaf_0` FROM (SELECT `t0`.`id`, `t0`.`version` FROM `t0`) AS `m` INNER ALL JOIN (SELECT `__chql_input`.`id` AS `id`, max(`__chql_input`.`version`) AS `version` FROM (SELECT `t0`.`id`, `t0`.`version` FROM `t0`) AS `__chql_input` GROUP BY `__chql_input`.`id`) AS `v` ON (`m`.`id` = `v`.`id`) AND (`m`.`version` = `v`.`version`)) AS `__chql_input`');
+    expect(sql).toBe('WITH `t0` AS (SELECT `id`, `version` FROM `items` WHERE `id` = {p0:String})\nSELECT `m`.`id` AS `id`\nFROM `t0` AS `m`\nINNER ALL JOIN (SELECT `id`, max(`version`) AS `version` FROM `t0` GROUP BY `id`) AS `v` ON `m`.`id` = `v`.`id` AND `m`.`version` = `v`.`version`');
     const total = q.aggregate(g => ({ n: sum(g.amount) }));
-    expect(compile(q.map(r => ({ id: r.id, n: scalar(total) })).ir).sql).toBe('WITH `t0` AS (SELECT `id`, `amount` FROM `items` WHERE (`id` = {p0:String})) SELECT `__chql_input`.`id` AS `id`, (SELECT sum(`__chql_input`.`amount`) AS `n` FROM (SELECT `t0`.`id`, `t0`.`amount` FROM `t0`) AS `__chql_input`) AS `n` FROM (SELECT `t0`.`id`, `t0`.`amount` FROM `t0`) AS `__chql_input`');
+    expect(compile(q.map(r => ({ id: r.id, n: scalar(total) })).ir).sql).toBe('WITH `t0` AS (SELECT `id`, `amount` FROM `items` WHERE `id` = {p0:String}) SELECT `__chql_input`.`id` AS `id`, (SELECT sum(`amount`) AS `n` FROM `t0`) AS `n` FROM (SELECT `t0`.`id`, `t0`.`amount` FROM `t0`) AS `__chql_input`');
   });
 });

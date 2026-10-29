@@ -5,4 +5,4 @@ scalar(q.groupBy(r => r.id).aggregate(() => count())); // expect: TS2345 Types o
 scalar(q.aggregate(() => ({ a: count(), b: count() }))); // expect: TS2345 scalar_column_count
 scalar(q.aggregate(() => count()).limit(1)); // expect: TS2345 Types of property 'ir' are incompatible
 q.aggregate(() => ({ n: scalar(q.aggregate(() => count())) })); // expect: TS2322 "row"
-q.aggregate(g => ({ n: sum(g.id).plus(scalar(q.aggregate(() => count()))) })); // expect: TS2769 Operand<bigint | null, "agg">
+q.aggregate(g => ({ n: sum(g.id).plus(scalar(q.aggregate(() => count()))) })); // expect: TS2769 ExprOperand<bigint | null, string, "agg">

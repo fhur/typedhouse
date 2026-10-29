@@ -12,4 +12,4 @@ q.aggregate(g => avg(avg(g.n))); // expect: TS2345 is not assignable to paramete
 q.aggregate(g => avgIf(g.n, g.n)); // expect: TS2345 is not assignable to parameter of type 'AggregateOperand<boolean | null>'.
 q.aggregate(g => avgIf(g.n, q.row.flag)); // expect: TS2345 is not assignable to parameter of type 'AggregateOperand<boolean | null>'.
 q.map(() => avg(val(1))); // expect: TS2322 Type '"agg"' is not assignable to type '"row"'.
-q.aggregate(g => avg(g.n).plus(g.n)); // expect: TS2769 is not assignable to parameter of type 'Operand<number, "agg">'.
+q.aggregate(g => avg(g.n).plus(g.n)); // expect: TS2769 Type '"grouped"' is not assignable to type '"agg"'. // expect-ts7: TS2769 ExprOperand<number | null, string, "agg">

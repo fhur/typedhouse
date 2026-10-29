@@ -1,6 +1,9 @@
 import type { CHType, ScalarName } from '../ch-type.js';
 import { col } from '../columns.js';
-import { defineFunction } from './define.js';
+import type { Expr, ExprValue } from '../expr.js';
+import type { Mode } from '../types.js';
+import type { ExpReceiver, ExpResult } from './descriptor-types.js';
+import { defineFunction, invoke } from './define.js';
 import { numeric, unwrap } from './matchers.js';
 /** ClickHouse integer widths grow once up to 64 bits; large integers retain their width. */
 export function promote(args: readonly CHType[]): CHType {
@@ -15,7 +18,14 @@ export function promote(args: readonly CHType[]): CHType {
   const bits = Math.max(...names.map(n => Number(n.replace(/\D/g, '')) || 64));
   return { kind: 'scalar', name: `${names.some(n => n.startsWith('Int')) ? 'Int' : 'UInt'}${bits < 64 ? bits * 2 : bits}` as ScalarName };
 }
+const expDefinition = defineFunction({ name: 'exp', args: [Object.freeze({ match: (t: CHType) => {
+  const base = t.kind === 'Nullable' ? t.inner : t;
+  return base.kind === 'scalar' && /^(U?Int(8|16|32|64)|Float(32|64))$/.test(base.name);
+} })], returns: col.Float64, deterministic: true, origin: 'typed', surface: 'exp' }).definition;
+export function exp<E extends Expr<number | bigint | null, string, Mode>>(value: E & ExpReceiver<E['ir']['type']>): ExpResult<ExprValue<E>, E['name'], E['mode']>;
+export function exp(value: Expr<number | bigint | null, string, Mode>): Expr<unknown, string, Mode> { return invoke(expDefinition, [value]); }
 export const arithmetic = [
+  expDefinition,
   ...['plus', 'minus', 'multiply'].map(name => defineFunction({ name, args: [numeric, numeric], returns: (args: readonly CHType[]) => {
     const result = promote(args);
     if (name === 'minus' && result.kind === 'scalar' && result.name.startsWith('UInt')) return { kind: 'scalar' as const, name: result.name.slice(1) as ScalarName };
