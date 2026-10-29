@@ -27,19 +27,40 @@ export function renderColumn(t: CHType): string {
     case 'SimpleAggregateFunction': return `col.SimpleAggregateFunction(${str(t.fn)}, ${renderColumn(t.inner)})`;
   }
 }
+// Module bindings must avoid keywords as well as the generator's own imports/exports.
+const reservedBindings = 'await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval table col Infer db'.split(' ');
+function uniqueNames(bases: string[], forbidden: readonly string[] = []): string[] {
+  const reserved = new Set([...bases, ...forbidden]);
+  const used = new Set(forbidden);
+  return bases.map(base => {
+    let name = base;
+    if (used.has(name)) {
+      let suffix = 2;
+      do { name = `${base}${suffix++}`; } while (used.has(name) || reserved.has(name));
+    }
+    used.add(name);
+    return name;
+  });
+}
 export function renderSchema(schema: DatabaseSchema): string {
   const tables = [...schema.tables].sort((a, b) => compare(a.name, b.name));
-  const body = tables.map(t => {
+  const aliases = uniqueNames(tables.map(t => {
+    const words = t.name.match(/[a-zA-Z0-9]+/g) ?? [];
+    return `Row$${words.map(word => word[0]!.toUpperCase() + word.slice(1)).join('') || 'Table'}`;
+  }));
+  const bindings = uniqueNames(tables.map(t => {
+    const name = t.name.replace(/[^a-zA-Z0-9_$]/g, '_') || 'table';
+    return /^\d/.test(name) ? `_${name}` : name;
+  }), [...reservedBindings, ...aliases]);
+  const shortcuts = [['entity_ots_component', 'ComponentRow'], ['entity_off_the_shelf_part', 'PartRow'], ['metric_group_ots_component_indices', 'ComponentIndicesRow']] as const;
+  const body = tables.map((t, i) => {
     const columns = [...t.columns].sort((a, b) => a.position - b.position);
     const metadata = object([['engine', str(t.engine)], ['sortingKey', JSON.stringify(t.sortingKey)], ['partitionKey', JSON.stringify(t.partitionKey)], ['primaryKey', JSON.stringify(t.primaryKey)], ['columnMetadata', object(columns.map(c => [c.name, JSON.stringify({ defaultKind: c.defaultKind, comment: c.comment, position: c.position })]))]]);
-    return `  ${key(t.name)}: table(${str(t.name)}, {\n${columns.map(c => `    ${key(c.name)}: ${renderColumn(c.type)},`).join('\n')}\n  }, ${metadata}),`;
-  }).join('\n');
-  // Stable numbered aliases avoid collisions and invalid identifiers for arbitrary server names.
-  const aliases = tables.map((t, i) => `export type Table${i}Row = Infer<typeof db[${str(t.name)}]>;`);
-  for (const [name, alias] of [['entity_ots_component', 'ComponentRow'], ['entity_off_the_shelf_part', 'PartRow'], ['metric_group_ots_component_indices', 'ComponentIndicesRow']] as const) {
-    if (tables.some(t => t.name === name)) aliases.push(`export type ${alias} = Infer<typeof db[${str(name)}]>;`);
-  }
-  return artifact(`import { table, col, type Infer } from '@chql/core';\n\n// DateTime64 precision > 3 maps to string: Date would lose sub-millisecond precision.\nexport const db = {\n${body}\n} as const;\n\n${aliases.join('\n')}\n`);
+    const shortcut = shortcuts.find(([name]) => name === t.name);
+    return `const ${bindings[i]} = table(${str(t.name)}, {\n${columns.map(c => `  ${key(c.name)}: ${renderColumn(c.type)},`).join('\n')}\n}, ${metadata});\nexport type ${aliases[i]} = Infer<typeof ${bindings[i]}>;${shortcut ? `\nexport type ${shortcut[1]} = ${aliases[i]};` : ''}`;
+  }).join('\n\n');
+  const entries = tables.map((t, i) => `  ${t.name === bindings[i] && t.name !== '__proto__' ? t.name : `${key(t.name)}: ${bindings[i]}`},`).join('\n');
+  return artifact(`import { table, col, type Infer } from '@chql/core';\n\n// DateTime64 precision > 3 maps to string: Date would lose sub-millisecond precision.\n${body}\n\nexport const db = {\n${entries}\n} as const;\n`);
 }
 export function renderFunctions(schema: DatabaseSchema): string {
   return artifact(`// M2 metadata; M3 attaches callable fn/agg wrappers over this catalog.\nexport const functions = ${object([...schema.functions].sort((a, b) => compare(a.name, b.name)).map(f => [f.name, JSON.stringify({ isAggregate: f.isAggregate, deterministic: f.deterministic, aliasTo: f.aliasTo })]))} as const;\n`);

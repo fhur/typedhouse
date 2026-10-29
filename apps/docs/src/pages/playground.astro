@@ -1,0 +1,10 @@
+---
+import Site from '../layouts/Site.astro';
+import { withBase } from '../lib/urls';
+import Playground from '../components/playground/Playground';
+---
+<Site title="Playground" description="Compose a ClickHouse query and inspect SQL locally. No database connection." fullPage>
+  <h1 class="visually-hidden">chql playground</h1>
+  <Playground client:load fullPage />
+  <noscript><p>The interactive editor requires JavaScript. <a href={withBase('/docs/getting-started/')}>Read the complete first query and expected SQL instead.</a></p></noscript>
+</Site>

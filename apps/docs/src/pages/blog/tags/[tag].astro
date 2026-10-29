@@ -1,0 +1,13 @@
+---
+import { getCollection } from 'astro:content';
+import Site from '../../../layouts/Site.astro';
+import { withBase } from '../../../lib/urls';
+export async function getStaticPaths() {
+  const posts = await getCollection('blog', ({ data }) => !data.draft);
+  return [...new Set(posts.flatMap(p => p.data.tags))].sort().map(tag => ({ params: { tag }, props: { tag, posts: posts.filter(p => p.data.tags.includes(tag)).sort((a,b) => b.data.date.getTime() - a.data.date.getTime()) } }));
+}
+const { tag, posts } = Astro.props;
+---
+<Site title={`Articles tagged ${tag}`} description={`chql engineering articles about ${tag}.`}>
+  <section><a href={withBase('/blog/')}>← All articles</a><h1>#{tag}</h1><ul>{posts.map(post => <li><a href={withBase(`/blog/${post.id}/`)}>{post.data.title}</a> — {post.data.description}</li>)}</ul></section>
+</Site>

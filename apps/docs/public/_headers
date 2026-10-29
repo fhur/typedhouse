@@ -1,0 +1,23 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+  X-Frame-Options: SAMEORIGIN
+
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/sandbox/worker.js
+  Cache-Control: no-cache
+
+/docs/*.md
+  Content-Type: text/markdown; charset=utf-8
+
+/blog/*.md
+  Content-Type: text/markdown; charset=utf-8
+
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+
+/llms-full.txt
+  Content-Type: text/plain; charset=utf-8

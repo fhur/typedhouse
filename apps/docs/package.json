@@ -1,0 +1,51 @@
+{
+  "name": "@chql/docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/build-playground.mjs && astro dev",
+    "build": "node scripts/build-playground.mjs && astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "test:playground": "node scripts/build-playground.mjs && node scripts/test-playground.mjs",
+    "test:browser": "playwright test",
+    "test:site": "node scripts/test-site.mjs",
+    "format:examples": "node scripts/format-examples.mjs",
+    "test:example-format": "node --test scripts/example-format.test.mjs && node scripts/format-examples.mjs --check",
+    "examples:compiler": "node scripts/compiler-examples.mjs",
+    "test:compiler-examples": "node scripts/compiler-examples.mjs --check",
+    "examples:query-builder": "node scripts/compiler-examples.mjs --query-builder",
+    "test:query-builder-examples": "node scripts/compiler-examples.mjs --query-builder --check",
+    "examples:functions": "node scripts/compiler-examples.mjs --functions",
+    "test:function-examples": "node scripts/compiler-examples.mjs --functions --check"
+  },
+  "dependencies": {
+    "@astrojs/react": "^4.2.0",
+    "@astrojs/starlight": "^0.34.0",
+    "@chql/compiler": "workspace:*",
+    "@chql/core": "workspace:*",
+    "@codemirror/autocomplete": "^6.18.6",
+    "@codemirror/commands": "^6.8.1",
+    "@codemirror/lang-javascript": "^6.2.3",
+    "@codemirror/lang-sql": "^6.9.0",
+    "@codemirror/language": "^6.11.0",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.36.5",
+    "@lezer/highlight": "^1.2.5",
+    "astro": "^5.7.0",
+    "codemirror": "^6.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sql-formatter": "^15.9.0",
+    "typescript": "~5.8.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@playwright/test": "^1.64.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "esbuild": "^0.25.0",
+    "prettier": "3.9.10"
+  }
+}

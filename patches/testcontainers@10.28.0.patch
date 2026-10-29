@@ -1,0 +1,33 @@
+diff --git a/build/generic-container/generic-container.js b/build/generic-container/generic-container.js
+index 1d3a33c2b16122a1c4df85550f9c95b9d3c5f6b3..dbb705658d055d39791fa8efdc82794e82f3e4df 100644
+--- a/build/generic-container/generic-container.js
++++ b/build/generic-container/generic-container.js
+@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
+ };
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.GenericContainer = void 0;
++const fs_1 = require("node:fs");
+ const archiver_1 = __importDefault(require("archiver"));
+ const async_lock_1 = __importDefault(require("async-lock"));
+ const common_1 = require("../common");
+@@ -56,6 +57,20 @@ class GenericContainer {
+     }
+     async start() {
+         const client = await (0, container_runtime_1.getContainerRuntimeClient)();
++        // chql: Docker Desktop for Mac must allocate dynamic TCP ports on the host,
++        // not in its Linux VM (testcontainers-node#1602). Keep other runtimes intact.
++        if (process.platform === "darwin" &&
++            client.info.containerRuntime.operatingSystem === "Docker Desktop" &&
++            ["localhost", "127.0.0.1", "::1"].includes(client.info.containerRuntime.host) &&
++            !(0, fs_1.existsSync)("/.dockerenv")) {
++            // Last declaration wins, including explicit { container, host: 0 }.
++            const ports = new Map(this.exposedPorts.map((port) => [(0, port_1.getContainerPort)(port), port]));
++            for (const [containerPort, port] of ports) {
++                if (typeof port === "number" && this.hostConfig.PortBindings?.[containerPort]?.[0]?.HostPort === "0") {
++                    this.hostConfig.PortBindings[containerPort][0].HostPort = "";
++                }
++            }
++        }
+         await client.image.pull(this.imageName, {
+             force: this.pullPolicy.shouldPull(),
+             platform: this.createOpts.platform,

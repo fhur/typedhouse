@@ -1,4 +1,7 @@
 packages:
   - packages/*
+  - apps/*
 onlyBuiltDependencies:
   - esbuild
+patchedDependencies:
+  testcontainers@10.28.0: patches/testcontainers@10.28.0.patch

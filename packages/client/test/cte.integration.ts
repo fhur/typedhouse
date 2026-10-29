@@ -72,9 +72,9 @@ it('executes collision-safe physical names and checks a total-order client seque
 });
 it('executes nested hint diamonds across scalar and IN scopes with case-sensitive alias collisions', async () => {
   const source = from(table('pruning_wide', { id: col.String, amount: col.UInt64 }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] }));
-  const hinted = source.where(r => r.amount.gt(2n)).materialize();
+  const hinted = source.where(r => r.amount.gt(2n)).cte();
   const pair = crossJoin({ t0: hinted, T0: hinted });
-  const diamond = unionAll(pair, pair).materialize();
+  const diamond = unionAll(pair, pair).cte();
   const total = hinted.aggregate(g => sum(g.amount));
   const n = scalar(diamond.aggregate(() => count()));
   const set = hinted.map(r => r.id);

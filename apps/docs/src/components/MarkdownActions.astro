@@ -1,0 +1,28 @@
+---
+interface Props { href: string }
+const { href } = Astro.props;
+---
+<div class="markdown-actions" data-pagefind-ignore>
+  <a href={href}>View Markdown</a>
+  <button type="button" data-markdown-url={href}>Copy as Markdown</button>
+  <span role="status" class="copy-status"></span>
+</div>
+<script>
+  document.querySelectorAll<HTMLButtonElement>('[data-markdown-url]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const status = button.parentElement?.querySelector('.copy-status');
+      try {
+        const response = await fetch(button.dataset.markdownUrl!);
+        if (!response.ok) throw new Error('Fetch failed');
+        await navigator.clipboard.writeText(await response.text());
+        if (status) status.textContent = 'Copied';
+      } catch {
+        if (status) status.textContent = 'Copy unavailable. Open View Markdown instead.';
+      }
+    });
+  });
+</script>
+<style>
+  .markdown-actions { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin: 1rem 0 2rem; font-size: .85rem; }
+  button { color: inherit; font: inherit; background: transparent; border: 1px solid currentColor; border-radius: .35rem; padding: .3rem .6rem; cursor: pointer; }
+</style>

@@ -201,8 +201,8 @@ export class Query<R, C extends Caps = Caps, Proxy = Row<R>, Nested extends bool
   limit(n: number, offset?: number): Query<R, C, this['row'], Nested> {
     return new Query(relNode({ kind: 'Limit', input: this.ir, n, ...(offset === undefined ? {} : { offset }), output: this.ir.output }), this.caps);
   }
-  /** v1 CTE hint only; ClickHouse may inline and evaluate each use independently. */
-  materialize(): Query<R, C, this['row'], Nested> {
+  /** Request an ordinary CTE; ClickHouse may inline and evaluate each use independently. */
+  cte(): Query<R, C, this['row'], Nested> {
     return new Query(relNode({ kind: 'Materialize', input: this.ir, output: this.ir.output }), this.caps);
   }
   distinct(): Query<R, C, this['row'], Nested> {

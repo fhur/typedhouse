@@ -26,7 +26,7 @@ it('places three-way conditions at the earliest valid occurrence and keeps neste
   expect(compiled.columns).toEqual(emitNaive(q.ir).columns);
 });
 it('keeps computed, materialized and clause-reversal boundaries, residual predicates and shared demands', () => {
-  const shared = a.where(r => r.id.eq('x')).materialize();
+  const shared = a.where(r => r.id.eq('x')).cte();
   const q = join({ a: shared, b: shared }).on(r => [r.a.id.eq(r.b.id), r.a.n.lt(r.b.n)]).map(r => ({ n: r.a.n }));
   const compiled = compile(q.ir);
   expect(compiled.sql).toContain('WITH ');

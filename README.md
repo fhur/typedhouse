@@ -78,18 +78,14 @@ Casts compose with grouping, aggregates, sorting, scalar/IN queries and run/stre
 The naive compiler also supports low-level `Union { all: false }` with explicit
 UNION DISTINCT; no public intersect/except APIs are implied.
 
-`componentParts.materialize()` is a composable v1 **ordinary CTE hint**. It retains
+`componentParts.cte()` is a composable **ordinary CTE hint**. It retains
 nested/expanded rows, descriptors and capabilities, but drops scan/thenBy stages
 and direct-aggregate scalar evidence. Filters, projections, grouping, ordering,
-limits, unions and membership can compose around it. `emitNaive` (also `compile`)
-logs `materialization is not yet implemented` to `console.warn` once per distinct
-Materialize node per successful compilation, not per repeated occurrence. Invalid
-compilations do not warn. The client's existing identity memoization means repeated
-runs reuse compilation; explicit `toSQL()` calls compile and warn again. Local WITH
-boundaries preserve input operations; ClickHouse may inline and evaluate each use
-repeatedly. This does **not** promise cached rows, one evaluation, temporary tables,
-or automatic shared-parent CTE extraction (the latter remains M4; real materialization
-is deferred M7). See `examples/first-query.ts` for executable composition.
+limits, unions and membership can compose around it. Local WITH boundaries preserve
+input operations; ClickHouse may inline and evaluate each use repeatedly. This does
+**not** promise cached rows, one evaluation, or temporary tables. The compiler can
+also extract safe shared query objects automatically, based on object identity.
+See `examples/first-query.ts` for executable composition.
 
 Mean metrics over a caller-selected history window:
 ```ts
@@ -430,6 +426,13 @@ corepack enable
 pnpm install
 pnpm check:all
 ```
+
+`check:all` requires the installed Testcontainers port checks and a fresh real
+ClickHouse/Ryuk smoke on every platform. The smoke preserves existing consumers'
+Ryuks and checks empty dynamic bindings only on affected local Mac Docker Desktop
+hosts (`0` elsewhere). See `patches/README.md`; the separate
+`node scripts/test-smoke-testcontainers-repeat.mjs` regression runs two consecutive
+smokes while a normal consumer keeps its foreign Ryuk alive.
 
 ESM-only pnpm workspace with strict TypeScript and exact optional properties.
 

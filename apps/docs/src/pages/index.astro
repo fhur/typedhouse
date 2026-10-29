@@ -1,0 +1,48 @@
+---
+import Site from '../layouts/Site.astro';
+import { withBase } from '../lib/urls';
+import HomeSearch from '../components/HomeSearch.astro';
+import Playground from '../components/playground/Playground';
+const composition = `import { col, table, from, count } from '@chql/core';
+const events = table('events', {
+  tenant: col.String, category: col.String, id: col.UInt32,
+}, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] });
+
+const base = from(events).where(e => e.tenant.eq('acme'));
+const dashboard = base.groupBy(e => e.category)
+  .aggregate(() => ({ total: count() }));
+const report = base.orderBy(e => e.id).limit(100);
+const drillDown = base.where(e => e.category.eq('purchase'));
+export default report;`;
+---
+<Site title="Type-safe and composable. SQL's missing features." description="Build reusable ClickHouse queries in TypeScript—without stitching SQL strings together.">
+  <section class="hero">
+    <p class="eyebrow">A typed, composable query builder for ClickHouse</p>
+    <h1>Type-safe and composable.<br />SQL's missing features.</h1>
+    <p class="lede">Build reusable ClickHouse queries in TypeScript—without stitching SQL strings together. Keep values parameterized, catch schema mismatches earlier, and inspect the SQL you ship.</p>
+    <div class="actions"><a class="button primary" href={withBase('/playground/')}>Try the playground →</a><a class="button" href={withBase('/docs/getting-started/')}>Build your first query</a></div>
+    <div class="install-command"><span>Install</span><code>pnpm add @chql/core @chql/compiler</code></div>
+    <p class="meta preview-note">Bounded implementation preview. Adopt one query, not a new application architecture.</p>
+    <HomeSearch />
+  </section>
+  <section>
+    <p class="eyebrow">01 / Compose queries, not strings</p>
+    <h2>One base. Three ways to use it.</h2>
+    <p>SQL has CTEs and subqueries. The missing piece is application-level composition: reusable query logic you can extend without duplicating SQL. Every operation below creates a new query; the base stays unchanged.</p>
+    <details class="composition-reference">
+      <summary>Read the static composition example · events fixture</summary>
+      <pre aria-label="Reusable query composition example"><code>{composition}</code></pre>
+      <p>The report selects tenant <code>acme</code>, sorts by <code>id ASC</code>, and limits to 100 rows. Its tenant value is a separate String parameter. The dashboard groups that same base by category; the drill-down adds another filter. The naive compiler nests SELECTs rather than optimizing these into a shared CTE.</p>
+    </details>
+    <p class="meta">A human interface for inspection: edit a query and review the generated SQL. This self-contained products fixture demonstrates the same reuse pattern; the static events example is the canonical documentation fixture.</p>
+    <Playground client:visible />
+  </section>
+  <section class="grid">
+    <div class="panel"><p class="eyebrow">02 / Safer construction</p><h2>Input stays input.</h2><p><code>e.tenant.eq(userInput)</code> produces a typed placeholder, such as <code>{'{p0:String}'}</code>, and a separate parameter value—even when input contains quotes or SQL syntax.</p><p>This separates values from structure. It does not enforce authorization or prove query logic correct.</p><a href={withBase('/docs/reference/parameters/')}>See the parameter contract →</a></div>
+    <div class="panel"><p class="eyebrow">03 / Built for ClickHouse</p><h2>Native semantics. Explicit edges.</h2><p><code>from(events).final()</code> preserves ClickHouse FINAL semantics. Integer <code>sum</code> outputs decode as bigint. Inner ALL joins retain duplicates.</p><p>Outer joins and automatic optimizer rewrites are not available in this preview. No performance promises hidden behind an abstraction.</p><a href={withBase('/docs/reference/queries/')}>Read the supported surface →</a></div>
+  </section>
+  <section class="grid">
+    <div><p class="eyebrow">04 / Catch schema drift earlier</p><h2>Refresh. Typecheck. Review.</h2><p>Regenerate descriptors after a column rename. A query still using <code>e.category</code> fails TypeScript checking if that property no longer exists.</p><p>Make generation and typechecking a CI step. Stale descriptors cannot detect live schema drift; not every semantic change alters a type.</p><a href={withBase('/docs/getting-started/#refresh-your-schema')}>Set up the feedback loop →</a></div>
+    <div class="panel agent-panel"><p class="eyebrow">Agent-first reference / human inspection</p><h2>Explicit APIs.<br />Inspectable SQL.</h2><p>Give coding agents documented query-building primitives, typed constraints, compiler validation, and generated SQL you can review. Every documentation page is also available as full Markdown from the same source.</p><a class="button" href={withBase('/llms.txt')}>Start with llms.txt →</a></div>
+  </section>
+</Site>

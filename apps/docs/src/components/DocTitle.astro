@@ -1,0 +1,8 @@
+---
+import Default from '@astrojs/starlight/components/PageTitle.astro';
+import MarkdownActions from './MarkdownActions.astro';
+import { withBase, withoutBase } from '../lib/urls';
+const path = withoutBase(Astro.url.pathname).replace(/\/$/, '');
+---
+<Default><slot /></Default>
+{path.startsWith('/docs/') && <MarkdownActions href={withBase(`${path}.md`)} />}

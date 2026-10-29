@@ -1,4 +1,103 @@
-# M3 stress repair — locally passing; full performance gate still open
+# M3 corpus gate — focused PASS; latest full matrix infrastructure BLOCKED
+
+Current repair: `ColumnsRow<C>` now reifies its mapped object at the table boundary.
+All 248 exact/not-any runtime rows and real emitted declarations pass on official
+5.8.3, 5.5.4 and 7.0.2; AST review finds exactly 18 first-argument expansions and
+no changes to the other query arguments. Original 200+2 inputs are unchanged.
+Fresh three-process source/built measurements pass every unchanged budget; the
+prior wall-time failure below remains real historical evidence, not retried away.
+Default and minimum full matrices pass. Latest fails container setup for the
+aggregate/Union suite (`No host port found for host IP`), so full acceptance is
+still blocked; no retry or test exclusion was applied. See the latest TODO section
+and `/tmp/chql-readable-*.log` for measurements and limitations. Full M3 and v1
+remain incomplete.
+
+## Historical acceptance (after a2409ad, before readability repair)
+
+`queries.ts` contains **200 unannotated exports**: twenty domain input shapes
+composed with ten relational operations (not changed literals). `manifest.json`
+records each root/expression/composition. All six tables, latest/FINAL, tuple-array
+payloads, histories, aggregation, membership/scalar, joins, ARRAY JOIN, union,
+ordering and CTE reuse occur. `correspondence.ts` consumes each inferred row with
+exact/not-any assertions against independently runtime-CHType-derived snapshots.
+The original **25-step / ten-way inputs are byte-for-byte unchanged**.
+
+Mandatory local commands (also wired additively into `verify-query-package.mjs`):
+
+```sh
+node scripts/generate-type-stress.mjs
+node scripts/generate-type-bench.mjs
+node scripts/check-type-performance.mjs --self-test
+node scripts/check-type-performance.mjs --all
+node scripts/check-corpus-types.mjs --self-test
+CHQL_TYPESCRIPT_VERSION=5.5.4 node scripts/check-corpus-types.mjs --self-test
+CHQL_TYPESCRIPT_VERSION=latest node scripts/check-corpus-types.mjs --self-test
+```
+
+The last three commands currently **fail intentionally on the actual acceptance
+contract**, not an expected-failure exemption: 18 supported exports emit decoded
+`ColumnsRow<...Column descriptors...>` instead of a flat object. `filterTenantActive`
+in `supported-types.ts` is the smallest existing corpus witness. Actual unmodified
+compiler output is in `../snapshots/corpus/supported-{5.8.3,5.5.4,7.0.2}.d.ts`.
+`bench-*.d.ts` are also actual emitted declarations, not expected-type substitutes.
+The **248 runtime-derived exact/not-any rows (48 supported + 200 bench)** and stale,
+descriptor-mismatch, inferred-widening and unreadability controls pass before that
+failure. Core repair requires renewed parent authorization; no production change
+was made. Consequently final wired `pnpm check:all` is red, and M3 is not accepted.
+
+`../corpus-coverage.json` is the per-example ledger, including missing symbols,
+scalar nullability, approved latest/cte changes, SQL-only SAMPLE and deferrals.
+Full v1 and all six universal gates remain incomplete. This is a type harness,
+not live execution/EXPLAIN proof of the new 200 compositions.
+
+### Measured performance policy and baseline
+
+Policy fixed before initialization: three sequential fresh official CLI processes
+per actual version and source/built path; maximum of three, with ceilings exactly
+50% above that maximum (instantiations rounded up). No incremental cache. OS caches
+are warm: this is cold **compiler process**, not cold machine. External wall time
+includes pnpm/CLI startup; build and version-resolution startup are excluded.
+TS check/total time and memory are retained separately in `budget.json`, with exact
+commands, input SHA256, Node/host and timestamp. Apple M3 Max / 36 GiB, Darwin arm64,
+Node v24.11.0. TS7 is its actual official CLI, not a compiler-API fallback.
+
+| Actual TS | Input | Instantiations | Instantiation ceiling | Max wall s | Wall ceiling s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 5.8.3 | built | 2,132,446 | 3,198,669 | 2.8270 | 4.2405 |
+| 5.8.3 | source | 2,709,599 | 4,064,399 | 3.1108 | 4.6663 |
+| 5.5.4 | built | 2,130,575 | 3,195,863 | 2.8125 | 4.2188 |
+| 5.5.4 | source | 2,707,502 | 4,061,253 | 3.1629 | 4.7443 |
+| 7.0.2 | built | 1,339,161 | 2,008,742 | 1.5018 | 2.2527 |
+| 7.0.2 | source | 1,543,292 | 2,314,938 | 1.5289 | 2.2933 |
+
+Initialization was explicit (`--initialize --self-test`), after successful complete
+compiles and rebuilt core. It refuses an existing budget. Normal invocation only
+compares: unknown versions, changed input hashes, missing metrics, timeout/compiler
+failure or excess ceilings fail closed. Never raise a future ceiling without an
+explicit reviewed rationale/approval; do not call a failed compile a baseline.
+The initial full normal comparison and three wired matrix performance phases passed.
+A final follow-up failed: unchanged default/built 2,132,446 instantiations, but
+wall times 8.716 / 14.118 / 4.264 s exceeded the unchanged 4.2405 s ceiling.
+Subsequent host load was 12.98 / 11.92 / 11.25 (Virtualization ~252% CPU); contention
+is plausible, not proven. See `/tmp/chql-m3-performance-final.log`. No retries to
+hide that result, no budget increase: final local performance status is red.
+
+The synthetic controls include missing metrics, unknown baseline, wall-only excess
+and tiny ceilings. A real run with `/tmp/chql-m3-tiny-budget.json` also failed with
+2,132,446 instantiations over its ceiling of 1. No budget was raised after testing.
+
+`--refresh` on the corpus script explicitly regenerates runtime snapshots, exact
+assertions and versioned **actual** declarations; it still fails unreadable output.
+Normal checks never regenerate. Deterministic bench generation has separate
+explicit `--refresh`, and normal mode verifies checked-in bytes.
+
+All prior suites were freshly run **before adding mandatory wiring** on default,
+5.5.4 and latest: 774 runtime + 7 codegen + 154 integration; 225 precise negatives;
+prior 500-case suites and actual 10M stream in each. Final wired matrices stop at
+the new readability failure, not at a regression in those prior suites. See TODO
+for exact logs and limitations. No hosted CI or full-v1 claim.
+
+## Historical stress repair — locally passing; full performance gate was open
 
 ## Repair evidence
 

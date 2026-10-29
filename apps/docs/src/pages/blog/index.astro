@@ -1,0 +1,10 @@
+---
+import { getCollection } from 'astro:content';
+import Site from '../../layouts/Site.astro';
+import { withBase } from '../../lib/urls';
+const posts = (await getCollection('blog', ({ data }) => !data.draft)).sort((a,b) => b.data.date.getTime() - a.data.date.getTime());
+---
+<Site title="Engineering notes" description="Design decisions, practical query composition, and implementation notes from chql.">
+  <section><p class="eyebrow">The chql blog</p><h1>Engineering notes.</h1><p>Small, inspectable steps toward better query composition.</p><a href={withBase('/blog/rss.xml')}>Subscribe via RSS</a></section>
+  {posts.map(post => <article class="panel"><p class="meta">{post.data.date.toISOString().slice(0,10)} · {post.data.author}</p><h2><a href={withBase(`/blog/${post.id}/`)}>{post.data.title}</a></h2><p>{post.data.description}</p><p>{post.data.tags.map(tag => <a href={withBase(`/blog/tags/${encodeURIComponent(tag)}/`)} style="margin-right: 1rem">#{tag}</a>)}</p></article>)}
+</Site>

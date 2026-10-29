@@ -82,7 +82,7 @@ describe('physical source-ordered demand', () => {
     const base = wide.map(r => ({ id: r.id, tenant: r.tenant }));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      for (const fence of [base.distinct(), unionAll(base, base), base.materialize()]) {
+      for (const fence of [base.distinct(), unionAll(base, base), base.cte()]) {
         const q = fence.map(r => ({ id: r.id }));
         expect(names(q.ir, fence.ir)).toEqual([['id'], ['tenant']]);
         expect(names(q.ir, wide.ir)).toEqual([['id'], ['tenant']]); metadata(q.ir);

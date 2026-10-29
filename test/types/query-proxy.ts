@@ -62,7 +62,13 @@ const rich = from(table('proxy_structural', {
   date: col.DateTime64(3, 'UTC'), precise: col.DateTime64(6),
   opaque: col.Unknown('FutureType'),
 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+// Table rows must already be fully decoded before any projection normalizes them.
+const richFiltered = rich.where(r => r.status.eq('open')).orderBy(r => r.decimal).limit(2);
+expectTypeOf<Infer<typeof richFiltered>>().toEqualTypeOf<Infer<typeof rich>>();
+expectTypeOf<Infer<typeof richFiltered>>().not.toBeAny();
 const richCopy = rich.map(r => ({ ...r })).map(r => ({ ...r }));
+expectTypeOf<Infer<typeof rich>>().toEqualTypeOf<Infer<typeof richCopy>>();
+expectTypeOf<Infer<typeof rich>>().not.toBeAny();
 expectTypeOf<Infer<typeof richCopy>>().toEqualTypeOf<{
   tuple: readonly [bigint, string | null];
   named: { nested: { price: Decimal<18, 4>; status: 'open' | 'closed' }[] };

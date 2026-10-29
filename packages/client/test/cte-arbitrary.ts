@@ -22,7 +22,7 @@ export function build(r: Recipe) {
   for (let i = 0; i < r.renames; i++) shared = shared.map(x => ({ renamed: x.id, amount: x.amount })).map(x => ({ id: x.renamed, amount: x.amount }));
   if (r.fence === 'distinct') shared = shared.distinct();
   if (r.fence === 'limit') shared = shared.orderBy(x => x.id).thenBy(x => x.amount).limit(r.take);
-  if (r.mode === 'hint') shared = shared.materialize();
+  if (r.mode === 'hint') shared = shared.cte();
   let q;
   if (r.mode === 'union' || r.mode === 'hint') q = unionAll(shared, shared, shared);
   else if (r.mode === 'scalar') {

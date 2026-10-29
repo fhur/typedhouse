@@ -12,5 +12,5 @@
     "types": [],
     "paths": { "@chql/core": ["../../../packages/core/dist/index.d.ts"] }
   },
-  "files": ["chain25.ts", "join10.ts"]
+  "files": ["queries.ts", "correspondence.ts", "chain25.ts", "join10.ts"]
 }

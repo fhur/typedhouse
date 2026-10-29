@@ -1,0 +1,46 @@
+---
+import { withBase } from '../lib/urls';
+const isDev = import.meta.env.DEV;
+---
+<div class="home-search" role="search" aria-label="Documentation">
+  <h2>Search the docs</h2>
+  {isDev ? (
+    <p>Search is available in the production build. <a href={withBase('/docs/getting-started/')}>Browse the docs →</a></p>
+  ) : (
+    <>
+      <link rel="stylesheet" href={withBase('/pagefind/pagefind-ui.css')} />
+      <div id="home-search" data-bundle-path={withBase('/pagefind/')}></div>
+      <script is:inline src={withBase('/pagefind/pagefind-ui.js')} defer></script>
+      <script is:inline>
+        window.addEventListener('DOMContentLoaded', () => {
+          if (!window.PagefindUI) {
+            document.getElementById('home-search').textContent = 'Search could not load. Use the Docs link to browse documentation.';
+            return;
+          }
+          new window.PagefindUI({
+            element: '#home-search',
+            bundlePath: document.getElementById('home-search').dataset.bundlePath,
+            showSubResults: true,
+            showImages: false,
+            translations: { placeholder: 'Search documentation…' },
+          });
+        });
+      </script>
+      <noscript><a href={withBase('/docs/getting-started/')}>Enable JavaScript to search, or browse the docs →</a></noscript>
+    </>
+  )}
+</div>
+<style>
+  .home-search {
+    margin-top: 2rem;
+    max-width: 42rem;
+    --pagefind-ui-primary: var(--chql-accent);
+    --pagefind-ui-text: var(--chql-text);
+    --pagefind-ui-background: var(--chql-surface);
+    --pagefind-ui-border: var(--chql-border);
+    --pagefind-ui-tag: var(--chql-surface-muted);
+    --pagefind-ui-font: var(--chql-font-sans);
+    --pagefind-ui-border-width: 1px;
+  }
+  h2 { font-size: 1rem; margin-bottom: 0.75rem; }
+</style>

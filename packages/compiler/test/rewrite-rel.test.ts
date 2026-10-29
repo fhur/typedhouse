@@ -68,7 +68,7 @@ it.each([false, true])('pushes independent predicates below expansion (left=%s)'
   expect(rewrite(expanded.where(r => r.part.eq('x')).ir).hits.PushFilterArrayJoin).toBe(0);
 });
 it('keeps all explicit fences and unused fallible projections', () => {
-  const fences = [q.orderBy(r => r.id), q.limit(1), q.distinct(), q.materialize()];
+  const fences = [q.orderBy(r => r.id), q.limit(1), q.distinct(), q.cte()];
   for (const fence of fences) { const root = fence.where(r => r.id.gt(1)).ir; expect(rewriteRel(root).root).toBe(root); }
 });
 it('does not move across computed projections, casts, aggregates or unsafe filters', () => {
@@ -182,7 +182,7 @@ it('pushes direct aggregate keys, splitting AND but retaining aggregate/mixed OR
   expect(rewrite(global.ir).root).toBe(global.ir);
 });
 it('replicates Union predicates per slot without crossing branch fences or merging Params', () => {
-  const branches = [q.limit(1), q.orderBy(r => r.id), q.distinct(), q.materialize()];
+  const branches = [q.limit(1), q.orderBy(r => r.id), q.distinct(), q.cte()];
   const p = val(1, col.UInt32), other = val(1, col.UInt32);
   const query = unionAll(branches[0]!, branches[1]!, ...branches.slice(2), branches[0]!).where(r => r.id.gt(p).and(r.id.ne(other)));
   const result = rewriteRel(query.ir);

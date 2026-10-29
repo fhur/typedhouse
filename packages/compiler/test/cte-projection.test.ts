@@ -7,7 +7,7 @@ afterEach(() => vi.restoreAllMocks());
 
 it('selects columns directly from a CTE without wrapping its reference', () => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  const input = from(events).where(r => r.tenant.eq('acme')).materialize();
+  const input = from(events).where(r => r.tenant.eq('acme')).cte();
   const query = input.map(r => ({ id: r.id }));
   const result = compile(query.ir);
   expect(result.sql).toBe('WITH `t0` AS (SELECT `id`, `tenant` FROM `events` WHERE `tenant` = {p0:String}) SELECT `t0`.`id` FROM `t0`');
@@ -17,7 +17,7 @@ it('selects columns directly from a CTE without wrapping its reference', () => {
 
 it('folds subsequent clauses and repeated selections while retaining the CTE boundary', () => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  const input = from(events).limit(10).materialize();
+  const input = from(events).limit(10).cte();
   const query = input.map(r => ({ id: r.id })).map(r => ({ id: r.id }))
     .where(r => r.id.gt(2)).orderBy(r => r.id.desc()).limit(3);
   const result = compile(query.ir);
@@ -28,7 +28,7 @@ it('folds subsequent clauses and repeated selections while retaining the CTE bou
 
 it('keeps renamed and computed projections in explicit scopes', () => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  const input = from(events).materialize();
+  const input = from(events).cte();
   for (const query of [input.map(r => ({ renamed: r.id })), input.map(r => ({ id: r.id.plus(1) }))]) {
     expect(compile(query.ir).sql).toContain(') AS `__chql_input`');
   }

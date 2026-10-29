@@ -1,0 +1,1103 @@
+{
+  "description": "20 domain input shapes x 10 nonliteral relational compositions; bounded supported corpus, not all spec examples",
+  "roots": [
+    {
+      "name": "componentPayload",
+      "expression": "components.where(forTenant('acme')).map(c => ({ entityId: c.entityId, category: c.category, parts: c.part_specifications, count: c.countOfParts }))"
+    },
+    {
+      "name": "partPayload",
+      "expression": "parts.where(forTenant('acme')).map(p => ({ entityId: p.entityId, category: p.partCategoryId, path: p.partCategoryPath, years: p.lifecycleYteol }))"
+    },
+    {
+      "name": "tupleExtraction",
+      "expression": "components.map(c => ({ entityId: c.entityId, mpns: c.part_specifications.element('mpn'), first: c.part_specifications.arrayElement(1).element('description') }))"
+    },
+    {
+      "name": "matchedParts",
+      "expression": "components.arrayJoin(c => c.matched_part_ids, 'partId').map(c => ({ entityId: c.entityId, partId: c.partId }))"
+    },
+    {
+      "name": "leftMatchedParts",
+      "expression": "components.leftArrayJoin(c => c.matched_part_ids, 'partId').map(c => ({ entityId: c.entityId, partId: c.partId, count: c.countOfParts }))"
+    },
+    {
+      "name": "componentPartJoin",
+      "expression": "join({ c: components.arrayJoin(c => c.matched_part_ids, 'partId'), p: parts }).on(r => [r.c.tenantId.eq(r.p.tenantId), r.c.partId.eq(r.p.entityId)]).map(r => ({ entityId: r.c.entityId, mpn: r.p.mpn, lifecycle: r.p.lifecycleStatus }))"
+    },
+    {
+      "name": "priceJoin",
+      "expression": "join({ c: components.arrayJoin(c => c.matched_part_ids, 'partId'), p: parts, m: latest(prices.final()) }).on(r => [r.c.tenantId.eq(r.p.tenantId), r.c.partId.eq(r.p.entityId), r.p.tenantId.eq(r.m.tenantId), r.p.entityId.eq(r.m.entityId)]).map(r => ({ entityId: r.c.entityId, price: r.m.market_unit_price_1k_p50 }))"
+    },
+    {
+      "name": "history",
+      "expression": "join({ c: components, a: availability.final().where(a => a.effectiveAt.between(new Date('2026-01-01'), new Date('2026-10-27'))) }).on(r => [r.c.tenantId.eq(r.a.tenantId), r.c.entityId.eq(r.a.entityId)]).map(r => ({ entityId: r.c.entityId, at: r.a.effectiveAt, stock: r.a.market_stock_total }))"
+    },
+    {
+      "name": "availabilityLatest",
+      "expression": "latest(availability.final()).map(r => ({ entityId: r.entityId, stock: r.market_stock_total, warnings: r.market_stock_total_warnings }))"
+    },
+    {
+      "name": "componentLatest",
+      "expression": "latest(cIndices.final()).map(r => ({ entityId: r.entityId, stock: r.stock_index, lead: r.lead_time_max_days }))"
+    },
+    {
+      "name": "partLatest",
+      "expression": "latest(pIndices.final()).map(r => ({ entityId: r.entityId, stock: r.stock_index, lead: r.lead_time_index_days.divide(r.lead_time_index_count) }))"
+    },
+    {
+      "name": "priceLatest",
+      "expression": "latest(prices.final()).map(r => ({ entityId: r.entityId, price: r.market_unit_price_1k_p50, warnings: r.market_unit_price_1k_p50_warnings }))"
+    },
+    {
+      "name": "argMaxLatest",
+      "expression": "cIndices.final().groupBy(r => ({ entityId: r.entityId })).aggregate(g => ({ stock: argMax(g.stock_index, g.version), lead: argMax(g.lead_time_max_days, g.version) }))"
+    },
+    {
+      "name": "weekly",
+      "expression": "availability.final().groupBy(r => ({ entityId: r.entityId, week: r.effectiveAt.toStartOfWeek() })).aggregate(g => ({ mean: avg(g.market_stock_total), median: quantile(0.5)(g.market_lead_time_p50_days) }))"
+    },
+    {
+      "name": "versionTotals",
+      "expression": "cIndices.final().groupBy(r => ({ entityId: r.entityId })).aggregate(g => ({ versions: sum(g.version), stock: sum(g.stock_index), warned: countIf(g.stock_index_warnings.notEmpty()) }))"
+    },
+    {
+      "name": "scalarShare",
+      "expression": "availability.map(r => ({ entityId: r.entityId, share: r.market_stock_total.divide(scalar(availability.aggregate(g => sum(g.market_stock_total)))) }))"
+    },
+    {
+      "name": "membership",
+      "expression": "components.where(c => c.entityId.in(cIndices.where(i => i.stock_index.lt(0.5)).map(i => i.entityId))).map(c => ({ entityId: c.entityId, count: c.countOfParts }))"
+    },
+    {
+      "name": "entityUnion",
+      "expression": "unionAll(components.map(c => ({ entityId: c.entityId, category: c.category })), parts.map(p => ({ entityId: p.entityId, category: p.partCategoryName })))"
+    },
+    {
+      "name": "manufacturerStock",
+      "expression": "join({ p: parts, i: latest(pIndices.final()) }).on(r => [r.p.tenantId.eq(r.i.tenantId), r.p.entityId.eq(r.i.entityId)]).groupBy(r => ({ entityId: r.p.manufacturerId })).aggregate(g => ({ stock: sum(g.i.stock_index), parts: count(), eol: countIf(g.p.lifecycleStatus.in(['EOL', 'Obsolete'])) }))"
+    },
+    {
+      "name": "categoryStock",
+      "expression": "join({ c: components, i: latest(cIndices.final()) }).on(r => [r.c.tenantId.eq(r.i.tenantId), r.c.entityId.eq(r.i.entityId)]).groupBy(r => ({ entityId: r.c.category.ifNull('uncategorised') })).aggregate(g => ({ stock: sum(g.i.stock_index), entities: uniq(g.c.entityId), price: exp(sum(g.i.price_change_log_sum).divide(sum(g.i.price_change_count))) }))"
+    }
+  ],
+  "topologies": [
+    "project",
+    "distinctFilter",
+    "orderedPage",
+    "groupCount",
+    "semiJoin",
+    "repeatedUnion",
+    "sharedCte",
+    "entityEnrichment",
+    "arrayEnrichment",
+    "rollupShare"
+  ],
+  "queries": [
+    {
+      "name": "componentPayload_project",
+      "root": "componentPayload",
+      "topology": "project"
+    },
+    {
+      "name": "componentPayload_distinctFilter",
+      "root": "componentPayload",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "componentPayload_orderedPage",
+      "root": "componentPayload",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "componentPayload_groupCount",
+      "root": "componentPayload",
+      "topology": "groupCount"
+    },
+    {
+      "name": "componentPayload_semiJoin",
+      "root": "componentPayload",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "componentPayload_repeatedUnion",
+      "root": "componentPayload",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "componentPayload_sharedCte",
+      "root": "componentPayload",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "componentPayload_entityEnrichment",
+      "root": "componentPayload",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "componentPayload_arrayEnrichment",
+      "root": "componentPayload",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "componentPayload_rollupShare",
+      "root": "componentPayload",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "partPayload_project",
+      "root": "partPayload",
+      "topology": "project"
+    },
+    {
+      "name": "partPayload_distinctFilter",
+      "root": "partPayload",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "partPayload_orderedPage",
+      "root": "partPayload",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "partPayload_groupCount",
+      "root": "partPayload",
+      "topology": "groupCount"
+    },
+    {
+      "name": "partPayload_semiJoin",
+      "root": "partPayload",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "partPayload_repeatedUnion",
+      "root": "partPayload",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "partPayload_sharedCte",
+      "root": "partPayload",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "partPayload_entityEnrichment",
+      "root": "partPayload",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "partPayload_arrayEnrichment",
+      "root": "partPayload",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "partPayload_rollupShare",
+      "root": "partPayload",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "tupleExtraction_project",
+      "root": "tupleExtraction",
+      "topology": "project"
+    },
+    {
+      "name": "tupleExtraction_distinctFilter",
+      "root": "tupleExtraction",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "tupleExtraction_orderedPage",
+      "root": "tupleExtraction",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "tupleExtraction_groupCount",
+      "root": "tupleExtraction",
+      "topology": "groupCount"
+    },
+    {
+      "name": "tupleExtraction_semiJoin",
+      "root": "tupleExtraction",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "tupleExtraction_repeatedUnion",
+      "root": "tupleExtraction",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "tupleExtraction_sharedCte",
+      "root": "tupleExtraction",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "tupleExtraction_entityEnrichment",
+      "root": "tupleExtraction",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "tupleExtraction_arrayEnrichment",
+      "root": "tupleExtraction",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "tupleExtraction_rollupShare",
+      "root": "tupleExtraction",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "matchedParts_project",
+      "root": "matchedParts",
+      "topology": "project"
+    },
+    {
+      "name": "matchedParts_distinctFilter",
+      "root": "matchedParts",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "matchedParts_orderedPage",
+      "root": "matchedParts",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "matchedParts_groupCount",
+      "root": "matchedParts",
+      "topology": "groupCount"
+    },
+    {
+      "name": "matchedParts_semiJoin",
+      "root": "matchedParts",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "matchedParts_repeatedUnion",
+      "root": "matchedParts",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "matchedParts_sharedCte",
+      "root": "matchedParts",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "matchedParts_entityEnrichment",
+      "root": "matchedParts",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "matchedParts_arrayEnrichment",
+      "root": "matchedParts",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "matchedParts_rollupShare",
+      "root": "matchedParts",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "leftMatchedParts_project",
+      "root": "leftMatchedParts",
+      "topology": "project"
+    },
+    {
+      "name": "leftMatchedParts_distinctFilter",
+      "root": "leftMatchedParts",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "leftMatchedParts_orderedPage",
+      "root": "leftMatchedParts",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "leftMatchedParts_groupCount",
+      "root": "leftMatchedParts",
+      "topology": "groupCount"
+    },
+    {
+      "name": "leftMatchedParts_semiJoin",
+      "root": "leftMatchedParts",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "leftMatchedParts_repeatedUnion",
+      "root": "leftMatchedParts",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "leftMatchedParts_sharedCte",
+      "root": "leftMatchedParts",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "leftMatchedParts_entityEnrichment",
+      "root": "leftMatchedParts",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "leftMatchedParts_arrayEnrichment",
+      "root": "leftMatchedParts",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "leftMatchedParts_rollupShare",
+      "root": "leftMatchedParts",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "componentPartJoin_project",
+      "root": "componentPartJoin",
+      "topology": "project"
+    },
+    {
+      "name": "componentPartJoin_distinctFilter",
+      "root": "componentPartJoin",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "componentPartJoin_orderedPage",
+      "root": "componentPartJoin",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "componentPartJoin_groupCount",
+      "root": "componentPartJoin",
+      "topology": "groupCount"
+    },
+    {
+      "name": "componentPartJoin_semiJoin",
+      "root": "componentPartJoin",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "componentPartJoin_repeatedUnion",
+      "root": "componentPartJoin",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "componentPartJoin_sharedCte",
+      "root": "componentPartJoin",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "componentPartJoin_entityEnrichment",
+      "root": "componentPartJoin",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "componentPartJoin_arrayEnrichment",
+      "root": "componentPartJoin",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "componentPartJoin_rollupShare",
+      "root": "componentPartJoin",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "priceJoin_project",
+      "root": "priceJoin",
+      "topology": "project"
+    },
+    {
+      "name": "priceJoin_distinctFilter",
+      "root": "priceJoin",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "priceJoin_orderedPage",
+      "root": "priceJoin",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "priceJoin_groupCount",
+      "root": "priceJoin",
+      "topology": "groupCount"
+    },
+    {
+      "name": "priceJoin_semiJoin",
+      "root": "priceJoin",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "priceJoin_repeatedUnion",
+      "root": "priceJoin",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "priceJoin_sharedCte",
+      "root": "priceJoin",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "priceJoin_entityEnrichment",
+      "root": "priceJoin",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "priceJoin_arrayEnrichment",
+      "root": "priceJoin",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "priceJoin_rollupShare",
+      "root": "priceJoin",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "history_project",
+      "root": "history",
+      "topology": "project"
+    },
+    {
+      "name": "history_distinctFilter",
+      "root": "history",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "history_orderedPage",
+      "root": "history",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "history_groupCount",
+      "root": "history",
+      "topology": "groupCount"
+    },
+    {
+      "name": "history_semiJoin",
+      "root": "history",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "history_repeatedUnion",
+      "root": "history",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "history_sharedCte",
+      "root": "history",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "history_entityEnrichment",
+      "root": "history",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "history_arrayEnrichment",
+      "root": "history",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "history_rollupShare",
+      "root": "history",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "availabilityLatest_project",
+      "root": "availabilityLatest",
+      "topology": "project"
+    },
+    {
+      "name": "availabilityLatest_distinctFilter",
+      "root": "availabilityLatest",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "availabilityLatest_orderedPage",
+      "root": "availabilityLatest",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "availabilityLatest_groupCount",
+      "root": "availabilityLatest",
+      "topology": "groupCount"
+    },
+    {
+      "name": "availabilityLatest_semiJoin",
+      "root": "availabilityLatest",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "availabilityLatest_repeatedUnion",
+      "root": "availabilityLatest",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "availabilityLatest_sharedCte",
+      "root": "availabilityLatest",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "availabilityLatest_entityEnrichment",
+      "root": "availabilityLatest",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "availabilityLatest_arrayEnrichment",
+      "root": "availabilityLatest",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "availabilityLatest_rollupShare",
+      "root": "availabilityLatest",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "componentLatest_project",
+      "root": "componentLatest",
+      "topology": "project"
+    },
+    {
+      "name": "componentLatest_distinctFilter",
+      "root": "componentLatest",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "componentLatest_orderedPage",
+      "root": "componentLatest",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "componentLatest_groupCount",
+      "root": "componentLatest",
+      "topology": "groupCount"
+    },
+    {
+      "name": "componentLatest_semiJoin",
+      "root": "componentLatest",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "componentLatest_repeatedUnion",
+      "root": "componentLatest",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "componentLatest_sharedCte",
+      "root": "componentLatest",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "componentLatest_entityEnrichment",
+      "root": "componentLatest",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "componentLatest_arrayEnrichment",
+      "root": "componentLatest",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "componentLatest_rollupShare",
+      "root": "componentLatest",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "partLatest_project",
+      "root": "partLatest",
+      "topology": "project"
+    },
+    {
+      "name": "partLatest_distinctFilter",
+      "root": "partLatest",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "partLatest_orderedPage",
+      "root": "partLatest",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "partLatest_groupCount",
+      "root": "partLatest",
+      "topology": "groupCount"
+    },
+    {
+      "name": "partLatest_semiJoin",
+      "root": "partLatest",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "partLatest_repeatedUnion",
+      "root": "partLatest",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "partLatest_sharedCte",
+      "root": "partLatest",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "partLatest_entityEnrichment",
+      "root": "partLatest",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "partLatest_arrayEnrichment",
+      "root": "partLatest",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "partLatest_rollupShare",
+      "root": "partLatest",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "priceLatest_project",
+      "root": "priceLatest",
+      "topology": "project"
+    },
+    {
+      "name": "priceLatest_distinctFilter",
+      "root": "priceLatest",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "priceLatest_orderedPage",
+      "root": "priceLatest",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "priceLatest_groupCount",
+      "root": "priceLatest",
+      "topology": "groupCount"
+    },
+    {
+      "name": "priceLatest_semiJoin",
+      "root": "priceLatest",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "priceLatest_repeatedUnion",
+      "root": "priceLatest",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "priceLatest_sharedCte",
+      "root": "priceLatest",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "priceLatest_entityEnrichment",
+      "root": "priceLatest",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "priceLatest_arrayEnrichment",
+      "root": "priceLatest",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "priceLatest_rollupShare",
+      "root": "priceLatest",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "argMaxLatest_project",
+      "root": "argMaxLatest",
+      "topology": "project"
+    },
+    {
+      "name": "argMaxLatest_distinctFilter",
+      "root": "argMaxLatest",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "argMaxLatest_orderedPage",
+      "root": "argMaxLatest",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "argMaxLatest_groupCount",
+      "root": "argMaxLatest",
+      "topology": "groupCount"
+    },
+    {
+      "name": "argMaxLatest_semiJoin",
+      "root": "argMaxLatest",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "argMaxLatest_repeatedUnion",
+      "root": "argMaxLatest",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "argMaxLatest_sharedCte",
+      "root": "argMaxLatest",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "argMaxLatest_entityEnrichment",
+      "root": "argMaxLatest",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "argMaxLatest_arrayEnrichment",
+      "root": "argMaxLatest",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "argMaxLatest_rollupShare",
+      "root": "argMaxLatest",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "weekly_project",
+      "root": "weekly",
+      "topology": "project"
+    },
+    {
+      "name": "weekly_distinctFilter",
+      "root": "weekly",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "weekly_orderedPage",
+      "root": "weekly",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "weekly_groupCount",
+      "root": "weekly",
+      "topology": "groupCount"
+    },
+    {
+      "name": "weekly_semiJoin",
+      "root": "weekly",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "weekly_repeatedUnion",
+      "root": "weekly",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "weekly_sharedCte",
+      "root": "weekly",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "weekly_entityEnrichment",
+      "root": "weekly",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "weekly_arrayEnrichment",
+      "root": "weekly",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "weekly_rollupShare",
+      "root": "weekly",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "versionTotals_project",
+      "root": "versionTotals",
+      "topology": "project"
+    },
+    {
+      "name": "versionTotals_distinctFilter",
+      "root": "versionTotals",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "versionTotals_orderedPage",
+      "root": "versionTotals",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "versionTotals_groupCount",
+      "root": "versionTotals",
+      "topology": "groupCount"
+    },
+    {
+      "name": "versionTotals_semiJoin",
+      "root": "versionTotals",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "versionTotals_repeatedUnion",
+      "root": "versionTotals",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "versionTotals_sharedCte",
+      "root": "versionTotals",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "versionTotals_entityEnrichment",
+      "root": "versionTotals",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "versionTotals_arrayEnrichment",
+      "root": "versionTotals",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "versionTotals_rollupShare",
+      "root": "versionTotals",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "scalarShare_project",
+      "root": "scalarShare",
+      "topology": "project"
+    },
+    {
+      "name": "scalarShare_distinctFilter",
+      "root": "scalarShare",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "scalarShare_orderedPage",
+      "root": "scalarShare",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "scalarShare_groupCount",
+      "root": "scalarShare",
+      "topology": "groupCount"
+    },
+    {
+      "name": "scalarShare_semiJoin",
+      "root": "scalarShare",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "scalarShare_repeatedUnion",
+      "root": "scalarShare",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "scalarShare_sharedCte",
+      "root": "scalarShare",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "scalarShare_entityEnrichment",
+      "root": "scalarShare",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "scalarShare_arrayEnrichment",
+      "root": "scalarShare",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "scalarShare_rollupShare",
+      "root": "scalarShare",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "membership_project",
+      "root": "membership",
+      "topology": "project"
+    },
+    {
+      "name": "membership_distinctFilter",
+      "root": "membership",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "membership_orderedPage",
+      "root": "membership",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "membership_groupCount",
+      "root": "membership",
+      "topology": "groupCount"
+    },
+    {
+      "name": "membership_semiJoin",
+      "root": "membership",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "membership_repeatedUnion",
+      "root": "membership",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "membership_sharedCte",
+      "root": "membership",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "membership_entityEnrichment",
+      "root": "membership",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "membership_arrayEnrichment",
+      "root": "membership",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "membership_rollupShare",
+      "root": "membership",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "entityUnion_project",
+      "root": "entityUnion",
+      "topology": "project"
+    },
+    {
+      "name": "entityUnion_distinctFilter",
+      "root": "entityUnion",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "entityUnion_orderedPage",
+      "root": "entityUnion",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "entityUnion_groupCount",
+      "root": "entityUnion",
+      "topology": "groupCount"
+    },
+    {
+      "name": "entityUnion_semiJoin",
+      "root": "entityUnion",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "entityUnion_repeatedUnion",
+      "root": "entityUnion",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "entityUnion_sharedCte",
+      "root": "entityUnion",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "entityUnion_entityEnrichment",
+      "root": "entityUnion",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "entityUnion_arrayEnrichment",
+      "root": "entityUnion",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "entityUnion_rollupShare",
+      "root": "entityUnion",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "manufacturerStock_project",
+      "root": "manufacturerStock",
+      "topology": "project"
+    },
+    {
+      "name": "manufacturerStock_distinctFilter",
+      "root": "manufacturerStock",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "manufacturerStock_orderedPage",
+      "root": "manufacturerStock",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "manufacturerStock_groupCount",
+      "root": "manufacturerStock",
+      "topology": "groupCount"
+    },
+    {
+      "name": "manufacturerStock_semiJoin",
+      "root": "manufacturerStock",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "manufacturerStock_repeatedUnion",
+      "root": "manufacturerStock",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "manufacturerStock_sharedCte",
+      "root": "manufacturerStock",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "manufacturerStock_entityEnrichment",
+      "root": "manufacturerStock",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "manufacturerStock_arrayEnrichment",
+      "root": "manufacturerStock",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "manufacturerStock_rollupShare",
+      "root": "manufacturerStock",
+      "topology": "rollupShare"
+    },
+    {
+      "name": "categoryStock_project",
+      "root": "categoryStock",
+      "topology": "project"
+    },
+    {
+      "name": "categoryStock_distinctFilter",
+      "root": "categoryStock",
+      "topology": "distinctFilter"
+    },
+    {
+      "name": "categoryStock_orderedPage",
+      "root": "categoryStock",
+      "topology": "orderedPage"
+    },
+    {
+      "name": "categoryStock_groupCount",
+      "root": "categoryStock",
+      "topology": "groupCount"
+    },
+    {
+      "name": "categoryStock_semiJoin",
+      "root": "categoryStock",
+      "topology": "semiJoin"
+    },
+    {
+      "name": "categoryStock_repeatedUnion",
+      "root": "categoryStock",
+      "topology": "repeatedUnion"
+    },
+    {
+      "name": "categoryStock_sharedCte",
+      "root": "categoryStock",
+      "topology": "sharedCte"
+    },
+    {
+      "name": "categoryStock_entityEnrichment",
+      "root": "categoryStock",
+      "topology": "entityEnrichment"
+    },
+    {
+      "name": "categoryStock_arrayEnrichment",
+      "root": "categoryStock",
+      "topology": "arrayEnrichment"
+    },
+    {
+      "name": "categoryStock_rollupShare",
+      "root": "categoryStock",
+      "topology": "rollupShare"
+    }
+  ],
+  "stress": [
+    "chain25.ts",
+    "join10.ts"
+  ]
+}

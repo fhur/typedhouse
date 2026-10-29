@@ -21,17 +21,17 @@ export function emitNaive(root: Rel): CompiledQuery {
 }
 
 /** Transitional validation adapter: reuse the reference backend's complete checks.
- * Its SQL is discarded; warnings belong only to the final emission stage.
+ * Its SQL is discarded.
  */
 export function validateRel(root: Rel): CompiledQuery {
-  return emitQuery(root, undefined, false);
+  return emitQuery(root);
 }
 
 export function emitPlanned(plan: SqlPlan): CompiledQuery {
   return emitQuery(plan.root, plan);
 }
 
-function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
+function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
   // Planned emission follows validateRel; preflight once per public compilation.
   if (!plan) validateStructure(root);
   const rendered = new Map<Rel, string>();
@@ -41,7 +41,6 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
   const nodes: Record<string, Rel> = Object.create(null) as Record<string, Rel>;
   const assigned = new Map<ExprNode, { name: string; type: CHType }>();
   const active = new Set<Rel>();
-  const materialized = new Set<Rel>();
   let cteIndex = 0;
   let weekBucketing = false;
   let dateMembership = false;
@@ -446,12 +445,11 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
           if (JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(inputLeaves.map(l => [l.path, print(l.type)]))) return fail('invalid_output', rel, path);
           const source = emit(rel.input, `${path}.input`);
           if (rel.kind === 'Materialize') {
-            if (plan?.ctes) { materialized.add(rel); return source; }
+            if (plan?.ctes) return source;
             // The local WITH is visible throughout its input. Avoid every quoted
             // identifier in that subtree, including physical tables and nested CTEs.
             let name: string;
             do { name = quoteIdentifier(`t${cteIndex++}`); } while (source.includes(name) || order.some(k => quoteIdentifier(k) === name));
-            materialized.add(rel);
             return `WITH ${name} AS (${source}) SELECT ${order.map(k => `${name}.${quoteIdentifier(k)}`).join(', ')} FROM ${name}`;
           }
           if (rel.kind === 'Distinct') return `SELECT DISTINCT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias}`;
@@ -501,8 +499,6 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     ...(dateMembership ? ['transform_null_in = 0'] : []),
   ];
   const sql = body + (settings.length ? ` SETTINGS ${settings.join(', ')}` : '');
-  // Warn only after successful validation, once per distinct hint per compile.
-  if (warn) for (const _rel of materialized) console.warn('chql: materialization is not yet implemented; materialize() emits an ordinary CTE, which ClickHouse may inline and evaluate repeatedly.');
   const leaves = outputLeaves(root.output);
   return Object.freeze({ sql, params: Object.freeze(params), parameterTypes: Object.freeze(parameterTypes), columns: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, l.type]))), ...(root.output.shape === 'nested' ? { columnPaths: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, Object.freeze(l.path)]))) } : {}), nodes: Object.freeze(nodes) });
 }

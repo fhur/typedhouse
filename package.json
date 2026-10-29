@@ -11,6 +11,10 @@
     "test:compiler-integration": "vitest run --config vitest.compiler.config.ts",
     "generate:expr-surface": "tsup scripts/gen-expr-methods.ts --format esm --out-dir node_modules/.cache/chql-expr && node node_modules/.cache/chql-expr/gen-expr-methods.js",
     "verify:expr-surface": "pnpm generate:expr-surface --check && node scripts/verify-expr-surface.mjs && node scripts/check-type-diagnostics.mjs",
+    "docs:dev": "pnpm --filter @chql/docs dev",
+    "docs:build": "pnpm --filter @chql/docs build",
+    "docs:check": "pnpm --filter @chql/docs check",
+    "docs:verify": "pnpm docs:check && pnpm --filter @chql/docs test:example-format && pnpm --filter @chql/docs test:compiler-examples && pnpm --filter @chql/docs test:query-builder-examples && pnpm --filter @chql/docs test:function-examples && pnpm --filter @chql/docs test:playground && pnpm docs:build && pnpm --filter @chql/docs test:site && pnpm --filter @chql/docs test:browser",
     "build": "pnpm -r build",
     "example:first-query": "pnpm build && node scripts/run-first-query.mjs",
     "verify:query-package": "node scripts/verify-query-package.mjs",
@@ -20,13 +24,13 @@
     "verify:core-package": "node scripts/verify-core-package.mjs",
     "test:codegen-integration": "vitest run --config vitest.codegen.config.ts",
     "verify:codegen-package": "node scripts/verify-codegen-package.mjs",
-    "check:all": "pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm verify:query-package && pnpm verify:expr-surface && pnpm test:codegen-integration && pnpm verify:codegen-package && pnpm verify:fixture-seed && pnpm test:compiler-integration"
+    "check:all": "node scripts/test-testcontainers-port-patch.mjs && node scripts/smoke-testcontainers-port-patch.mjs && pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm verify:query-package && pnpm verify:expr-surface && pnpm test:codegen-integration && pnpm verify:codegen-package && pnpm verify:fixture-seed && pnpm test:compiler-integration"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "expect-type": "^1.2.1",
     "fast-check": "^4.1.1",
-    "testcontainers": "^10.25.0",
+    "testcontainers": "10.28.0",
     "tsup": "^8.4.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.3"

@@ -4,6 +4,11 @@ coverage/
 *.tsbuildinfo
 .env
 .env.*
+# Ignore local credentials at every directory depth.
+.env.local
 !.env.example
 .pi/
 .worktrees/
+
+# Local proprietary application; never commit its contents.
+/apps/playground/

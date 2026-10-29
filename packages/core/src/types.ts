@@ -47,4 +47,7 @@ export type TupleValue<C extends Readonly<Record<string, Column>> | readonly Col
 /** Ordered entries retain SQL tuple positions while inferring a named decoded object. */
 export type NamedTupleValue<C extends readonly (readonly [string, Column])[]> =
   C extends readonly [] ? readonly [] : { [E in C[number] as E[0]]: Value<E[1]> };
-export type ColumnsRow<C extends Record<string, Column>> = { -readonly [K in keyof C]: Value<C[K]> };
+/** Reify the decoded object at the table boundary instead of retaining the
+ * descriptor-bearing alias in inferred public query declarations. The empty
+ * intersection changes representation only: the mapped result is an object. */
+export type ColumnsRow<C extends Record<string, Column>> = { -readonly [K in keyof C]: Value<C[K]> } & {};

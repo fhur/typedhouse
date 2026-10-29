@@ -1,0 +1,270 @@
+{
+  "policy": "Three sequential fresh official CLI processes per version/input, no incremental state; maximum of three; initial ceilings = maximum * 1.5 (instantiations rounded up). Wall includes pnpm/CLI startup, excludes builds and version resolution. Warm OS caches, not cold machine.",
+  "inputHash": "e31f5753e8bd70b52ea569623ce9cb24e2601411dde32adace40764a57bb5a50",
+  "inputs": [
+    "scripts/generate-type-bench.mjs",
+    "scripts/generate-type-stress.mjs",
+    "test/types/bench/queries.ts",
+    "test/types/bench/correspondence.ts",
+    "test/types/bench/chain25.ts",
+    "test/types/bench/join10.ts",
+    "test/types/bench/manifest.json",
+    "test/types/bench/tsconfig.json",
+    "test/types/bench/tsconfig.source.json",
+    "test/types/snapshots/corpus/rows.d.ts",
+    "packages/compiler/test/fixtures/corpus/low-stock.ts"
+  ],
+  "recordedAt": "2026-10-29T14:44:49.981Z",
+  "host": {
+    "cpu": "Apple M3 Max",
+    "memoryBytes": 38654705664,
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "23.6.0",
+    "node": "v24.11.0"
+  },
+  "baselines": {
+    "5.8.3/built": {
+      "instantiations": 3198669,
+      "wallSeconds": 4.240484625000001,
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "-p",
+        "test/types/bench/tsconfig.json",
+        "--extendedDiagnostics",
+        "--pretty",
+        "false",
+        "--incremental",
+        "false"
+      ],
+      "runs": [
+        {
+          "instantiations": 2132446,
+          "checkSeconds": 2.39,
+          "totalSeconds": 2.54,
+          "memoryKiB": 463454,
+          "wallSeconds": 2.819995209
+        },
+        {
+          "instantiations": 2132446,
+          "checkSeconds": 2.36,
+          "totalSeconds": 2.51,
+          "memoryKiB": 458811,
+          "wallSeconds": 2.786026084
+        },
+        {
+          "instantiations": 2132446,
+          "checkSeconds": 2.4,
+          "totalSeconds": 2.55,
+          "memoryKiB": 458552,
+          "wallSeconds": 2.8269897500000005
+        }
+      ]
+    },
+    "5.8.3/source": {
+      "instantiations": 4064399,
+      "wallSeconds": 4.6662739994999995,
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "-p",
+        "test/types/bench/tsconfig.source.json",
+        "--extendedDiagnostics",
+        "--pretty",
+        "false",
+        "--incremental",
+        "false"
+      ],
+      "runs": [
+        {
+          "instantiations": 2709599,
+          "checkSeconds": 2.66,
+          "totalSeconds": 2.84,
+          "memoryKiB": 507015,
+          "wallSeconds": 3.110849333
+        },
+        {
+          "instantiations": 2709599,
+          "checkSeconds": 2.64,
+          "totalSeconds": 2.81,
+          "memoryKiB": 457907,
+          "wallSeconds": 3.0823183329999995
+        },
+        {
+          "instantiations": 2709599,
+          "checkSeconds": 2.62,
+          "totalSeconds": 2.8,
+          "memoryKiB": 510644,
+          "wallSeconds": 3.079078374999999
+        }
+      ]
+    },
+    "5.5.4/built": {
+      "instantiations": 3195863,
+      "wallSeconds": 4.2187835625000005,
+      "command": [
+        "pnpm",
+        "--package",
+        "typescript@5.5.4",
+        "dlx",
+        "tsc",
+        "-p",
+        "test/types/bench/tsconfig.json",
+        "--extendedDiagnostics",
+        "--pretty",
+        "false",
+        "--incremental",
+        "false"
+      ],
+      "runs": [
+        {
+          "instantiations": 2130575,
+          "checkSeconds": 2.32,
+          "totalSeconds": 2.47,
+          "memoryKiB": 438242,
+          "wallSeconds": 2.8012174169999997
+        },
+        {
+          "instantiations": 2130575,
+          "checkSeconds": 2.33,
+          "totalSeconds": 2.48,
+          "memoryKiB": 437391,
+          "wallSeconds": 2.809943542000001
+        },
+        {
+          "instantiations": 2130575,
+          "checkSeconds": 2.34,
+          "totalSeconds": 2.49,
+          "memoryKiB": 438828,
+          "wallSeconds": 2.8125223750000004
+        }
+      ]
+    },
+    "5.5.4/source": {
+      "instantiations": 4061253,
+      "wallSeconds": 4.744343750999999,
+      "command": [
+        "pnpm",
+        "--package",
+        "typescript@5.5.4",
+        "dlx",
+        "tsc",
+        "-p",
+        "test/types/bench/tsconfig.source.json",
+        "--extendedDiagnostics",
+        "--pretty",
+        "false",
+        "--incremental",
+        "false"
+      ],
+      "runs": [
+        {
+          "instantiations": 2707502,
+          "checkSeconds": 2.66,
+          "totalSeconds": 2.83,
+          "memoryKiB": 474339,
+          "wallSeconds": 3.162895833999999
+        },
+        {
+          "instantiations": 2707502,
+          "checkSeconds": 2.56,
+          "totalSeconds": 2.73,
+          "memoryKiB": 444699,
+          "wallSeconds": 3.0512473750000026
+        },
+        {
+          "instantiations": 2707502,
+          "checkSeconds": 2.62,
+          "totalSeconds": 2.78,
+          "memoryKiB": 474679,
+          "wallSeconds": 3.113016499999998
+        }
+      ]
+    },
+    "7.0.2/built": {
+      "instantiations": 2008742,
+      "wallSeconds": 2.2526832494999978,
+      "command": [
+        "pnpm",
+        "--package",
+        "typescript@latest",
+        "dlx",
+        "tsc",
+        "-p",
+        "test/types/bench/tsconfig.json",
+        "--extendedDiagnostics",
+        "--pretty",
+        "false",
+        "--incremental",
+        "false"
+      ],
+      "runs": [
+        {
+          "instantiations": 1339161,
+          "checkSeconds": 0.74,
+          "totalSeconds": 0.771,
+          "memoryKiB": 412118,
+          "wallSeconds": 1.423952790999996
+        },
+        {
+          "instantiations": 1339161,
+          "checkSeconds": 0.743,
+          "totalSeconds": 0.773,
+          "memoryKiB": 411876,
+          "wallSeconds": 1.416339792000006
+        },
+        {
+          "instantiations": 1339161,
+          "checkSeconds": 0.696,
+          "totalSeconds": 0.719,
+          "memoryKiB": 412179,
+          "wallSeconds": 1.5017888329999987
+        }
+      ]
+    },
+    "7.0.2/source": {
+      "instantiations": 2314938,
+      "wallSeconds": 2.2933246875000006,
+      "command": [
+        "pnpm",
+        "--package",
+        "typescript@latest",
+        "dlx",
+        "tsc",
+        "-p",
+        "test/types/bench/tsconfig.source.json",
+        "--extendedDiagnostics",
+        "--pretty",
+        "false",
+        "--incremental",
+        "false"
+      ],
+      "runs": [
+        {
+          "instantiations": 1543292,
+          "checkSeconds": 0.72,
+          "totalSeconds": 0.743,
+          "memoryKiB": 445381,
+          "wallSeconds": 1.3783952080000017
+        },
+        {
+          "instantiations": 1543292,
+          "checkSeconds": 0.708,
+          "totalSeconds": 0.73,
+          "memoryKiB": 445312,
+          "wallSeconds": 1.5288831250000003
+        },
+        {
+          "instantiations": 1543292,
+          "checkSeconds": 0.727,
+          "totalSeconds": 0.749,
+          "memoryKiB": 445346,
+          "wallSeconds": 1.3820286669999986
+        }
+      ]
+    }
+  }
+}

@@ -84,14 +84,14 @@ describe('identity CTE planning', () => {
     expect(out.nodes).toEqual(emitNaive(q.ir).nodes);
     expect(compile(q.ir)).toEqual(out);
   });
-  it('unifies nested explicit hints, retaining full interfaces and once-per-hint warnings', () => {
+  it('unifies nested explicit hints, retaining full interfaces without warnings', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const hint = source.materialize(), outer = unionAll(hint, hint).materialize();
+      const hint = source.cte(), outer = unionAll(hint, hint).cte();
       const q = crossJoin({ a: outer, b: outer }).map(r => r.a.id);
       const out = compile(q.ir);
       expect(definitions(out.sql)).toEqual(['t0', 't1']);
-      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).not.toHaveBeenCalled();
       expect(out.sql).toContain('`unused`');
       expect(out.sql.match(/WITH/g)).toHaveLength(1);
     } finally { warn.mockRestore(); }
@@ -107,7 +107,7 @@ describe('identity CTE planning', () => {
     const bad = source.map(() => source.final().row.id);
     expect(() => compile(crossJoin({ a: bad, b: bad }).ir)).toThrow(/unbound_column.*root.inputs\[0\].exprs.id/);
     const total = source.aggregate(g => sum(g.amount));
-    expect(() => scalarDescriptor(total.materialize().ir)).toThrow();
+    expect(() => scalarDescriptor(total.cte().ir)).toThrow();
   });
   it('keeps settings from shared definitions and ignores unattached Params', () => {
     const dates = from(table('dates', { at: col.Date }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
@@ -125,7 +125,7 @@ describe('identity CTE planning', () => {
   it('preserves correlated-capture errors in shared scalar scopes without partial hint warnings', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const hinted = source.materialize();
+      const hinted = source.cte();
       const captured = source.where(() => hinted.row.id.eq('a')).aggregate(() => count());
       const s = scalar(captured);
       const q = hinted.map(() => ({ first: s, second: s }));

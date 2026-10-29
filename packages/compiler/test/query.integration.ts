@@ -843,8 +843,8 @@ it('adversarial cast composition preserves shared hostile Params through union, 
   const shared = val(hostile, col.String);
   const source = from(db.entity_ots_component).orderBy(r => r.entityId).limit(1);
   const branch = source.map(() => ({ values: val([0, 2, 2], col.Array(col.UInt32)), text: cast(shared, col.String) })).arrayJoin(r => r.values, 'item')
-    .map(r => ({ value: cast(r.item, col.Float64), text: r.text })).orderBy(r => r.value).materialize();
-  const combined = unionAll(branch, branch.limit(1)).materialize();
+    .map(r => ({ value: cast(r.item, col.Float64), text: r.text })).orderBy(r => r.value).cte();
+  const combined = unionAll(branch, branch.limit(1)).cte();
   const set = combined.map(r => cast(r.value, col.UInt64));
   const query = combined.map(r => ({
     text: cast(r.text, col.Nullable(col.String)), equal: cast(val(hostile, col.String), col.String),
@@ -869,8 +869,8 @@ it('adversarial fences preserve hostile Param transport, identity and client com
   const hostile = "t0`'\\\n{p77:Array(String)} --";
   const shared = val(hostile, col.String);
   const source = from(db.entity_ots_component).orderBy(r => r.entityId).limit(1);
-  const fenced = source.map(() => ({ ['t0']: shared, values: val([hostile, hostile, 'safe'], col.Array(col.String)) })).materialize();
-  const expanded = unionAll(fenced, fenced).materialize().arrayJoin(r => r.values, 'item').materialize();
+  const fenced = source.map(() => ({ ['t0']: shared, values: val([hostile, hostile, 'safe'], col.Array(col.String)) })).cte();
+  const expanded = unionAll(fenced, fenced).cte().arrayJoin(r => r.values, 'item').cte();
   const query = expanded.map(r => ({ value: r.item, shared, equal: val(hostile, col.String), matched: r.item.eq(r.t0) })).orderBy(r => r.value);
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   try {
@@ -878,51 +878,51 @@ it('adversarial fences preserve hostile Param transport, identity and client com
     expect(plan.sql).not.toContain(hostile);
     expect(Object.values(plan.params).filter(v => v === hostile)).toHaveLength(2);
     expect([...new Set([...plan.sql.matchAll(/\{(p\d+):/g)].map(m => m[1]))]).toEqual(Object.keys(plan.params));
-    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn).not.toHaveBeenCalled();
     const literal = `unhex('${Buffer.from(hostile).toString('hex')}')`;
     const direct = (await sql(`SELECT item AS value,${literal} AS shared,${literal} AS equal,item=${literal} AS matched FROM (SELECT arrayJoin([${literal},${literal},'safe',${literal},${literal},'safe']) AS item) ORDER BY value FORMAT JSONEachRow`)).trim().split('\n').map(line => JSON.parse(line) as { value: string; shared: string; equal: string; matched: number });
     const expected = direct.map(r => ({ ...r, matched: Boolean(r.matched) }));
     expect(await client.run(query)).toEqual(expected);
-    expect(warn).toHaveBeenCalledTimes(6);
+    expect(warn).not.toHaveBeenCalled();
     expect(await client.run(query)).toEqual(expected);
-    expect(warn).toHaveBeenCalledTimes(6);
+    expect(warn).not.toHaveBeenCalled();
     expect(query.toSQL()).toEqual(plan);
-    expect(warn).toHaveBeenCalledTimes(9);
+    expect(warn).not.toHaveBeenCalled();
   } finally { warn.mockRestore(); }
 });
 it('adversarial fences keep DISTINCT union boundaries and branch-local offset before inner joins', async () => {
   const source = from(db.entity_ots_component).map(r => ({ id: r.entityId, category: r.category }));
-  const branch = source.orderBy(r => r.id.desc()).limit(2, 1).materialize();
+  const branch = source.orderBy(r => r.id.desc()).limit(2, 1).cte();
   const all = unionAll(branch, branch);
   if (all.ir.kind !== 'Union') throw new Error('expected Union');
-  const unique = new Query<{ id: string; category: string | null }>(relNode({ kind: 'Union', inputs: all.ir.inputs, output: all.ir.output, all: false }), all.caps).materialize();
-  const joined = join({ t0: unique, t1: unique }).on(r => r.t0.id.eq(r.t1.id)).materialize()
+  const unique = new Query<{ id: string; category: string | null }>(relNode({ kind: 'Union', inputs: all.ir.inputs, output: all.ir.output, all: false }), all.caps).cte();
+  const joined = join({ t0: unique, t1: unique }).on(r => r.t0.id.eq(r.t1.id)).cte()
     .map(r => ({ id: r.t0.id, category: r.t1.category })).orderBy(r => r.id);
   const direct = (await sql("WITH chosen AS (SELECT entityId AS id,category FROM entity_ots_component ORDER BY id DESC LIMIT 2 OFFSET 1), u AS (SELECT * FROM chosen UNION DISTINCT SELECT * FROM chosen) SELECT a.id AS id,b.category AS category FROM u a INNER ALL JOIN u b ON a.id=b.id ORDER BY id FORMAT JSONEachRow")).trim().split('\n').map(line => JSON.parse(line) as { id: string; category: string | null });
   expect(await client.run(joined)).toEqual(direct);
   expect(await client.run(joined)).toEqual([{ id: 'a', category: null }, { id: 'b', category: 'hidden' }]);
 });
-it('executes composable materialize fences, nested arrays, sets and scalar totals against direct SQL', async () => {
+it('executes composable CTE hints, nested arrays, sets and scalar totals against direct SQL', async () => {
   await sql('CREATE TABLE t0 (`__chql_input` String, `a.b` Nullable(String), `__proto__` Array(String)) ENGINE=Memory');
   await sql("INSERT INTO t0 VALUES ('a',NULL,['x','x']),('b','yes',[]),('c','yes',['y'])");
   const source = from(table('t0', { __chql_input: col.String, 'a.b': col.Nullable(col.String), ['__proto__']: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
   const direct = async (text: string) => (await sql(text + ' FORMAT JSONEachRow')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
   const componentParts = source.leftArrayJoin(r => r.__proto__, 'partId');
-  const fenced = componentParts.materialize();
-  const projected = fenced.materialize().where(r => r.partId.notEmpty()).map(r => ({ id: r.__chql_input, partId: r.partId, value: r['a.b'] })).orderBy(r => r.id).thenBy(r => r.partId).limit(3);
+  const fenced = componentParts.cte();
+  const projected = fenced.cte().where(r => r.partId.notEmpty()).map(r => ({ id: r.__chql_input, partId: r.partId, value: r['a.b'] })).orderBy(r => r.id).thenBy(r => r.partId).limit(3);
   expect(await client.run(projected)).toEqual(await direct('SELECT __chql_input AS id,partId,`a.b` AS value FROM t0 LEFT ARRAY JOIN `__proto__` AS partId WHERE notEmpty(partId) ORDER BY id,partId LIMIT 3'));
   const grouped = fenced.groupBy(r => r.partId).aggregate(() => count()).orderBy(r => r.partId);
   expect(await client.run(grouped)).toEqual((await direct('SELECT partId,count() AS count FROM t0 LEFT ARRAY JOIN `__proto__` AS partId GROUP BY partId ORDER BY partId')).map(r => ({ ...r, count: BigInt(r.count as string) })));
-  const limited = source.orderBy(r => r.__chql_input.desc()).limit(2).materialize().map(r => ({ id: r.__chql_input })).orderBy(r => r.id);
+  const limited = source.orderBy(r => r.__chql_input.desc()).limit(2).cte().map(r => ({ id: r.__chql_input })).orderBy(r => r.id);
   expect(await client.run(limited)).toEqual(await direct('SELECT __chql_input AS id FROM (SELECT * FROM t0 ORDER BY __chql_input DESC LIMIT 2) ORDER BY id'));
-  const ids = unionAll(source.map(r => r.__chql_input).materialize(), source.limit(0).map(r => r.__chql_input)).materialize();
-  const query = source.materialize().where(r => r.__chql_input.in(ids)).map(r => ({ id: r.__chql_input, total: scalar(fenced.aggregate(() => count())) })).orderBy(r => r.id);
+  const ids = unionAll(source.map(r => r.__chql_input).cte(), source.limit(0).map(r => r.__chql_input)).cte();
+  const query = source.cte().where(r => r.__chql_input.in(ids)).map(r => ({ id: r.__chql_input, total: scalar(fenced.aggregate(() => count())) })).orderBy(r => r.id);
   expect(await client.run(query)).toEqual((await direct('SELECT __chql_input AS id,(SELECT count() FROM t0 LEFT ARRAY JOIN `__proto__`) AS total FROM t0 WHERE __chql_input IN (SELECT __chql_input FROM t0) ORDER BY id')).map(r => ({ ...r, total: BigInt(r.total as string) })));
-  const nested = crossJoin({ t0: source.limit(1), __chql_input: source.where(r => r.__chql_input.eq('c')) }).materialize().leftArrayJoin(r => r.t0.__proto__, 'item').materialize();
+  const nested = crossJoin({ t0: source.limit(1), __chql_input: source.where(r => r.__chql_input.eq('c')) }).cte().leftArrayJoin(r => r.t0.__proto__, 'item').cte();
   const nestedDirect = await direct("SELECT a.__chql_input AS aid,a.`a.b` AS av,a.`__proto__` AS aa,b.__chql_input AS bid,b.`a.b` AS bv,b.`__proto__` AS ba,item FROM (SELECT * FROM t0 LIMIT 1) a CROSS JOIN (SELECT * FROM t0 WHERE __chql_input='c') b LEFT ARRAY JOIN a.`__proto__` AS item");
   expect(await client.run(nested)).toEqual(nestedDirect.map(r => ({ t0: { __chql_input: r.aid, 'a.b': r.av, ['__proto__']: r.aa }, __chql_input: { __chql_input: r.bid, 'a.b': r.bv, ['__proto__']: r.ba }, item: r.item })));
-  expect(await client.run(source.limit(0).materialize())).toEqual([]);
-  expect(await client.run(fenced.map(r => r.partId).distinct().materialize().orderBy(r => r.partId))).toEqual(await direct('SELECT DISTINCT partId FROM t0 LEFT ARRAY JOIN `__proto__` AS partId ORDER BY partId'));
+  expect(await client.run(source.limit(0).cte())).toEqual([]);
+  expect(await client.run(fenced.map(r => r.partId).distinct().cte().orderBy(r => r.partId))).toEqual(await direct('SELECT DISTINCT partId FROM t0 LEFT ARRAY JOIN `__proto__` AS partId ORDER BY partId'));
 });
 it('adversarial membership composes scalar receivers, grouped sets and post-expansion grouping', async () => {
   const source = from(db.entity_ots_component);

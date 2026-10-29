@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { col, from, table } from '@chql/core';
+import * as compiler from '@chql/compiler';
 import { createClient, QueryError } from '../src/index.js';
 const driver = vi.hoisted(() => ({ query: vi.fn(), close: vi.fn() }));
 vi.mock('@clickhouse/client', () => ({ createClient: () => driver }));
@@ -109,14 +110,16 @@ it('closing one paused cursor neither decodes its remaining batch nor closes ano
 it('shares compilation/decoders with run and uses identical transport settings', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const client = createClient();
-  const query = q.where(r => r.id.in([1n, 2n])).materialize();
+  const query = q.where(r => r.id.in([1n, 2n])).cte();
+  const compile = vi.spyOn(compiler, 'compile');
   try {
     response([{ id: '1' }]);
     for await (const _row of client.stream(query)) { /* exhaust */ }
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(compile).toHaveBeenCalledTimes(1);
     await client.run(query);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(compile).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
     expect(driver.query.mock.calls[0]).toEqual(driver.query.mock.calls[1]);
     expect(driver.query.mock.calls[0]![0]).toMatchObject({ format: 'JSONEachRow', query_params: {}, clickhouse_settings: { param_p0: '[1,2]', date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1 } });
-  } finally { warn.mockRestore(); }
+  } finally { warn.mockRestore(); compile.mockRestore(); }
 });

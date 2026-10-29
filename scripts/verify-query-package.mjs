@@ -160,7 +160,7 @@ const union = unionAll(nestedExpanded, nestedExpanded);
 assert.equal(readFileSync('joined-array-join.d.ts', 'utf8'), 'export type JoinedArrayJoinSnapshot = ' + schemaType(union.ir.output) + ';\\n');
 assert.match(union.toSQL().sql, /UNION ALL/);
 assert.deepEqual(union.toSQL().columnPaths, nestedExpanded.toSQL().columnPaths);
-const fenced = nestedExpanded.materialize();
+const fenced = nestedExpanded.cte();
 assert.equal(readFileSync('joined-array-join.d.ts', 'utf8'), 'export type JoinedArrayJoinSnapshot = ' + schemaType(fenced.ir.output) + ';\\n');
 assert.match(fenced.toSQL().sql, /^WITH /);
 assert.deepEqual(fenced.toSQL().columns, nestedExpanded.toSQL().columns);
@@ -192,5 +192,8 @@ await streamClient.close();
   run(process.execPath, ['smoke.mjs'], directory);
   const version = process.env.CHQL_TYPESCRIPT_VERSION;
   run('pnpm', [...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc']), '--project', join(directory, 'tsconfig.json')]);
+  run(process.execPath, ['scripts/check-type-performance.mjs', '--self-test']);
+  run(process.execPath, ['scripts/check-type-performance.mjs']);
+  run(process.execPath, ['scripts/check-corpus-types.mjs', '--self-test']);
   console.log('Built Query/compiler/client ESM and exact/not-any consumer types passed.');
 } finally { rmSync(directory, { recursive: true, force: true }); }

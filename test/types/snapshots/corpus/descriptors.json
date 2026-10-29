@@ -1,0 +1,8738 @@
+{
+  "supported_argMaxIndices": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "version": {
+        "kind": "scalar",
+        "name": "UInt32"
+      },
+      "stockIndex": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "leadDays": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "version",
+      "stockIndex",
+      "leadDays"
+    ]
+  },
+  "supported_categories": {
+    "shape": "flat",
+    "columns": {
+      "category": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "components": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stockIndex": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "leadTimeIndex": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "priceIndex": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "category",
+      "components",
+      "stockIndex",
+      "leadTimeIndex",
+      "priceIndex",
+      "warned"
+    ]
+  },
+  "supported_categoryShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "share": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "share"
+    ]
+  },
+  "supported_cleanIndices": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "version": {
+        "kind": "scalar",
+        "name": "UInt32"
+      },
+      "effectiveAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "insertedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "price_change_log_sum": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "price_change_count": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "stock_index": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "stock_index_warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "lead_time_index_part_days": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead_time_index_part_count": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead_time_max_days": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "version",
+      "effectiveAt",
+      "insertedAt",
+      "price_change_log_sum",
+      "price_change_count",
+      "stock_index",
+      "stock_index_warnings",
+      "lead_time_index_part_days",
+      "lead_time_index_part_count",
+      "lead_time_max_days"
+    ]
+  },
+  "supported_componentParts": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt",
+      "partId"
+    ]
+  },
+  "supported_distinctManufacturer": {
+    "shape": "flat",
+    "columns": {
+      "manufacturerId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "manufacturerId"
+    ]
+  },
+  "supported_entityUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "kind": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "kind"
+    ]
+  },
+  "supported_explicitCte": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt",
+      "partId"
+    ]
+  },
+  "supported_filterCategory": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_filterCount": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_filterLifecycle": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerName": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partCategoryId": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "partCategoryName": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partCategoryPath": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "lifecycleStatus": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "lifecycleYteol": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "countryOfOrigin": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "ipns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "supplier_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "manufacturerId",
+      "manufacturerName",
+      "mpn",
+      "partCategoryId",
+      "partCategoryName",
+      "partCategoryPath",
+      "lifecycleStatus",
+      "lifecycleYteol",
+      "countryOfOrigin",
+      "ipns",
+      "supplier_ids",
+      "updatedAt"
+    ]
+  },
+  "supported_filterMatched": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_filterMembership": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_filterOrigin": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerName": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partCategoryId": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "partCategoryName": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partCategoryPath": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "lifecycleStatus": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "lifecycleYteol": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "countryOfOrigin": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "ipns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "supplier_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "manufacturerId",
+      "manufacturerName",
+      "mpn",
+      "partCategoryId",
+      "partCategoryName",
+      "partCategoryPath",
+      "lifecycleStatus",
+      "lifecycleYteol",
+      "countryOfOrigin",
+      "ipns",
+      "supplier_ids",
+      "updatedAt"
+    ]
+  },
+  "supported_filterPart": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_filterPath": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerName": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partCategoryId": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "partCategoryName": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partCategoryPath": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "lifecycleStatus": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "lifecycleYteol": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "countryOfOrigin": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "ipns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "supplier_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "manufacturerId",
+      "manufacturerName",
+      "mpn",
+      "partCategoryId",
+      "partCategoryName",
+      "partCategoryPath",
+      "lifecycleStatus",
+      "lifecycleYteol",
+      "countryOfOrigin",
+      "ipns",
+      "supplier_ids",
+      "updatedAt"
+    ]
+  },
+  "supported_filterTenantActive": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_filterUpdated": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_filterWarnings": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "version": {
+        "kind": "scalar",
+        "name": "UInt32"
+      },
+      "effectiveAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "insertedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "price_change_log_sum": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "price_change_count": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "stock_index": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "stock_index_warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "lead_time_index_part_days": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead_time_index_part_count": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead_time_max_days": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "version",
+      "effectiveAt",
+      "insertedAt",
+      "price_change_log_sum",
+      "price_change_count",
+      "stock_index",
+      "stock_index_warnings",
+      "lead_time_index_part_days",
+      "lead_time_index_part_count",
+      "lead_time_max_days"
+    ]
+  },
+  "supported_filterYteol": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerName": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partCategoryId": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "partCategoryName": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partCategoryPath": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "lifecycleStatus": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "lifecycleYteol": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "countryOfOrigin": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "ipns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "supplier_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "manufacturerId",
+      "manufacturerName",
+      "mpn",
+      "partCategoryId",
+      "partCategoryName",
+      "partCategoryPath",
+      "lifecycleStatus",
+      "lifecycleYteol",
+      "countryOfOrigin",
+      "ipns",
+      "supplier_ids",
+      "updatedAt"
+    ]
+  },
+  "supported_history": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "at": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "version": {
+        "kind": "scalar",
+        "name": "UInt32"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "at",
+      "version",
+      "stock"
+    ]
+  },
+  "supported_latestAvailability": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "version": {
+        "kind": "scalar",
+        "name": "UInt32"
+      },
+      "effectiveAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "insertedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "market_stock_total": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "market_stock_total_warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "market_stock_p50": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "market_stock_p50_warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "market_lead_time_p50_days": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "market_lead_time_p50_days_warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "version",
+      "effectiveAt",
+      "insertedAt",
+      "market_stock_total",
+      "market_stock_total_warnings",
+      "market_stock_p50",
+      "market_stock_p50_warnings",
+      "market_lead_time_p50_days",
+      "market_lead_time_p50_days_warnings"
+    ]
+  },
+  "supported_latestIndices": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "version": {
+        "kind": "scalar",
+        "name": "UInt32"
+      },
+      "effectiveAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "insertedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "price_change_log_sum": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "price_change_count": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "stock_index": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "stock_index_warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "lead_time_index_part_days": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead_time_index_part_count": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead_time_max_days": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "version",
+      "effectiveAt",
+      "insertedAt",
+      "price_change_log_sum",
+      "price_change_count",
+      "stock_index",
+      "stock_index_warnings",
+      "lead_time_index_part_days",
+      "lead_time_index_part_count",
+      "lead_time_max_days"
+    ]
+  },
+  "supported_latestPartIndices": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "version": {
+        "kind": "scalar",
+        "name": "UInt32"
+      },
+      "effectiveAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "insertedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "price_change_log_sum": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "price_change_count": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "stock_index": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead_time_index_days": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead_time_index_count": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "version",
+      "effectiveAt",
+      "insertedAt",
+      "price_change_log_sum",
+      "price_change_count",
+      "stock_index",
+      "lead_time_index_days",
+      "lead_time_index_count"
+    ]
+  },
+  "supported_latestPrices": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "version": {
+        "kind": "scalar",
+        "name": "UInt32"
+      },
+      "effectiveAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "insertedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "market_unit_price_1k_p50": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "market_unit_price_1k_p50_warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "version",
+      "effectiveAt",
+      "insertedAt",
+      "market_unit_price_1k_p50",
+      "market_unit_price_1k_p50_warnings"
+    ]
+  },
+  "supported_latestTotals": {
+    "shape": "flat",
+    "columns": {
+      "versions": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "versions",
+      "stock"
+    ]
+  },
+  "supported_leftArray": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt",
+      "partId"
+    ]
+  },
+  "supported_lowStock": {
+    "shape": "flat",
+    "columns": {
+      "category": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "components": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stockIndex": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "leadTimeIndex": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "priceIndex": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "category",
+      "components",
+      "stockIndex",
+      "leadTimeIndex",
+      "priceIndex",
+      "warned"
+    ]
+  },
+  "supported_manufacturers": {
+    "shape": "flat",
+    "columns": {
+      "manufacturerId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerName": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "parts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stockIndex": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "eol": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "manufacturerId",
+      "manufacturerName",
+      "parts",
+      "stockIndex",
+      "eol"
+    ]
+  },
+  "supported_orderedBare": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerName": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partCategoryId": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "partCategoryName": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partCategoryPath": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "lifecycleStatus": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "lifecycleYteol": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "countryOfOrigin": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "ipns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "supplier_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "manufacturerId",
+      "manufacturerName",
+      "mpn",
+      "partCategoryId",
+      "partCategoryName",
+      "partCategoryPath",
+      "lifecycleStatus",
+      "lifecycleYteol",
+      "countryOfOrigin",
+      "ipns",
+      "supplier_ids",
+      "updatedAt"
+    ]
+  },
+  "supported_orderedComponents": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_orderedNullable": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturerName": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partCategoryId": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "partCategoryName": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partCategoryPath": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "lifecycleStatus": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "lifecycleYteol": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "countryOfOrigin": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "ipns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "supplier_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "manufacturerId",
+      "manufacturerName",
+      "mpn",
+      "partCategoryId",
+      "partCategoryName",
+      "partCategoryPath",
+      "lifecycleStatus",
+      "lifecycleYteol",
+      "countryOfOrigin",
+      "ipns",
+      "supplier_ids",
+      "updatedAt"
+    ]
+  },
+  "supported_perCategory": {
+    "shape": "flat",
+    "columns": {
+      "category": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "category",
+      "stock"
+    ]
+  },
+  "supported_projectionFragment": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "mpns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Nullable",
+          "inner": {
+            "kind": "scalar",
+            "name": "String"
+          }
+        }
+      },
+      "firstDesc": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "source": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt",
+      "matched",
+      "mpns",
+      "firstDesc",
+      "source"
+    ]
+  },
+  "supported_sampleOnly": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_scopedLatest": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "stock"
+    ]
+  },
+  "supported_sharedPart": {
+    "shape": "flat",
+    "columns": {
+      "a": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "b": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "a",
+      "b",
+      "partId"
+    ]
+  },
+  "supported_singleCategory": {
+    "shape": "flat",
+    "columns": {
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "category",
+      "count"
+    ]
+  },
+  "supported_singleManufacturer": {
+    "shape": "flat",
+    "columns": {
+      "manufacturerId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "manufacturerId"
+    ]
+  },
+  "supported_singleMembership": {
+    "shape": "flat",
+    "columns": {
+      "tenantId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "state": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "part_specifications": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "matched_part_ids": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "countOfParts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "tenantId",
+      "entityId",
+      "category",
+      "state",
+      "part_specifications",
+      "matched_part_ids",
+      "countOfParts",
+      "updatedAt"
+    ]
+  },
+  "supported_singleShare": {
+    "shape": "flat",
+    "columns": {
+      "stock": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "stock"
+    ]
+  },
+  "supported_singleWeek": {
+    "shape": "flat",
+    "columns": {
+      "effectiveAt": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "stock_index": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "effectiveAt",
+      "stock_index"
+    ]
+  },
+  "supported_stockShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "share": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "share"
+    ]
+  },
+  "supported_tenantTotals": {
+    "shape": "flat",
+    "columns": {
+      "total": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "unmatched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "categories": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "total",
+      "unmatched",
+      "categories"
+    ]
+  },
+  "supported_total": {
+    "shape": "flat",
+    "columns": {
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "stock"
+    ]
+  },
+  "supported_weeklySeries": {
+    "shape": "flat",
+    "columns": {
+      "week": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "leadDays": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "week",
+      "stock",
+      "leadDays"
+    ]
+  },
+  "supported_withParts": {
+    "shape": "flat",
+    "columns": {
+      "component": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "manufacturer": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "lifecycle": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "component",
+      "mpn",
+      "manufacturer",
+      "lifecycle"
+    ]
+  },
+  "supported_withPrice": {
+    "shape": "flat",
+    "columns": {
+      "component": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price1k": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "component",
+      "mpn",
+      "price1k"
+    ]
+  },
+  "bench_argMaxLatest_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead",
+      "partId"
+    ]
+  },
+  "bench_argMaxLatest_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_argMaxLatest_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_argMaxLatest_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_argMaxLatest_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_argMaxLatest_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead",
+      "labelled"
+    ]
+  },
+  "bench_argMaxLatest_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_argMaxLatest_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_argMaxLatest_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_argMaxLatest_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_availabilityLatest_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "warnings",
+      "partId"
+    ]
+  },
+  "bench_availabilityLatest_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "warnings"
+    ]
+  },
+  "bench_availabilityLatest_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "warnings",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_availabilityLatest_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_availabilityLatest_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "warnings"
+    ]
+  },
+  "bench_availabilityLatest_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "warnings",
+      "labelled"
+    ]
+  },
+  "bench_availabilityLatest_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "warnings"
+    ]
+  },
+  "bench_availabilityLatest_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_availabilityLatest_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "warnings"
+    ]
+  },
+  "bench_availabilityLatest_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "warnings"
+    ]
+  },
+  "bench_categoryStock_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "entities": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "entities",
+      "price",
+      "partId"
+    ]
+  },
+  "bench_categoryStock_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "entities": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "entities",
+      "price"
+    ]
+  },
+  "bench_categoryStock_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "entities": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "entities",
+      "price",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_categoryStock_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_categoryStock_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "entities": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "entities",
+      "price"
+    ]
+  },
+  "bench_categoryStock_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "entities": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "entities",
+      "price",
+      "labelled"
+    ]
+  },
+  "bench_categoryStock_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "entities": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "entities",
+      "price"
+    ]
+  },
+  "bench_categoryStock_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_categoryStock_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "entities": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "entities",
+      "price"
+    ]
+  },
+  "bench_categoryStock_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "entities": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "entities",
+      "price"
+    ]
+  },
+  "bench_componentLatest_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead",
+      "partId"
+    ]
+  },
+  "bench_componentLatest_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_componentLatest_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_componentLatest_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_componentLatest_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_componentLatest_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead",
+      "labelled"
+    ]
+  },
+  "bench_componentLatest_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_componentLatest_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_componentLatest_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_componentLatest_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_componentPartJoin_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "lifecycle": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "mpn",
+      "lifecycle",
+      "partId"
+    ]
+  },
+  "bench_componentPartJoin_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "lifecycle": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpn",
+      "lifecycle"
+    ]
+  },
+  "bench_componentPartJoin_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "lifecycle": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "mpn",
+      "lifecycle",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_componentPartJoin_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_componentPartJoin_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "lifecycle": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpn",
+      "lifecycle"
+    ]
+  },
+  "bench_componentPartJoin_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "lifecycle": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "mpn",
+      "lifecycle",
+      "labelled"
+    ]
+  },
+  "bench_componentPartJoin_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "lifecycle": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpn",
+      "lifecycle"
+    ]
+  },
+  "bench_componentPartJoin_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_componentPartJoin_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "lifecycle": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpn",
+      "lifecycle"
+    ]
+  },
+  "bench_componentPartJoin_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpn": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "lifecycle": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpn",
+      "lifecycle"
+    ]
+  },
+  "bench_componentPayload_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "parts": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "parts",
+      "count",
+      "partId"
+    ]
+  },
+  "bench_componentPayload_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "parts": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "parts",
+      "count"
+    ]
+  },
+  "bench_componentPayload_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "parts": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "parts",
+      "count",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_componentPayload_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_componentPayload_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "parts": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "parts",
+      "count"
+    ]
+  },
+  "bench_componentPayload_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "parts": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "parts",
+      "count",
+      "labelled"
+    ]
+  },
+  "bench_componentPayload_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "parts": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "parts",
+      "count"
+    ]
+  },
+  "bench_componentPayload_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_componentPayload_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "parts": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "parts",
+      "count"
+    ]
+  },
+  "bench_componentPayload_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "parts": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Tuple",
+          "items": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            },
+            {
+              "name": "mpn",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "manufacturer",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "description",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "package",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            },
+            {
+              "name": "part_type",
+              "type": {
+                "kind": "Nullable",
+                "inner": {
+                  "kind": "scalar",
+                  "name": "String"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "parts",
+      "count"
+    ]
+  },
+  "bench_entityUnion_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "partId"
+    ]
+  },
+  "bench_entityUnion_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category"
+    ]
+  },
+  "bench_entityUnion_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_entityUnion_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_entityUnion_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category"
+    ]
+  },
+  "bench_entityUnion_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "labelled"
+    ]
+  },
+  "bench_entityUnion_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category"
+    ]
+  },
+  "bench_entityUnion_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_entityUnion_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category"
+    ]
+  },
+  "bench_entityUnion_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category"
+    ]
+  },
+  "bench_history_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "at": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "at",
+      "stock",
+      "partId"
+    ]
+  },
+  "bench_history_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "at": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "at",
+      "stock"
+    ]
+  },
+  "bench_history_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "at": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "at",
+      "stock",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_history_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_history_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "at": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "at",
+      "stock"
+    ]
+  },
+  "bench_history_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "at": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "at",
+      "stock",
+      "labelled"
+    ]
+  },
+  "bench_history_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "at": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "at",
+      "stock"
+    ]
+  },
+  "bench_history_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_history_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "at": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "at",
+      "stock"
+    ]
+  },
+  "bench_history_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "at": {
+        "kind": "DateTime64",
+        "precision": 3
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "at",
+      "stock"
+    ]
+  },
+  "bench_leftMatchedParts_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "count"
+    ]
+  },
+  "bench_leftMatchedParts_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "count"
+    ]
+  },
+  "bench_leftMatchedParts_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "count",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_leftMatchedParts_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_leftMatchedParts_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "count"
+    ]
+  },
+  "bench_leftMatchedParts_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "count",
+      "labelled"
+    ]
+  },
+  "bench_leftMatchedParts_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "count"
+    ]
+  },
+  "bench_leftMatchedParts_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_leftMatchedParts_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "count"
+    ]
+  },
+  "bench_leftMatchedParts_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "count"
+    ]
+  },
+  "bench_manufacturerStock_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "parts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "eol": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "parts",
+      "eol",
+      "partId"
+    ]
+  },
+  "bench_manufacturerStock_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "parts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "eol": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "parts",
+      "eol"
+    ]
+  },
+  "bench_manufacturerStock_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "parts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "eol": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "parts",
+      "eol",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_manufacturerStock_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_manufacturerStock_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "parts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "eol": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "parts",
+      "eol"
+    ]
+  },
+  "bench_manufacturerStock_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "parts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "eol": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "parts",
+      "eol",
+      "labelled"
+    ]
+  },
+  "bench_manufacturerStock_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "parts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "eol": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "parts",
+      "eol"
+    ]
+  },
+  "bench_manufacturerStock_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_manufacturerStock_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "parts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "eol": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "parts",
+      "eol"
+    ]
+  },
+  "bench_manufacturerStock_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "parts": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "eol": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "parts",
+      "eol"
+    ]
+  },
+  "bench_matchedParts_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId"
+    ]
+  },
+  "bench_matchedParts_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId"
+    ]
+  },
+  "bench_matchedParts_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_matchedParts_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_matchedParts_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId"
+    ]
+  },
+  "bench_matchedParts_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId",
+      "labelled"
+    ]
+  },
+  "bench_matchedParts_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId"
+    ]
+  },
+  "bench_matchedParts_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_matchedParts_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId"
+    ]
+  },
+  "bench_matchedParts_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "partId"
+    ]
+  },
+  "bench_membership_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "count",
+      "partId"
+    ]
+  },
+  "bench_membership_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "count"
+    ]
+  },
+  "bench_membership_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "count",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_membership_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_membership_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "count"
+    ]
+  },
+  "bench_membership_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "count",
+      "labelled"
+    ]
+  },
+  "bench_membership_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "count"
+    ]
+  },
+  "bench_membership_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_membership_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "count"
+    ]
+  },
+  "bench_membership_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "count": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "count"
+    ]
+  },
+  "bench_partLatest_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead",
+      "partId"
+    ]
+  },
+  "bench_partLatest_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_partLatest_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_partLatest_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_partLatest_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_partLatest_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead",
+      "labelled"
+    ]
+  },
+  "bench_partLatest_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_partLatest_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_partLatest_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_partLatest_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "lead": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock",
+      "lead"
+    ]
+  },
+  "bench_partPayload_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "path": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "years": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "path",
+      "years",
+      "partId"
+    ]
+  },
+  "bench_partPayload_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "path": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "years": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "path",
+      "years"
+    ]
+  },
+  "bench_partPayload_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "path": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "years": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "path",
+      "years",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_partPayload_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_partPayload_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "path": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "years": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "path",
+      "years"
+    ]
+  },
+  "bench_partPayload_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "path": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "years": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "path",
+      "years",
+      "labelled"
+    ]
+  },
+  "bench_partPayload_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "path": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "years": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "path",
+      "years"
+    ]
+  },
+  "bench_partPayload_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_partPayload_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "path": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "years": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "path",
+      "years"
+    ]
+  },
+  "bench_partPayload_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "path": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "Int64"
+        }
+      },
+      "years": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "path",
+      "years"
+    ]
+  },
+  "bench_priceJoin_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "partId"
+    ]
+  },
+  "bench_priceJoin_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "price"
+    ]
+  },
+  "bench_priceJoin_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_priceJoin_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_priceJoin_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "price"
+    ]
+  },
+  "bench_priceJoin_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "labelled"
+    ]
+  },
+  "bench_priceJoin_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "price"
+    ]
+  },
+  "bench_priceJoin_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_priceJoin_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "price"
+    ]
+  },
+  "bench_priceJoin_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "price"
+    ]
+  },
+  "bench_priceLatest_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "warnings",
+      "partId"
+    ]
+  },
+  "bench_priceLatest_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "warnings"
+    ]
+  },
+  "bench_priceLatest_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "warnings",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_priceLatest_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_priceLatest_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "warnings"
+    ]
+  },
+  "bench_priceLatest_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "warnings",
+      "labelled"
+    ]
+  },
+  "bench_priceLatest_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "warnings"
+    ]
+  },
+  "bench_priceLatest_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_priceLatest_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "warnings"
+    ]
+  },
+  "bench_priceLatest_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "price": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warnings": {
+        "kind": "Array",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "price",
+      "warnings"
+    ]
+  },
+  "bench_scalarShare_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "share": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "share",
+      "partId"
+    ]
+  },
+  "bench_scalarShare_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "share": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "share"
+    ]
+  },
+  "bench_scalarShare_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "share": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "share",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_scalarShare_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_scalarShare_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "share": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "share"
+    ]
+  },
+  "bench_scalarShare_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "share": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "share",
+      "labelled"
+    ]
+  },
+  "bench_scalarShare_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "share": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "share"
+    ]
+  },
+  "bench_scalarShare_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_scalarShare_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "share": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "share"
+    ]
+  },
+  "bench_scalarShare_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "share": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "share"
+    ]
+  },
+  "bench_tupleExtraction_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Nullable",
+          "inner": {
+            "kind": "scalar",
+            "name": "String"
+          }
+        }
+      },
+      "first": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "mpns",
+      "first",
+      "partId"
+    ]
+  },
+  "bench_tupleExtraction_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Nullable",
+          "inner": {
+            "kind": "scalar",
+            "name": "String"
+          }
+        }
+      },
+      "first": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpns",
+      "first"
+    ]
+  },
+  "bench_tupleExtraction_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Nullable",
+          "inner": {
+            "kind": "scalar",
+            "name": "String"
+          }
+        }
+      },
+      "first": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "mpns",
+      "first",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_tupleExtraction_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_tupleExtraction_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Nullable",
+          "inner": {
+            "kind": "scalar",
+            "name": "String"
+          }
+        }
+      },
+      "first": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpns",
+      "first"
+    ]
+  },
+  "bench_tupleExtraction_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Nullable",
+          "inner": {
+            "kind": "scalar",
+            "name": "String"
+          }
+        }
+      },
+      "first": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "mpns",
+      "first",
+      "labelled"
+    ]
+  },
+  "bench_tupleExtraction_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Nullable",
+          "inner": {
+            "kind": "scalar",
+            "name": "String"
+          }
+        }
+      },
+      "first": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpns",
+      "first"
+    ]
+  },
+  "bench_tupleExtraction_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_tupleExtraction_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Nullable",
+          "inner": {
+            "kind": "scalar",
+            "name": "String"
+          }
+        }
+      },
+      "first": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpns",
+      "first"
+    ]
+  },
+  "bench_tupleExtraction_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "mpns": {
+        "kind": "Array",
+        "inner": {
+          "kind": "Nullable",
+          "inner": {
+            "kind": "scalar",
+            "name": "String"
+          }
+        }
+      },
+      "first": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "mpns",
+      "first"
+    ]
+  },
+  "bench_versionTotals_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "versions": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "versions",
+      "stock",
+      "warned",
+      "partId"
+    ]
+  },
+  "bench_versionTotals_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "versions": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "versions",
+      "stock",
+      "warned"
+    ]
+  },
+  "bench_versionTotals_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "versions": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "versions",
+      "stock",
+      "warned",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_versionTotals_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_versionTotals_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "versions": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "versions",
+      "stock",
+      "warned"
+    ]
+  },
+  "bench_versionTotals_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "versions": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "versions",
+      "stock",
+      "warned",
+      "labelled"
+    ]
+  },
+  "bench_versionTotals_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "versions": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "versions",
+      "stock",
+      "warned"
+    ]
+  },
+  "bench_versionTotals_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_versionTotals_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "versions": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "versions",
+      "stock",
+      "warned"
+    ]
+  },
+  "bench_versionTotals_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "versions": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "warned": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "versions",
+      "stock",
+      "warned"
+    ]
+  },
+  "bench_weekly_arrayEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "week": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "mean": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "median": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "partId": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "order": [
+      "entityId",
+      "week",
+      "mean",
+      "median",
+      "partId"
+    ]
+  },
+  "bench_weekly_distinctFilter": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "week": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "mean": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "median": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "week",
+      "mean",
+      "median"
+    ]
+  },
+  "bench_weekly_entityEnrichment": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "week": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "mean": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "median": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "matched": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "updatedAt": {
+        "kind": "DateTime64",
+        "precision": 3
+      }
+    },
+    "order": [
+      "entityId",
+      "week",
+      "mean",
+      "median",
+      "matched",
+      "updatedAt"
+    ]
+  },
+  "bench_weekly_groupCount": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences"
+    ]
+  },
+  "bench_weekly_orderedPage": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "week": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "mean": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "median": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "week",
+      "mean",
+      "median"
+    ]
+  },
+  "bench_weekly_project": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "week": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "mean": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "median": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "labelled": {
+        "kind": "scalar",
+        "name": "Bool"
+      }
+    },
+    "order": [
+      "entityId",
+      "week",
+      "mean",
+      "median",
+      "labelled"
+    ]
+  },
+  "bench_weekly_repeatedUnion": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "week": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "mean": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "median": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "week",
+      "mean",
+      "median"
+    ]
+  },
+  "bench_weekly_rollupShare": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "occurrences": {
+        "kind": "scalar",
+        "name": "UInt64"
+      },
+      "proportion": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "occurrences",
+      "proportion"
+    ]
+  },
+  "bench_weekly_semiJoin": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "week": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "mean": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "median": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "week",
+      "mean",
+      "median"
+    ]
+  },
+  "bench_weekly_sharedCte": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "week": {
+        "kind": "scalar",
+        "name": "Date"
+      },
+      "mean": {
+        "kind": "scalar",
+        "name": "Float64"
+      },
+      "median": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "week",
+      "mean",
+      "median"
+    ]
+  }
+}

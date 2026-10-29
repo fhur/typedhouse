@@ -8,6 +8,7 @@ import { collect, keys, verify } from './backend-harness.js';
 import { source } from './pruning-arbitrary.js';
 import { build, buildComposition, native, recipeArbitrary, seed, shape, anchor, type Recipe } from './aggregate-union-arbitrary.js';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
+import { assertAggregateUnionAccounting } from './aggregate-union-accounting.js';
 let container: StartedTestContainer;
 let driver: ReturnType<typeof createClient>;
 const backends: ReturnType<typeof createClickHouseBackend>[] = [];
@@ -43,15 +44,16 @@ async function check(r: Recipe) {
   return expected;
 }
 it('runs 500 fixed-seed recursive aggregate/Union recipes against native bags with rule evidence', async () => {
+  const path = process.env.CHQL_AGG_UNION_PATH;
   const shapes = new Set<string>(); let agg = 0, union = 0;
   const start = performance.now();
   const result = await fc.check(fc.asyncProperty(recipeArbitrary, async r => {
     shapes.add(shape(r.composition)); const hits = rewriteRel(build(r).ir).hits; agg += hits.PushFilterAggKey; union += hits.PushFilterUnion;
     await check(r);
-  }), { seed: Number(process.env.CHQL_AGG_UNION_SEED ?? seed), numRuns: 500, ...(process.env.CHQL_AGG_UNION_PATH ? { path: process.env.CHQL_AGG_UNION_PATH } : {}) });
-  console.info('aggregate/Union differential', { runs: result.numRuns, seed: result.seed, shapes: shapes.size, agg, union, milliseconds: Math.round(performance.now() - start) });
+  }), { seed: Number(process.env.CHQL_AGG_UNION_SEED ?? seed), numRuns: 500, ...(path ? { path } : {}) });
+  console.info('aggregate/Union differential', { mode: path ? 'replay-only (not full acceptance)' : 'full-500', path, runs: result.numRuns, seed: result.seed, shapes: shapes.size, agg, union, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
-  expect(result.numRuns).toBe(500); expect(shapes.size).toBeGreaterThan(100); expect(agg).toBeGreaterThanOrEqual(500); expect(union).toBeGreaterThan(100);
+  assertAggregateUnionAccounting(result.numRuns, path, { shapes: shapes.size, agg, union });
 }, 180000);
 it('anchors rollups, shared latest, repeated/empty branches, HAVING and ordered run/stream', async () => {
   const expected = [{ key: 'a', n: 2n, total: 7n, highest: 5n }];
@@ -87,7 +89,7 @@ it('executes nullable keys, alias collisions and grouped-key versus aggregate-na
   await verify(backends, duplicated, [{ n: 4n }], async () => [{ n: 4n }]);
 });
 it('retains shared materialized rollups across scalar and IN scopes with conflicting consumers', async () => {
-  const shared = source.groupBy(r => ({ key: r.id })).aggregate(g => ({ total: sum(g.amount) })).materialize();
+  const shared = source.groupBy(r => ({ key: r.id })).aggregate(g => ({ total: sum(g.amount) })).cte();
   const total = shared.aggregate(g => ({ total: sum(g.total) }));
   const selected = shared.where(r => r.total.gt(4n)).map(r => ({ key: r.key }));
   const q = unionAll(shared.where(r => r.key.eq('a')), shared.where(r => r.key.eq('b')), shared)

@@ -19,7 +19,7 @@ it('round-trips hostile ordered tuple names through executable generated source'
 it('is repeatable, content sensitive and prototype-safe', () => {
   const first = renderSchema(fixture);
   expect(first).toBe(renderSchema(structuredClone(fixture)));
-  expect(first).toContain('["__proto__"]: table');
+  expect(first).toContain('["__proto__"]: __proto__');
   expect(first).toContain('precision > 3 maps to string');
   expect(renderFunctions(fixture)).toContain('["__proto__"]:');
   const changed = structuredClone(fixture); changed.tables[0]!.columns[0]!.comment = 'changed';
@@ -44,6 +44,41 @@ it('sorts table/function inputs without mutating them', () => {
   const combined = { tables: [...fixture.tables, ...second.tables], functions: [...fixture.functions, ...second.functions] };
   expect(renderSchema(combined)).toBe(renderSchema({ ...combined, tables: [...combined.tables].reverse() }));
   expect(renderFunctions(combined)).toBe(renderFunctions({ ...combined, functions: [...combined.functions].reverse() }));
+});
+it('generates descriptive, valid, unique row aliases for arbitrary table names', () => {
+  const names = ['ipn_offer', '_pg_bridge_test', '123_items', '!!!', '你好', 'foo-bar', 'foo_bar', 'component', 'entity_ots_component'];
+  const schema = { tables: names.map(name => ({ ...fixture.tables[0]!, name })), functions: [] };
+  const rendered = renderSchema(schema);
+  expect(rendered).toContain('export type Row$IpnOffer = Infer<typeof ipn_offer>;');
+  expect(rendered).toContain('export type Row$PgBridgeTest =');
+  expect(rendered).toContain('export type Row$123Items = Infer<typeof _123_items>;');
+  expect(rendered).toContain('export type Row$EntityOtsComponent =');
+  expect(rendered).toContain('export type ComponentRow = Row$EntityOtsComponent;');
+  expect(rendered).toContain('"foo-bar": foo_bar,');
+  expect(rendered).toContain('export type Row$Component = Infer<typeof component>;');
+  expect(rendered).toContain('export type Row$FooBar2 =');
+  expect(rendered.indexOf('const ipn_offer = table(')).toBeLessThan(rendered.indexOf('export type Row$IpnOffer'));
+  expect(rendered.indexOf('export type Row$IpnOffer')).toBeLessThan(rendered.indexOf('export const db =')); 
+  const aliases = [...rendered.matchAll(/export type (\S+) =/g)].map(match => match[1]!);
+  expect(new Set(aliases).size).toBe(aliases.length);
+  expect(aliases.every(alias => /^[A-Za-z_$][\w$]*$/.test(alias))).toBe(true);
+  expect(rendered).toBe(renderSchema({ ...schema, tables: [...schema.tables].reverse() }));
+});
+it('avoids keyword, import and normalized binding collisions', () => {
+  const names = ['class', 'table', 'table2', 'db', 'col', 'Infer', 'foo-bar', 'foo_bar', '__proto__'];
+  const rendered = renderSchema({ tables: names.map(name => ({ ...fixture.tables[0]!, name })), functions: [] });
+  expect(rendered).toContain('const class2 = table("class",');
+  expect(rendered).toContain('const table3 = table("table",');
+  expect(rendered).toContain('const db2 = table("db",');
+  expect(rendered).toContain('const foo_bar = table("foo-bar",');
+  expect(rendered).toContain('  foo_bar: foo_bar2,');
+  expect(rendered).toContain('  ["__proto__"]: __proto__,');
+});
+it('keeps descriptive aliases stable when unrelated tables are added', () => {
+  const table = { ...fixture.tables[0]!, name: 'ipn_offer' };
+  const alias = 'export type Row$IpnOffer = Infer<typeof ipn_offer>;';
+  expect(renderSchema({ tables: [table], functions: [] })).toContain(alias);
+  expect(renderSchema({ tables: [fixture.tables[0]!, table], functions: [] })).toContain(alias);
 });
 it.each([
   ['String', 'col.String'], ['DateTime', 'col.DateTime()'], ["DateTime('UTC')", 'col.DateTime("UTC")'],

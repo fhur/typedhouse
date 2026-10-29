@@ -50,7 +50,7 @@ it('streams nested inner/cross joins and UNION/IN/scalar/CTE composition indepen
   });
   expect(await collect(client.stream(nested))).toEqual(direct);
   expect(await collect(client.stream(nested))).toEqual(await client.run(nested));
-  const union = unionAll(small, small).materialize();
+  const union = unionAll(small, small).cte();
   const q = union.where(r => r.id.in(small)).map(r => ({ id: r.id, total: scalar(union.aggregate(() => count())) })).orderBy(r => r.id);
   const expected = (await sql('WITH u AS (SELECT id FROM stream_rows UNION ALL SELECT id FROM stream_rows) SELECT id,(SELECT count() FROM u) AS total FROM u WHERE id IN (SELECT id FROM stream_rows) ORDER BY id FORMAT JSONEachRow')).trim().split('\n').map(line => {
     const r = JSON.parse(line) as { id: string; total: string }; return { id: BigInt(r.id), total: BigInt(r.total) };
@@ -78,7 +78,7 @@ it('keeps mixed scalar/Array parameters safe across union fences and overrides i
     id: r.id, text: shared, equal: val(hostile, col.String), list: val([hostile, '', 'NULL'], col.Array(col.String)),
     at: r.at, nonfinite: r.id.divide(0n), pair: r.pair,
   }));
-  const q = unionAll(projection.limit(1), projection).materialize().orderBy(r => r.id);
+  const q = unionAll(projection.limit(1), projection).cte().orderBy(r => r.id);
   try {
     const literal = `unhex('${Buffer.from(hostile).toString('hex')}')`;
     const direct = (await sql(`WITH u AS (SELECT * FROM stream_rows ORDER BY id LIMIT 1) SELECT id,${literal} AS text,${literal} AS equal,[${literal},'', 'NULL'] AS list,at,id/0 AS nonfinite,pair FROM (SELECT * FROM u UNION ALL SELECT * FROM stream_rows) ORDER BY id SETTINGS date_time_output_format='iso',output_format_json_quote_64bit_integers=1,output_format_json_quote_denormals=1 FORMAT JSONEachRow`)).trim().split('\n').map(line => {

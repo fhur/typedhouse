@@ -56,7 +56,7 @@ it('shared DAGs, operators, subqueries and manual IR retain SQL/schema/params/wa
   const joined = join({ a: filtered, b: filtered }).on(r => r.a.id.eq(r.b.id));
   const controls = [source, filtered, filtered.map(r => ({ id: r.id, a: shared, b: shared, c: val(7n, col.UInt64) })), rollup,
     joined, crossJoin({ a: joined, b: joined }), source.arrayJoin(r => r.tags, 'tag'), unionAll(filtered, filtered),
-    filtered.orderBy(r => r.id).limit(4, 1).distinct(), filtered.materialize(),
+    filtered.orderBy(r => r.id).limit(4, 1).distinct(), filtered.cte(),
     filtered.map(() => ({ n: scalar(rollup) })), source.where(r => r.id.in(filtered.map(r => r.id))),
   ];
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -74,7 +74,7 @@ it('shared DAGs, operators, subqueries and manual IR retain SQL/schema/params/wa
         const actual = emit(before);
         expect(actual).toEqual(expected);
         expect(warning).toHaveBeenCalledTimes(count);
-        expect(count).toBe(query.ir.kind === 'Materialize' ? 1 : 0);
+        expect(count).toBe(0);
       }
       expect(query.ir).toEqual(before);
     }
