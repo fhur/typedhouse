@@ -245,6 +245,11 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
       }
       return `SELECT ${items.join(', ')}${separator}FROM ${source}${predicates.length ? `${separator}WHERE ${predicates.join(' AND ')}` : ''}${tails.join('')}`;
     }
+    // Allocate projection Params before WHERE Params, matching textual SQL order.
+    const qualifier = blockQualifier(rel);
+    const items = order.map(k => block.project
+      ? `${expression(block.project.exprs[k]!, block.project.input, `${path}.exprs.${k}`, undefined, false, 'row', qualifier)} AS ${quoteIdentifier(k)}`
+      : `${qualifier ? `${qualifier}.` : ''}${quoteIdentifier(k)}`);
     let from: string;
     if (block.source.kind === 'table') {
       const scan = block.source.scan;
@@ -257,7 +262,6 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     }
     // Render only the final block, in textual order. Never eagerly emit folded
     // children: their discarded SELECTs could allocate Params out of order.
-    const qualifier = blockQualifier(rel);
     const predicates: { expr: ExprNode; sql: string }[] = [];
     const tails: string[] = [];
     for (const [i, node] of block.clauses.entries()) {
@@ -268,7 +272,7 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     }
     const where = predicates.length ? ` WHERE ${conjunction(predicates)}` : '';
     const tail = tails.join('');
-    return `SELECT ${order.map(k => `${qualifier ? `${qualifier}.` : ''}${quoteIdentifier(k)}`).join(', ')} FROM ${from}${where}${tail}`;
+    return `SELECT ${items.join(', ')} FROM ${from}${where}${tail}`;
   }
   function emit(rel: Rel, path: string): string {
     const name = plan?.ctes?.names.get(rel);

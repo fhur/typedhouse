@@ -27,6 +27,29 @@ beforeAll(async () => {
 }, 120000);
 afterAll(async () => { await container?.stop(); });
 
+it('folded arithmetic preserves rows and types under both alias-preference settings', async () => {
+  await execute('CREATE TABLE inventory (sku String, onHand UInt32, reserved Nullable(UInt32), reorderPoint Int64) ENGINE=Memory');
+  await execute("INSERT INTO inventory VALUES ('a', 2, 5, 4), ('b', 10, 1, 3), ('c', 0, NULL, 3), ('d', 4294967295, 0, 4294967296)");
+  const input = from(table('inventory', { sku: col.String, onHand: col.UInt32, reserved: col.Nullable(col.UInt32), reorderPoint: col.Int64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const queries = [
+    input.where(r => r.onHand.minus(r.reserved).lt(r.reorderPoint))
+      .map(r => ({ sku: r.sku, available: r.onHand.minus(r.reserved) })),
+    input.map(r => ({ available: r.onHand.minus(r.reserved), product: r.onHand.multiply(r.onHand) })),
+    input.where(r => r.reorderPoint.gt(0n)).map(r => ({ onHand: r.onHand, reserved: r.reserved }))
+      .map(r => ({ reorderPoint: r.onHand.minus(r.reserved) })),
+  ];
+  expect(compile(queries[0]!.ir).sql.match(/SELECT /g)).toHaveLength(1);
+  for (const query of queries) for (const setting of [0, 1]) {
+    const results = [];
+    for (const emitter of [compile, emitNaive]) {
+      const plan = emitter(query.ir);
+      const json = JSON.parse(await execute(`${plan.sql} SETTINGS prefer_column_name_to_alias = ${setting} FORMAT JSON`, plan.params));
+      results.push({ meta: json.meta, data: json.data });
+    }
+    expect(results[0]).toEqual(results[1]);
+  }
+});
+
 it('generated filter/projection queries match naive rows and types on generated datasets', async () => {
   const products = table('optimizer_products', { id: col.UInt32, category: col.String, stock: col.Nullable(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
   const source = from(products);

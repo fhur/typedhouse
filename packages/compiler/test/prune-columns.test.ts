@@ -111,7 +111,7 @@ describe('physical source-ordered demand', () => {
     const subset = ordered.map(r => ({ second: r['2'], first: r['10'] }));
     if (subset.ir.kind !== 'Project') throw new Error('expected project');
     expect(names(subset.ir, subset.ir.input)).toEqual([['10'], ['2']]);
-    expect(compile(subset.ir).sql).toContain('SELECT `10`, `2` FROM `odd`');
+    expect(compile(subset.ir).sql).toBe('SELECT `2` AS `second`, `10` AS `first` FROM `odd`');
     expect(compile(q.ir).sql).toContain('SELECT `source`.`a.b` AS `x`, `other`.`__chql_leaf_0` AS `y`');
     // The direct selection now bypasses transport aliases; the logical nested
     // output still reserves collision-free transport names for derived uses.

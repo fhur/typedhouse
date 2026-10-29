@@ -367,8 +367,11 @@ table alias and column qualifiers; derived-table and join scopes retain explicit
 qualification. Identifiers remain quoted. Consecutive filters combine with AND. Simple same-name column
 selections (for example `.map(p => ({ id: p.id, stock: p.stock }))`) fold before
 sorting/limiting, including filters on columns omitted by the selection. Repeated
-sorts/limits and out-of-order clauses start a derived table. Renamed/computed
-projections, projections after sort/limit, aggregates, joins, DISTINCT and
+sorts/limits and out-of-order clauses start a derived table. Direct renames and
+integer `plus`/`minus`/`multiply` projections with typed operands can fold over a
+scan and its filters, provided output aliases do not shadow different physical
+columns. Computed projections retain a boundary for subsequent clauses; fallible
+expressions, projections after sort/limit, aggregates, joins, DISTINCT and
 materialization remain fences. A seeded ClickHouse property test compares rows
 and column types across 30 generated datasets/parameter sets and five query shapes;
 queries use unique ordering before LIMIT to make comparisons deterministic. `emitNaive` remains
