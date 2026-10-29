@@ -25,6 +25,7 @@ jobs:
       - uses: actions/configure-pages@v5
         id: pages
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '@chql/docs^...' build
       - run: pnpm docs:check
       - run: pnpm docs:build
         env:
