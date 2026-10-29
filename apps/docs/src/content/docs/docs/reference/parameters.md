@@ -14,16 +14,16 @@ const userInput = "acme' OR 1=1 --";
 const query = from(events).where((e) =>
   e.tenant.eq(userInput),
 );
-const compiled = query.toSQL();
+const compiled = compile(query.ir);
 console.log(compiled.sql, compiled.params);
 ```
 
 Expected SQL:
 
 ```sql
-SELECT `tenant`, `category`, `id` FROM (
-  SELECT `tenant`, `category`, `id` FROM `events`
-) AS `__chql_input` WHERE (`__chql_input`.`tenant` = {p0:String})
+SELECT `tenant`, `category`, `id`
+FROM `events`
+WHERE `tenant` = {p0:String}
 ```
 
 Expected parameters:
@@ -36,9 +36,9 @@ The output row remains `{ tenant: string; category: string; id: number }`. The q
 
 ## Compile a query
 
-Core has no implicit compiler dependency. Import `registerCompiler` from `@chql/core` and `emitNaive` from `@chql/compiler`, then call `registerCompiler(emitNaive)` once before `query.toSQL()`.
+Core has no implicit compiler dependency. Import `registerCompiler` from `@chql/core` and `compile` from `@chql/compiler`, then call `registerCompiler(compile)` once before `query.toSQL()`.
 
-Alternatively use `emitNaive(query.ir)` or `compile(query.ir)` directly from `@chql/compiler`. The compiler accepts a relational IR node, not a Query wrapper. Both compiler exports currently use the naive backend.
+Alternatively use `compile(query.ir)` directly. The compiler accepts a relational IR node, not a Query wrapper. `compile` applies simplifying rewrites; `emitNaive(query.ir)` is the separate baseline emitter, useful for comparing SQL structure.
 
 `toSQL(): CompiledQuery` returns:
 
@@ -53,7 +53,7 @@ Descriptors are not a complete TypeScript typechecker. `@chql/client` uses the c
 
 ## Errors and corrections
 
-- **Compiler not registered:** register it, or use `emitNaive(query.ir)` directly. Importing core alone intentionally does not attach a backend.
+- **Compiler not registered:** register it, or use `compile(query.ir)` directly. Importing core alone intentionally does not attach a backend.
 - **Invalid predicate or expression mode:** return a core expression from the callback, not a JavaScript boolean, object, or grouped expression in a row context.
 - **Unsupported descriptor/function:** use a supported operation; changing a TypeScript assertion does not add compiler or server support.
 - **Server-side failure:** compilation is not execution validation. Check real table metadata, engine requirements, supported server version, and the SQL retained by the client's `QueryError`.

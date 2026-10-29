@@ -27,7 +27,7 @@ Each optimization page includes a standalone TypeScript example followed by its 
 
 ## Choosing the compiler
 
-The examples call `compile(query.ir)` directly and export the result. To use the same compiler through `query.toSQL()`, import `registerCompiler` from `@chql/core` and register `compile` instead of the `emitNaive` used in [getting started](/docs/getting-started/). `client.run` compiles independently of that registration.
+The examples call `compile(query.ir)` directly and export the result. To use the same compiler through `query.toSQL()`, import `registerCompiler` from `@chql/core` and register `compile`, as explained in [Getting started](/docs/getting-started/). `client.run` compiles independently of that registration.
 
 ## Safety boundaries
 

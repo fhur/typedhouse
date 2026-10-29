@@ -22,12 +22,16 @@ for (const entry of await readdir(dist, { recursive: true })) {
   }
   if (entry.startsWith('docs/')) assert.ok(!html.includes('/Playground.'), `Editor assets on static docs: ${entry}`);
 }
-for (const route of ['docs/getting-started.md', 'docs/tutorials/composition.md', 'docs/reference/queries.md', 'blog/composition-without-hiding-sql.md', 'llms.txt', 'llms-full.txt', 'blog/rss.xml', 'pagefind/pagefind.js']) {
+for (const route of ['docs/getting-started.md', 'docs/tutorials/composition.md', 'docs/tutorials/advanced-example.md', 'docs/reference/queries.md', 'blog/composition-without-hiding-sql.md', 'llms.txt', 'llms-full.txt', 'blog/rss.xml', 'pagefind/pagefind.js']) {
   assert.ok(await exists(join(dist, route)), `Missing static output: ${route}`);
 }
 const markdown = await readFile(join(dist, 'docs/getting-started.md'), 'utf8');
-assert.match(markdown, /import\s*\{\s*col,\s*table,\s*from,\s*registerCompiler,?\s*\}/);
+assert.match(markdown, /import\s*\{\s*col,\s*table,\s*from,?\s*\}/);
 assert.match(markdown, /SELECT/);
 assert.match(markdown, /tutorials\/composition\.md/);
+assert.match(markdown, /tutorials\/advanced-example\.md/);
+const guideHtml = await readFile(join(dist, 'docs/getting-started/index.html'), 'utf8');
+assert.match(guideHtml, />Guides</);
+assert.ok(!/>Start here<|>Tutorials</.test(guideHtml), 'Old navigation sections must not remain');
 assert.ok(!markdown.includes('<astro-island'));
 console.log(`Static outputs and ${links} internal links verified; docs pages have no playground assets.`);

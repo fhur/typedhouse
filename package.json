@@ -14,7 +14,7 @@
     "docs:dev": "pnpm --filter @chql/docs dev",
     "docs:build": "pnpm --filter @chql/docs build",
     "docs:check": "pnpm --filter @chql/docs check",
-    "docs:verify": "pnpm docs:check && pnpm --filter @chql/docs test:example-format && pnpm --filter @chql/docs test:compiler-examples && pnpm --filter @chql/docs test:query-builder-examples && pnpm --filter @chql/docs test:function-examples && pnpm --filter @chql/docs test:playground && pnpm docs:build && pnpm --filter @chql/docs test:site && pnpm --filter @chql/docs test:browser",
+    "docs:verify": "pnpm docs:check && pnpm --filter @chql/docs test:guide-examples && pnpm --filter @chql/docs test:example-format && pnpm --filter @chql/docs test:compiler-examples && pnpm --filter @chql/docs test:query-builder-examples && pnpm --filter @chql/docs test:function-examples && pnpm --filter @chql/docs test:playground && pnpm docs:build && pnpm --filter @chql/docs test:site && pnpm --filter @chql/docs test:browser",
     "build": "pnpm -r build",
     "example:first-query": "pnpm build && node scripts/run-first-query.mjs",
     "verify:query-package": "node scripts/verify-query-package.mjs",

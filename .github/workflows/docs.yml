@@ -27,6 +27,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter '@chql/docs^...' build
       - run: pnpm docs:check
+      - run: pnpm --filter @chql/docs test:guide-examples
       - run: pnpm docs:build
         env:
           SITE_URL: ${{ steps.pages.outputs.origin }}

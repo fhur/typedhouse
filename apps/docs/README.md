@@ -45,7 +45,7 @@ The Functions section lives in `src/content/docs/docs/functions/`, with one page
 - `pnpm --filter @chql/docs examples:functions` refreshes final SQL and parameters and typechecks examples.
 - `pnpm --filter @chql/docs test:function-examples` checks for stale SQL and typechecks examples.
 
-`pnpm docs:verify` includes compiler, query-builder, and function example checks. Each generated-SQL marker closes an independent executable example: its preceding TypeScript blocks (including collapsed setup) are compiled together. Pages can include multiple examples, each with its own imports, default export, and SQL marker.
+`pnpm docs:verify` includes guide, compiler, query-builder, and function example checks. Each generated-SQL marker closes an independent executable example: its preceding TypeScript blocks (including collapsed setup) are compiled together. Pages can include multiple examples, each with its own imports, default export, and SQL marker.
 
 ## Query Builder examples
 
@@ -62,6 +62,14 @@ The top-level Simplifying Compiler section lives in `src/content/docs/docs/compi
 - `pnpm --filter @chql/docs test:compiler-examples` verifies the committed output still matches the compiler and typechecks the snippets.
 
 SQL is formatted with the ClickHouse dialect; aliases and parameter values come from the compiler, not handwritten approximations.
+
+## Guides
+
+The sidebar teaches three progressively richer workflows: Getting started, Simple example, and Advanced example. Existing getting-started and composition URLs remain stable. Each runnable checkpoint has independent setup and generated SQL.
+
+- `pnpm --filter @chql/docs examples:guides` regenerates all five checkpoints and typechecks their code.
+- `pnpm --filter @chql/docs test:guide-examples` rejects stale SQL or type errors; Pages deployment runs this check too.
+- A `ts typecheck-only` fence extends the page's first complete example for typechecking without executing it. This lets the server-client example stay checked without making database calls during builds.
 
 ## GitHub Pages
 

@@ -19,8 +19,14 @@ export default defineConfig({
       customCss: ['./src/styles/docs.css'],
       components: { Head: './src/components/Head.astro', PageTitle: './src/components/DocTitle.astro' },
       sidebar: [
-        { label: 'Start here', items: [{ label: 'Build your first query', slug: 'docs/getting-started' }] },
-        { label: 'Tutorials', autogenerate: { directory: 'docs/tutorials' } },
+        {
+          label: 'Guides',
+          items: [
+            { label: 'Getting started', slug: 'docs/getting-started' },
+            { label: 'Simple example', slug: 'docs/tutorials/composition' },
+            { label: 'Advanced example', slug: 'docs/tutorials/advanced-example' },
+          ],
+        },
         { label: 'Query Builder', autogenerate: { directory: 'docs/query-builder' } },
         { label: 'Functions', autogenerate: { directory: 'docs/functions' } },
         { label: 'Reference', autogenerate: { directory: 'docs/reference' } },
