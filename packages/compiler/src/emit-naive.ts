@@ -52,7 +52,9 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
   // A physical-table block has no competing input or SELECT aliases. Derived
   // scopes retain qualification; logical ColumnRef binding stays unchanged.
   function blockQualifier(rel: Rel): string {
-    return plan?.blocks.get(rel)?.source.kind === 'table' ? '' : inputAlias;
+    const source = plan?.blocks.get(rel)?.source;
+    if (source?.kind === 'cte') return quoteIdentifier(plan!.ctes!.names.get(source.rel)!);
+    return source?.kind === 'table' ? '' : inputAlias;
   }
   function fail(code: string, node: unknown, path: string, detail = ''): never { throw new ValidationError(code, node, path, detail); }
   function resolvedType(e: ExprNode, expected?: CHType): CHType {
@@ -247,6 +249,9 @@ function emitQuery(root: Rel, plan?: SqlPlan, warn = true): CompiledQuery {
     if (block.source.kind === 'table') {
       const scan = block.source.scan;
       from = `${quoteIdentifier(scan.table.name)}${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
+    } else if (block.source.kind === 'cte') {
+      if (!defined.has(block.source.rel)) return fail('cte_visibility', block.source.rel, path);
+      from = quoteIdentifier(plan!.ctes!.names.get(block.source.rel)!);
     } else {
       from = `(${emit(block.source.rel, `${path}.source`)}) AS ${inputAlias}`;
     }

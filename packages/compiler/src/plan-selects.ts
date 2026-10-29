@@ -57,9 +57,13 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       if (!child) return undefined;
       block = { ...child, project: rel };
     } else if (rel.kind === 'Project' && isColumnSelection(rel)) {
-      const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
+      // A CTE already provides a scope: select its columns directly rather than
+      // wrapping its reference in another SELECT. Do not fold its definition.
+      const child: SelectBlock | undefined = ctes?.names.has(rel.input)
+        ? { source: { kind: 'cte', rel: rel.input }, clauses: [] }
+        : plan(rel.input);
       if (!child || child.aggregate || child.project || child.clauses.some(node => node.kind !== 'Filter')) return undefined;
-      block = { source: child.source, clauses: child.clauses };
+      block = { source: Object.freeze(child.source), clauses: Object.freeze(child.clauses) };
     } else if (rel.kind === 'Aggregate') {
       const sourceNames = new Set(outputLeaves(rel.input.output).map(l => l.name));
       // Alias substitution is server-setting-sensitive if an output shadows a
@@ -78,7 +82,7 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       const safe = !child?.aggregate || (rel.kind === 'Filter' ? safePredicate(rel.pred) : rel.kind === 'Sort' ? rel.keys.every(k => k.expr.kind === 'ColumnRef') : true);
       block = child && !child.project && safe && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
         ? { ...child, clauses: Object.freeze([...child.clauses, rel]) }
-        : { source: Object.freeze({ kind: 'derived', rel: rel.input }), clauses: Object.freeze([rel]) };
+        : { source: Object.freeze({ kind: ctes?.names.has(rel.input) ? 'cte' : 'derived', rel: rel.input }), clauses: Object.freeze([rel]) };
     } else return undefined;
     blocks.set(rel, Object.freeze(block));
     return block;

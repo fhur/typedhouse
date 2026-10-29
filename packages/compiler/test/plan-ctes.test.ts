@@ -41,7 +41,7 @@ describe('identity CTE planning', () => {
     const ctes = planCtes(q.ir), columns = pruneColumns(q.ir);
     const plan = planSelects(q.ir, columns.keys(), columns, ctes);
     expect(columns.get(shared.ir)?.map(l => l.name)).toEqual(['id', 'amount']);
-    expect(plan.blocks.has(q.ir.kind === 'Join' ? q.ir.inputs[0]![1] : q.ir)).toBe(false);
+    expect(plan.blocks.get(q.ir.kind === 'Join' ? q.ir.inputs[0]![1] : q.ir)?.source).toEqual({ kind: 'cte', rel: shared.ir });
     const sql = compile(q.ir).sql;
     expect(sql).toContain('WITH `t0` AS (SELECT `id`, `amount` FROM `items` WHERE `id` = {p0:String})');
     expect(sql.match(/FROM `t0`/g)).toHaveLength(2);
