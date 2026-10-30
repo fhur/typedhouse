@@ -67,7 +67,7 @@ Parameters:
 
 ## Computed selections
 
-The filter references a computed output. The predicate is rewritten over the source expression, so the inner block's `WHERE` compares `id + {p0}` against the source column before the selection runs. The parameter inside the projected expression keeps its identity: it is one `{p0}` in both places. The selection itself stays a derived table here because [SELECT-block folding](/docs/compiler/select-blocks/) folds integer arithmetic only when its parameters carry an explicit type; written as `e.id.plus(val(1, col.UInt32))`, the same query is a single `SELECT`.
+The filter references a computed output. The predicate is rewritten over the source expression, so `WHERE` compares `id + {p0}` against the source column before the selection runs. The parameter inside the projected expression keeps its identity: it is one `{p0}` in both places. The pushed filter and the computed selection then [fold into one SELECT](/docs/compiler/select-blocks/).
 
 <details>
 <summary>Setup: imports and table definitions</summary>
@@ -106,16 +106,11 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` + {p0:UInt32} AS `eventId`
+  `id` + {p0:UInt32} AS `eventId`
 FROM
-  (
-    SELECT
-      `id`
-    FROM
-      `events`
-    WHERE
-      `id` + {p0:UInt32} > {p1:UInt64}
-  ) AS `__typedhouse_input`
+  `events`
+WHERE
+  `id` + {p0:UInt32} > {p1:UInt64}
 ```
 
 Parameters:

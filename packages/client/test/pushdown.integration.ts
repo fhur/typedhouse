@@ -7,7 +7,7 @@ import { components, parts } from './differential-arbitrary.js';
 import { createClickHouseBackend, type Backend } from '../src/index.js';
 import { differential, multiplicityDiff, decodedRecord } from './backend-harness.js';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
-import { build, native, recipeArbitrary, seed, type Recipe } from './pushdown-arbitrary.js';
+import { build, native, recipeArbitrary, seed, shape, shapeCount, type Recipe } from './pushdown-arbitrary.js';
 let container: StartedTestContainer;
 let driver: ReturnType<typeof createClient>;
 const backends: ReturnType<typeof createClickHouseBackend>[] = [];
@@ -42,7 +42,7 @@ async function check(recipe: Recipe) {
     return rows;
   } finally { result.close(); }
 }
-const anchor: Recipe = { kind: 'inner', tenant: 'acme', minimum: 0, renames: 2, nullable: false, fence: 'none', take: 9, offset: 0 };
+const anchor: Recipe = { kind: 'inner', tenant: 'acme', minimum: 0, renames: 2, nullable: false, fence: 'none', take: 9, offset: 0, expansion: 'column', mixed: false };
 it('anchors duplicate, empty-array, NULL, tenant and shared-occurrence cardinalities independently', async () => {
   const decoded = values.map(r => ({ ...r, at: new Date(r.at), amount: BigInt(r.amount) }));
   expect(await check(anchor)).toEqual([...Array(5).fill(decoded[0]), ...Array(2).fill(decoded[1])]);
@@ -50,6 +50,11 @@ it('anchors duplicate, empty-array, NULL, tenant and shared-occurrence cardinali
   expect(await check({ ...anchor, kind: 'shared' })).toEqual([decoded[0]]);
   expect(await check({ ...anchor, kind: 'cross', tenant: 'other' })).toEqual([decoded[3]]);
   expect(await check({ ...anchor, fence: 'limit', take: 3, offset: 1 })).toEqual(Array(3).fill(decoded[0]));
+  // A Param array expands every row, the empty-array row included; the mixed filter pushes only its safe conjuncts.
+  expect(await check({ ...anchor, kind: 'array', expansion: 'constant', mixed: true })).toEqual([...Array(2).fill(decoded[0]), ...Array(2).fill(decoded[1]), ...Array(2).fill(decoded[2])]);
+  const mixed = rewriteRel(build({ ...anchor, mixed: true }).ir);
+  expect(mixed.hits.PushFilterJoin).toBeGreaterThan(0); expect(mixed.hits.PushFilterArrayJoin).toBe(1);
+  expect(await check({ ...anchor, mixed: true })).toEqual([...Array(5).fill(decoded[0]), ...Array(2).fill(decoded[1])]);
 });
 it('preserves nested occurrence paths, same-side residuals, swapped names and shared consumers', async () => {
   const nested = join({ t0: components, '__typedhouse_input': parts }).on(r => r.t0.tenant.eq(r.__typedhouse_input.tenant));
@@ -85,7 +90,7 @@ it('executes 500 bounded shrinkable multi-operator recipes with actual rule/topo
   const result = await fc.check(fc.asyncProperty(recipeArbitrary, async recipe => {
     const rewritten = rewriteRel(build(recipe).ir);
     for (const [rule, n] of Object.entries(rewritten.hits)) if (n) hits.add(rule);
-    shapes.add(`${recipe.kind}:${recipe.fence}`);
+    shapes.add(shape(recipe));
     try { await check(recipe); } catch (cause) {
       const sqls = backends.map(b => { const p = b.compile(build(recipe).ir).compiled; return { name: b.name, sql: p.sql, params: p.params }; });
       throw new Error(`${String(cause)}\n${JSON.stringify(sqls)}`, { cause });
@@ -95,7 +100,7 @@ it('executes 500 bounded shrinkable multi-operator recipes with actual rule/topo
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(500);
   expect([...hits].sort()).toEqual(['MergeFilter', 'MergeProject', 'PushFilterArrayJoin', 'PushFilterJoin', 'PushFilterProject']);
-  expect(shapes.size).toBe(15);
+  expect(shapes.size).toBe(shapeCount);
 }, 120000);
 it('detects real decoded duplicate loss, genuinely shrinks and exactly replays', async () => {
   const source = backends[1]!;

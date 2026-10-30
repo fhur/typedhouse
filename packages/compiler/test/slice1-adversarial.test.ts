@@ -251,24 +251,27 @@ it('nested-input selections over joins merge and push with path-2 refs intact an
   const query = joined.map(r => ({ ...r.a, k: r.b.k })).map(r => ({ id: r.id, n2: r.n.plus(val(1n, col.Int64)), k: r.k })).where(r => r.n2.gt(5n).and(r.k.lt(3n)));
   const { hits, root, compiled } = rewrite(query.ir);
   expect(hits.MergeProject).toBe(1); expect(hits.PushFilterProject).toBe(1);
-  // FINDING (limitation, pinned): the pushed predicate carries `plus`, so it fails `safePredicate` and `local`'s entry
-  // check makes the new Filter(Join) terminal. Neither conjunct reaches a join side, not even the safe `b.k < 3`.
-  expect(hits.PushFilterJoin).toBe(0);
-  if (root.kind !== 'Project' || root.input.kind !== 'Filter') throw new Error('shape');
-  expect(root.input.input).toBe(joined.ir);
+  // Slice 1 Finding 1, fixed in slice 2 (per-conjunct gating): the safe conjunct `b.k < 3` reaches side b while the
+  // arithmetic conjunct (total, not safe) stays above the join as the residual. Flipped deliberately from `toBe(0)`.
+  expect(hits.PushFilterJoin).toBe(1);
+  if (root.kind !== 'Project' || root.input.kind !== 'Filter' || root.input.input.kind !== 'Join') throw new Error('shape');
+  expect(root.input.input.inputs[0]![1]).toBe(q.ir);
+  expect(root.input.input.inputs[1]![1].kind).toBe('Filter');
   expect(safePredicate(root.input.pred)).toBe(false);
   expect(totalPredicate(root.input.pred)).toBe(true);
+  expect(references(root.input.pred).map(r => r.path)).toEqual([['a', 'n']]);
   expect(references(root.exprs.n2!).map(r => r.path)).toEqual([['a', 'n']]);
-  expect(compiled.sql).toContain('WHERE (`a`.`n` + {p0:Int64} > {p1:Int64} AND `b`.`k` < {p2:Int64})');
+  expect(compiled.sql).toContain('INNER ALL JOIN (SELECT `id`, `k` FROM `adv2` WHERE `k` < {p1:Int64}) AS `b` ON `a`.`id` = `b`.`id` WHERE (`a`.`n` + {p0:Int64} > {p2:Int64})');
   expect(selects(compiled.sql)).toBeLessThan(selects(emitNaive(query.ir).sql));
-  // The same filter written as a rename-only selection does reach the join sides (pre-existing fast path).
+  // The same filter written as a rename-only selection reaches both join sides.
   const renamed = joined.map(r => ({ ...r.a, k: r.b.k })).where(r => r.n.gt(5n).and(r.k.lt(3n)));
   expect(rewrite(renamed.ir).hits.PushFilterJoin).toBe(1);
-  // And a safe filter stacked *below* a pushed total filter is not merged with it either (MergeFilter needs both safe).
+  // A safe filter stacked *below* a pushed total filter now merges with it (slice 2: MergeFilter needs both total,
+  // merging changes no evaluation set). Flipped deliberately from `toBe(0)`; the SQL text is unchanged.
   const stacked = q.where(r => r.id.gt(1)).map(r => ({ a: r.n.plus(val(1n, col.Int64)) })).where(r => r.a.gt(5n));
   const st = rewrite(stacked.ir);
-  expect(st.hits.MergeFilter).toBe(0);
-  if (st.root.kind !== 'Project' || st.root.input.kind !== 'Filter' || st.root.input.input.kind !== 'Filter') throw new Error('shape');
+  expect(st.hits.MergeFilter).toBe(1);
+  if (st.root.kind !== 'Project' || st.root.input.kind !== 'Filter' || st.root.input.input !== q.ir) throw new Error('shape');
   expect(st.compiled.sql).toBe('SELECT `n` + {p0:Int64} AS `a` FROM `adv` WHERE `id` > {p1:UInt32} AND `n` + {p0:Int64} > {p2:Int64}');
   // Substitution never touches a path-2 ref bound to the join when the inner selection is a spread of one side.
   const spread = joined.map(r => ({ ...r.a })).map(r => ({ id: r.id }));
@@ -401,6 +404,7 @@ it('a total-but-unsafe pushed filter stays sound over an Aggregate (new block, n
   const j = rewrite(overArray.ir);
   expect(j.hits.PushFilterProject).toBe(1); expect(j.hits.PushFilterArrayJoin).toBe(0);
   if (j.root.kind !== 'Project' || j.root.input.kind !== 'Filter' || j.root.input.input.kind !== 'ArrayJoin') throw new Error('shape');
-  expect(j.compiled.sql).toContain('ARRAY JOIN');
-  expect(j.compiled.sql).toContain('WHERE `__typedhouse_input`.`one` = {p');
+  // Slice 2 folds the ARRAY JOIN into the scan block (alias-dependent WHERE after it); the computed `id` alias shadows
+  // the physical column, so the selection alone keeps its derived table. Emission shape updated deliberately.
+  expect(j.compiled.sql).toContain('FROM (SELECT `id`, `one` FROM `adv` ARRAY JOIN `ids` AS `one` WHERE `one` = {p1:String}) AS `__typedhouse_input`');
 });

@@ -126,7 +126,8 @@ it('nested-input selections over a join, shared diamonds and shared Params agree
   const k = val(1n, col.Int64);
   const joined = join({ a: q, b: q2 }).on(r => r.a.id.eq(r.b.id));
   const nested = joined.map(r => ({ ...r.a, k: r.b.k })).map(r => ({ id: r.id, n2: r.n.plus(k), k: r.k })).where(r => r.n2.lt(5n).and(r.k.lt(3n)));
-  const r1 = await agree(nested.ir, 'SELECT a.id AS id, a.n + 1 AS n2, b.k AS k FROM adv_native AS a INNER JOIN adv_native2 AS b ON a.id = b.id WHERE a.n + 1 < 5 AND b.k < 3', { MergeProject: 1, PushFilterProject: 1, PushFilterJoin: 0 });
+  // Slice 2 (per-conjunct gating) flips the slice 1 Finding 1 pin from `PushFilterJoin: 0`: the safe `b.k < 3` reaches side b.
+  const r1 = await agree(nested.ir, 'SELECT a.id AS id, a.n + 1 AS n2, b.k AS k FROM adv_native AS a INNER JOIN adv_native2 AS b ON a.id = b.id WHERE a.n + 1 < 5 AND b.k < 3', { MergeProject: 1, PushFilterProject: 1, PushFilterJoin: 1 });
   expect(r1.data).toEqual([{ id: 1, n2: '-9223372036854775808', k: '1' }, { id: 3, n2: '1', k: '2' }, { id: 3, n2: '1', k: '2' }]);
   const shared = q.map(r => ({ id: r.id, total: r.n.plus(k) }));
   const diamond = crossJoin({ a: shared.where(r => r.total.gt(5n)), b: shared.map(r => ({ id: r.id })) }).map(r => ({ x: r.a.id, y: r.b.id, t: r.a.total }));

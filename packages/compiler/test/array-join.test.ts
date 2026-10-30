@@ -1,6 +1,9 @@
 import { expect, it } from 'vitest';
-import { col, columnExpr, from, table, relNode, flatOutput, val, type Rel } from '@typedhouse/core';
-import { emitNaive } from '../src/index.js';
+import { cast, col, columnExpr, count, defineFunction, from, table, relNode, flatOutput, val, type Rel } from '@typedhouse/core';
+import { compile, emitNaive } from '../src/index.js';
+import { emitPlanned, validateRel, ValidationError } from '../src/emit-naive.js';
+import { planSelects } from '../src/plan-selects.js';
+import { pruneColumns } from '../src/prune-columns.js';
 const t = table('t`', { id: col.UInt32, a: col.Array(col.Tuple({ label: col.String })) }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [], source: { kind: 'test' } });
 it('retains immutable scan hints, source capabilities and exact descriptors', () => {
   const q = from(t), hinted = q.sample(0.25).final();
@@ -44,4 +47,62 @@ it('rejects malformed array join shape, scope, mode and aliases with node paths'
   expect(() => emitNaive(relNode({ ...fields, output, columns: output.columns }))).toThrow(/invalid_output at root/);
   expect(() => (q.arrayJoin as Function)(() => q.row.id, 'v')).toThrow(/invalid_array_join_expression/);
   expect(() => (q.arrayJoin as Function)(() => q.row.a, 'a')).toThrow(/duplicate_column/);
+});
+it('folds one ARRAY JOIN into a scan block after FINAL and SAMPLE, aliasing the element verbatim; naive emission is unchanged', () => {
+  const hinted = from(t).sample(0.25).final();
+  const query = hinted.arrayJoin(r => r.a, 'v').where(r => r.id.gt(1)).orderBy(r => r.id).limit(2);
+  expect(compile(query.ir).sql).toBe('SELECT `id`, `a`, `v` FROM `t\\`` FINAL SAMPLE 0.25 ARRAY JOIN `a` AS `v` WHERE `id` > {p0:UInt32} ORDER BY `id` ASC LIMIT 2');
+  expect(emitNaive(query.ir).sql).toBe('SELECT `id`, `a`, `v` FROM (SELECT `__typedhouse_input`.`id`, `__typedhouse_input`.`a`, `__typedhouse_input`.`v` FROM (SELECT `id`, `a`, `v` FROM (SELECT `__typedhouse_input`.`id` AS `id`, `__typedhouse_input`.`a` AS `a`, `__typedhouse_element` AS `v` FROM (SELECT `id`, `a` FROM `t\\`` FINAL SAMPLE 0.25) AS `__typedhouse_input` ARRAY JOIN `__typedhouse_input`.`a` AS `__typedhouse_element`) AS `__typedhouse_input` WHERE greater(`__typedhouse_input`.`id`, {p0:UInt32})) AS `__typedhouse_input` ORDER BY `__typedhouse_input`.`id` ASC) LIMIT 2');
+  expect(compile(query.ir).params).toEqual(emitNaive(query.ir).params);
+  expect(compile(query.ir).columns).toEqual(emitNaive(query.ir).columns);
+  expect(compile(from(t).leftArrayJoin(r => r.a, 'v').ir).sql).toBe('SELECT `id`, `a`, `v` FROM `t\\`` LEFT ARRAY JOIN `a` AS `v`');
+  // Tuple extraction is a total array expression: it expands in place, with the selector as a parameter.
+  const labels = from(t).arrayJoin(r => r.a.element('label'), 'label').where(r => r.label.eq('x')).map(r => ({ id: r.id, label: r.label }));
+  expect(compile(labels.ir).sql).toBe('SELECT `id`, `label` FROM `t\\`` ARRAY JOIN tupleElement(`a`, {p0:String}) AS `label` WHERE `label` = {p1:String}');
+  // A Param array is a total expansion; its Param precedes the WHERE Params in text.
+  const constant = from(t).arrayJoin(() => val(['x'], col.Array(col.String)), 'v').where(r => r.v.eq('y'));
+  expect(compile(constant.ir).sql).toBe('SELECT `id`, `a`, `v` FROM `t\\`` ARRAY JOIN {p0:Array(String)} AS `v` WHERE `v` = {p1:String}');
+  expect(compile(constant.ir).params).toEqual({ p0: "['x']", p1: 'y' });
+});
+it('keeps one ARRAY JOIN per block and never folds over a CTE, a derived table, an unsafe inner filter or an aggregate', () => {
+  const twice = from(t).arrayJoin(r => r.a, 'v').arrayJoin(r => r.a, 'w');
+  expect(compile(twice.ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id`, `__typedhouse_input`.`a` AS `a`, `__typedhouse_input`.`v` AS `v`, `__typedhouse_element` AS `w` FROM (SELECT `id`, `a`, `v` FROM `t\\`` ARRAY JOIN `a` AS `v`) AS `__typedhouse_input` ARRAY JOIN `__typedhouse_input`.`a` AS `__typedhouse_element`');
+  const cte = from(t).cte().arrayJoin(r => r.a, 'v');
+  expect(compile(cte.ir).sql).toContain('FROM (SELECT `t0`.`id`, `t0`.`a` FROM `t0`) AS `__typedhouse_input` ARRAY JOIN');
+  const limited = from(t).limit(1).arrayJoin(r => r.a, 'v');
+  expect(compile(limited.ir).sql).toContain('LIMIT 1) AS `__typedhouse_input` ARRAY JOIN `__typedhouse_input`.`a` AS `__typedhouse_element`');
+  // An inner ARRAY JOIN drops empty-array rows before WHERE: a fallible filter below it keeps its own scope; LEFT folds.
+  const unsafe = from(t).where(r => cast(r.id, col.String).ne('x'));
+  expect(compile(unsafe.arrayJoin(r => r.a, 'v').ir).sql).toContain('WHERE CAST(`id` AS String) != {p0:String}) AS `__typedhouse_input` ARRAY JOIN');
+  expect(compile(unsafe.leftArrayJoin(r => r.a, 'v').ir).sql).toBe('SELECT `id`, `a`, `v` FROM `t\\`` LEFT ARRAY JOIN `a` AS `v` WHERE CAST(`id` AS String) != {p0:String}');
+  expect(compile(from(t).where(r => r.id.plus(1).gt(2n)).arrayJoin(r => r.a, 'v').ir).sql).toContain(') AS `__typedhouse_input` ARRAY JOIN');
+  // LEFT folds only over deterministic filters: a volatile call keeps the nested emission, as the rewrite rules never move it.
+  const volatile = defineFunction({ name: 'rowNumberInAllBlocks', args: [], returns: col.UInt64, deterministic: false });
+  expect(compile(from(t).where(() => volatile().eq(0n)).leftArrayJoin(r => r.a, 'v').ir).sql).toContain('WHERE rowNumberInAllBlocks() = {p0:UInt64}) AS `__typedhouse_input` LEFT ARRAY JOIN `__typedhouse_input`.`a` AS `__typedhouse_element`');
+  // Aggregate blocks qualify source columns with the input alias, so an expanded block stays a derived table (recorded).
+  const grouped = from(t).arrayJoin(r => r.a, 'v').groupBy(r => ({ id: r.id })).aggregate(() => ({ n: count() }));
+  expect(compile(grouped.ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id`, count() AS `n` FROM (SELECT `id` FROM `t\\`` ARRAY JOIN `a` AS `v`) AS `__typedhouse_input` GROUP BY `__typedhouse_input`.`id`');
+});
+it('selects the alias as a plain column, shadow-checks it against computed aliases, and folds DISTINCT over the expansion', () => {
+  const expanded = from(t).arrayJoin(r => r.a, 'v');
+  expect(compile(expanded.map(r => ({ v: r.v })).ir).sql).toBe('SELECT `v` FROM `t\\`` ARRAY JOIN `a` AS `v`');
+  expect(compile(expanded.map(r => ({ n: r.id.plus(1), v: r.v })).ir).sql).toBe('SELECT `id` + {p0:UInt32} AS `n`, `v` AS `v` FROM `t\\`` ARRAY JOIN `a` AS `v`');
+  expect(compile(expanded.map(r => ({ v: r.id.plus(1) })).ir).sql).toBe('SELECT `__typedhouse_input`.`id` + {p0:UInt32} AS `v` FROM (SELECT `id` FROM `t\\`` ARRAY JOIN `a` AS `v`) AS `__typedhouse_input`');
+  expect(compile(expanded.distinct().orderBy(r => r.id).ir).sql).toBe('SELECT DISTINCT `id`, `a`, `v` FROM `t\\`` ARRAY JOIN `a` AS `v` ORDER BY `id` ASC');
+  expect(compile(expanded.distinct().where(r => r.id.gt(1)).ir).sql).toBe('SELECT `__typedhouse_input`.`id`, `__typedhouse_input`.`a`, `__typedhouse_input`.`v` FROM (SELECT DISTINCT `id`, `a`, `v` FROM `t\\`` ARRAY JOIN `a` AS `v`) AS `__typedhouse_input` WHERE `__typedhouse_input`.`id` > {p0:UInt32}');
+  for (const query of [expanded, expanded.distinct(), expanded.map(r => ({ v: r.v }))]) expect(compile(query.ir).columns).toEqual(emitNaive(query.ir).columns);
+});
+it('rejects a folded block whose select list names a column the pruned scan does not provide', () => {
+  const query = from(t).arrayJoin(r => r.a, 'v').map(r => ({ id: r.id, v: r.v }));
+  const validated = validateRel(query.ir);
+  const columns = new Map(pruneColumns(query.ir));
+  for (const [rel, leaves] of columns) if (rel.kind === 'Scan') columns.set(rel, leaves.filter(l => l.name !== 'id'));
+  let error: unknown;
+  try { emitPlanned(planSelects(query.ir, Object.values(validated.nodes), columns)); } catch (caught) { error = caught; }
+  // Same ValidationError path and code string as the naive ArrayJoin guard.
+  expect(error).toBeInstanceOf(ValidationError);
+  expect((error as ValidationError).code).toBe('missing_physical_column');
+  expect((error as ValidationError).path).toBe('root');
+  expect(String(error)).toContain('missing_physical_column at root: id');
+  expect(emitPlanned(planSelects(query.ir, Object.values(validated.nodes), pruneColumns(query.ir))).sql).toBe('SELECT `id`, `v` FROM `t\\`` ARRAY JOIN `a` AS `v`');
 });

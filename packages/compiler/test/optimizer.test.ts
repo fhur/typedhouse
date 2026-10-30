@@ -30,10 +30,20 @@ it('keeps reversed and repeated clause boundaries', () => {
 });
 
 it('folds above but not through projection and distinct fences', () => {
-  const q = from(products).map(r => ({ stock: r.stock.plus(1n) })).distinct()
+  // DISTINCT folds over the computed selection; the filter after it opens a new block (WHERE precedes DISTINCT).
+  const q = from(products).map(r => ({ next: r.stock.plus(1n) })).distinct()
+    .where(r => r.next.eq(2n)).orderBy(r => r.next).limit(1);
+  expect(selects(compile(q.ir).sql)).toBe(2);
+  expect(compile(q.ir).sql).toBe('SELECT `__typedhouse_input`.`next` FROM (SELECT DISTINCT `stock` + {p0:UInt64} AS `next` FROM `products`) AS `__typedhouse_input` WHERE `__typedhouse_input`.`next` = {p1:UInt64} ORDER BY `__typedhouse_input`.`next` ASC LIMIT 1');
+  // A computed alias shadowing a physical column keeps its own derived table, as before.
+  const shadowed = from(products).map(r => ({ stock: r.stock.plus(1n) })).distinct()
     .where(r => r.stock.eq(2n)).orderBy(r => r.stock).limit(1);
-  expect(selects(compile(q.ir).sql)).toBe(4);
-  expect(compile(q.ir).sql).toContain('SELECT DISTINCT');
+  expect(selects(compile(shadowed.ir).sql)).toBe(4);
+  // Reversed: DISTINCT after ORDER BY still fences, and no DISTINCT is emitted where the IR has none.
+  const reversed = from(products).where(r => r.stock.gt(1n)).orderBy(r => r.stock).distinct();
+  expect(selects(compile(reversed.ir).sql)).toBe(2);
+  expect(compile(reversed.ir).sql).toBe('SELECT DISTINCT `__typedhouse_input`.`id`, `__typedhouse_input`.`category`, `__typedhouse_input`.`stock` FROM (SELECT `id`, `category`, `stock` FROM `products` WHERE `stock` > {p0:UInt64} ORDER BY `stock` ASC) AS `__typedhouse_input`');
+  expect(compile(from(products).where(r => r.stock.gt(1n)).orderBy(r => r.stock).ir).sql).not.toContain('DISTINCT');
 });
 
 it('preserves shared parameter identity and textual allocation order', () => {

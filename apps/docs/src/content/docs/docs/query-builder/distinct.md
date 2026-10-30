@@ -48,14 +48,9 @@ Final SQL:
 
 ```sql
 SELECT DISTINCT
-  `__typedhouse_input`.`tenant`
+  `tenant`
 FROM
-  (
-    SELECT
-      `tenant`
-    FROM
-      `events`
-  ) AS `__typedhouse_input`
+  `events`
 ```
 
 Parameters:

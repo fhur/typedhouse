@@ -9,7 +9,7 @@ sidebar:
 
 ## Example
 
-The inner `map` renames `id` and `tenant`; the outer `map` computes on the renamed columns. The final SQL has a single selection: the intermediate `eventId`/`owner` level is gone, and the remaining derived table is only the pruned scan. [SELECT-block folding](/docs/compiler/select-blocks/) collapses that too when the arithmetic parameter is typed (`e.eventId.plus(val(1, col.UInt32))`).
+The inner `map` renames `id` and `tenant`; the outer `map` computes on the renamed columns. The final SQL is a single `SELECT` over the scan: the intermediate `eventId`/`owner` level is gone, and the merged selection [folds into the scan block](/docs/compiler/select-blocks/).
 
 <details>
 <summary>Setup: imports and table definitions</summary>
@@ -51,16 +51,10 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` + {p0:UInt32} AS `nextId`,
-  `__typedhouse_input`.`tenant` AS `owner`
+  `id` + {p0:UInt32} AS `nextId`,
+  `tenant` AS `owner`
 FROM
-  (
-    SELECT
-      `id`,
-      `tenant`
-    FROM
-      `events`
-  ) AS `__typedhouse_input`
+  `events`
 ```
 
 Parameters:

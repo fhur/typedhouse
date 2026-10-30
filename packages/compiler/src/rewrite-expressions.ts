@@ -62,8 +62,9 @@ const booleanFamily = ['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'and', 'or', 'not', '
 const comparisons = ['eq', 'ne', 'lt', 'le', 'gt', 'ge'];
 const arithmeticFamily = ['plus', 'minus', 'multiply'];
 /** Closed total fragment, checked against the authoritative resolver, not flags.
- * `wide` admits integer `plus`/`minus`/`multiply` (ClickHouse wraps) and same-family
- * `ifNull` as operands; the boolean family alone is the predicate fragment. */
+ * `wide` admits integer `plus`/`minus`/`multiply` (ClickHouse wraps), same-family
+ * `ifNull` and `element` of a named tuple (or array of tuples) column with a
+ * catalog-checked constant selector; the boolean family alone is the predicate fragment. */
 function resolveTotal(e: ExprNode, wide: boolean): CHType | undefined {
   function resolve(a: ExprNode, expected?: CHType): CHType {
     if (a.kind === 'ColumnRef' || a.kind === 'Param') {
@@ -73,6 +74,11 @@ function resolveTotal(e: ExprNode, wide: boolean): CHType | undefined {
     }
     if (a.kind !== 'Call' || a.fn.origin !== 'typed') throw new Error('unsafe expression');
     const name = a.fn.name;
+    if (wide && name === 'element' && a.args[0]?.kind === 'ColumnRef') {
+      const resolved = resolveCall(a, (x, want) => x.kind === 'ColumnRef' ? x.type : resolve(x, want));
+      if (!methodCatalog.find(d => d.name === name)?.deterministic) throw new Error('unsafe metadata');
+      return resolved.result;
+    }
     const arithmetic = wide && arithmeticFamily.includes(name), fallback = wide && name === 'ifNull';
     if (!booleanFamily.includes(name) && !arithmetic && !fallback) throw new Error('unsafe function');
     const resolved = resolveCall(a, resolve);
@@ -125,6 +131,11 @@ export function references(e: ExprNode): Ref[] {
   const refs: Ref[] = [];
   mapExpression(e, r => { refs.push(r); return r; });
   return refs;
+}
+/** No Raw, no Subquery and no call whose catalog entry is not deterministic: evaluating
+ * such an expression at another point of the plan could change its value. */
+export function deterministicExpression(e: ExprNode): boolean {
+  return !contains(e, a => a.kind === 'Raw' || a.kind === 'Subquery' || (a.kind === 'Call' || a.kind === 'Agg') && a.fn.deterministic !== true);
 }
 export function contains(e: ExprNode, test: (e: ExprNode) => boolean): boolean {
   if (test(e)) return true;

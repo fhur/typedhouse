@@ -83,6 +83,9 @@ export function rewriteMeasure(root: Rel): readonly [number, number, number] {
  * when that distance is unchanged. Union replication replaces weight
  * 1 + sum(branch sizes) with sum(branch sizes) per conjunct, strictly decreasing
  * distance despite increasing Filter count. Repeated slots count as occurrences.
+ * Splitting a conjunction leaves every residual conjunct at its old distance while
+ * each pushed conjunct loses at least the crossed node's weight, so per-conjunct
+ * arms decrease distance exactly as whole-predicate pushes did.
  * MergeProject changes neither distance nor Filter count unless a Filter sits above
  * it (then distance drops); it strictly decreases the non-Filter occurrence count.
  * No rule pulls predicates upward. Fifty passes are a safety limit, never partial success.
@@ -106,43 +109,46 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
     hits.MergeProject++;
     return relNode({ kind: 'Project', input: inner.input, exprs: mapRecord(outer.exprs, e => substitute(e, inner)), columns: outer.columns, output: outer.output });
   }
+  /** Every arm decides conjunct by conjunct: the qualifying subset crosses the child,
+   * the rest stays above as a residual Filter. A conjunction never promises to evaluate
+   * one conjunct on rows another rejects, so splitting cannot suppress a failure; what
+   * crosses a Join/ArrayJoin/Aggregate/Union boundary is `safePredicate`, what crosses
+   * a Project is `totalPredicate` (the substituted copy), and nothing else moves. */
   function local(node: Rel): Rel {
     if (node.kind === 'Project') return mergeProject(node);
-    if (node.kind !== 'Filter' || !safePredicate(node.pred)) return node;
+    if (node.kind !== 'Filter') return node;
     const child = node.input;
-    if (child.kind === 'Filter' && safePredicate(child.pred)) {
+    const split = (qualifies: (pred: ExprNode) => boolean) => {
+      const pushed: ExprNode[] = [], residual: ExprNode[] = [];
+      for (const pred of conjuncts(node.pred)) (qualifies(pred) ? pushed : residual).push(pred);
+      return { pushed, residual };
+    };
+    const above = (rewritten: Rel, residual: readonly ExprNode[]) => residual.length ? filter(rewritten, rebind(conjunction(residual), child, rewritten)) : rewritten;
+    // Merging changes no evaluation set, so both predicates need only be total.
+    if (child.kind === 'Filter') {
+      if (!totalPredicate(node.pred) || !totalPredicate(child.pred)) return node;
       hits.MergeFilter++;
       return filter(child.input, conjunction([child.pred, rebind(node.pred, child, child.input)]));
     }
     if (child.kind === 'Aggregate' && Object.getOwnPropertyNames(child.keys).length && safeAggregate(child)) {
-      const pushed: ExprNode[] = [], residual: ExprNode[] = [];
-      for (const pred of conjuncts(node.pred)) {
-        const refs = references(pred);
-        if (!refs.every(r => r.rel === child.id && r.path.length === 1 && Object.hasOwn(child.keys, r.path[0]!))) { residual.push(pred); continue; }
-        pushed.push(mapExpression(pred, r => child.keys[r.path[0]!]!));
-      }
+      const { pushed, residual } = split(pred => safePredicate(pred) && references(pred).every(r => r.rel === child.id && r.path.length === 1 && Object.hasOwn(child.keys, r.path[0]!)));
       if (!pushed.length) return node;
-      const input = filter(child.input, conjunction(pushed));
+      const input = filter(child.input, conjunction(pushed.map(pred => mapExpression(pred, r => child.keys[r.path[0]!]!))));
       const aggregate = relNode({ kind: 'Aggregate', input, output: child.output, columns: child.columns,
         keys: mapRecord(child.keys, e => rebind(e, child.input, input)), aggs: mapRecord(child.aggs, e => rebind(e, child.input, input)) });
       hits.PushFilterAggKey++;
-      return residual.length ? filter(aggregate, rebind(conjunction(residual), child, aggregate)) : aggregate;
+      return above(aggregate, residual);
     }
     if (child.kind === 'Union') {
       const schema = (r: Rel) => JSON.stringify(outputLeaves(r.output).map(l => [l.path, print(l.type)]));
       if (!child.inputs.every(r => schema(r) === schema(child))) return node;
+      const { pushed, residual } = split(safePredicate);
+      if (!pushed.length) return node;
       // Each slot gets its own binding; the branch itself (including fences) is
       // untouched. Subsequent passes can only cross their existing safe rules.
-      const inputs = child.inputs.map(input => filter(input, rebind(node.pred, child, input)));
+      const inputs = child.inputs.map(input => filter(input, rebind(conjunction(pushed), child, input)));
       hits.PushFilterUnion++;
-      return relNode({ kind: 'Union', inputs, all: child.all, output: child.output });
-    }
-    if (child.kind === 'Project' && Object.getOwnPropertyNames(child.exprs).every(k => { const e = child.exprs[k]!; return e.kind === 'ColumnRef' && e.rel === child.input.id; })) {
-      const pred = mapExpression(node.pred, r => r.rel === child.id && r.path.length === 1 ? child.exprs[r.path[0]!]! : r);
-      if (!references(pred).every(r => r.rel === child.input.id)) return node;
-      const input = filter(child.input, pred);
-      hits.PushFilterProject++;
-      return relNode({ kind: 'Project', input, output: child.output, columns: child.columns, exprs: mapRecord(child.exprs, e => rebind(e, child.input, input)) });
+      return above(relNode({ kind: 'Union', inputs, all: child.all, output: child.output }), residual);
     }
     if (child.kind === 'Project') {
       const names = Object.getOwnPropertyNames(child.exprs);
@@ -159,12 +165,17 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
       const input = filter(child.input, conjunction(pushed));
       const project = relNode({ kind: 'Project', input, output: child.output, columns: child.columns, exprs: mapRecord(child.exprs, e => rebind(e, child.input, input)) });
       hits.PushFilterProject++;
-      return residual.length ? filter(project, rebind(conjunction(residual), child, project)) : project;
+      return above(project, residual);
     }
-    if (child.kind === 'ArrayJoin' && child.expr.kind === 'ColumnRef' && child.expr.rel === child.input.id && references(node.pred).every(r => r.rel === child.id && !(r.path.length === 1 && r.path[0] === child.alias))) {
-      const input = filter(child.input, rebind(node.pred, child, child.input));
+    // An inner ARRAY JOIN drops empty-array rows before any later WHERE sees them, so a
+    // conjunct moving below it is evaluated on rows it never saw: only total predicates
+    // move, and the expansion expression itself must be total since it runs on fewer rows.
+    if (child.kind === 'ArrayJoin' && totalExpression(child.expr)) {
+      const { pushed, residual } = split(pred => safePredicate(pred) && references(pred).every(r => r.rel === child.id && !(r.path.length === 1 && r.path[0] === child.alias)));
+      if (!pushed.length) return node;
+      const input = filter(child.input, rebind(conjunction(pushed), child, child.input));
       hits.PushFilterArrayJoin++;
-      return relNode({ kind: 'ArrayJoin', input, expr: rebind(child.expr, child.input, input), alias: child.alias, left: child.left, output: child.output, columns: child.columns });
+      return above(relNode({ kind: 'ArrayJoin', input, expr: rebind(child.expr, child.input, input), alias: child.alias, left: child.left, output: child.output, columns: child.columns }), residual);
     }
     if (child.kind === 'Join' && (child.joinKind === 'inner' || child.joinKind === 'cross') && child.on.every(safePredicate)) {
       const sides = new Map<string, ExprNode[]>();
@@ -172,7 +183,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
       for (const pred of conjuncts(node.pred)) {
         const refs = references(pred);
         const alias = refs[0]?.path[0];
-        if (!alias || !refs.every(r => r.rel === child.id && r.path[0] === alias) || !child.inputs.some(([a]) => a === alias)) { residual.push(pred); continue; }
+        if (!safePredicate(pred) || !alias || !refs.every(r => r.rel === child.id && r.path[0] === alias) || !child.inputs.some(([a]) => a === alias)) { residual.push(pred); continue; }
         const es = sides.get(alias) ?? [];
         es.push(pred); sides.set(alias, es);
       }
@@ -185,7 +196,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
       });
       const joined = relNode({ kind: 'Join', joinKind: child.joinKind, inputs, on: child.on, scope: child.scope ?? child.id, output: child.output });
       hits.PushFilterJoin++;
-      return residual.length ? filter(joined, rebind(conjunction(residual), child, joined)) : joined;
+      return above(joined, residual);
     }
     return node;
   }

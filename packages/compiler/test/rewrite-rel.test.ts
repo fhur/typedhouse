@@ -1,9 +1,9 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, max, sum, crossJoin, exprNode, from, join, scalar, table, unionAll, val, type Rel } from '@typedhouse/core';
+import { cast, col, count, createKnownFunctions, max, sum, crossJoin, exprNode, from, join, scalar, table, unionAll, val, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { validateRel } from '../src/emit-naive.js';
 import { rewriteRel } from '../src/rewrite-rel.js';
-import { references, safePredicate } from '../src/rewrite-expressions.js';
+import { conjuncts, references, safePredicate, totalExpression } from '../src/rewrite-expressions.js';
 const q = from(table('rewrite', { id: col.UInt32, text: col.Nullable(col.String), ids: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 function rewrite(root: Rel) {
   const snapshot = () => JSON.stringify(root, (_, v: unknown) => typeof v === 'bigint' ? `${v}n` : v);
@@ -236,4 +236,70 @@ it('retains original invalid graph diagnostics and fails loudly at the convergen
   expect(() => compile(invalid.ir)).toThrow(String(reference).replace(/^ValidationError: /, ''));
   const query = q.map(r => ({ id: r.id })).where(r => r.id.gt(1));
   expect(() => rewriteRel(query.ir, 1)).toThrow('rewrite_nonconvergence');
+});
+it('pushes safe conjuncts below any total array expansion, keeping alias-dependent and unsafe ones above', () => {
+  const p = from(table('rewrite_parts', { id: col.UInt32, text: col.Nullable(col.String), parts: col.Array(col.Tuple({ id: col.String, mpn: col.Nullable(col.String) })) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const shared = val(['x', 'y'], col.Array(col.String));
+  expect(totalExpression(p.row.parts.element('mpn').ir)).toBe(true);
+  for (const expanded of [p.arrayJoin(r => r.parts.element('mpn'), 'mpn'), p.leftArrayJoin(r => r.parts.element('mpn'), 'mpn'), p.arrayJoin(() => shared, 'mpn')]) {
+    const result = rewrite(expanded.where(r => r.text.isNull().and(r.mpn.eq('a')).and(r.id.gt(1))).ir);
+    expect(result.hits.PushFilterArrayJoin).toBe(1);
+    if (result.root.kind !== 'Filter' || result.root.input.kind !== 'ArrayJoin' || result.root.input.input.kind !== 'Filter') throw new Error('shape');
+    expect(references(result.root.pred).map(r => r.path)).toEqual([['mpn']]);
+    expect(references(result.root.input.input.pred).map(r => r.path)).toEqual([['text'], ['id']]);
+    expect(result.root.input.input.input).toBe(p.ir);
+    expect(result.root.input.expr.kind === 'Param' ? result.root.input.expr : undefined).toBe(expanded.ir.kind === 'ArrayJoin' && expanded.ir.expr.kind === 'Param' ? expanded.ir.expr : undefined);
+  }
+  // `element` is total only with a ColumnRef receiver and a constant selector the catalog resolves.
+  const total = p.row.parts.element('mpn').ir;
+  if (total.kind !== 'Call') throw new Error('shape');
+  expect(totalExpression({ ...total, args: [total.args[0]!, p.row.id.ir] })).toBe(false); // non-constant selector
+  expect(totalExpression(p.row.parts.arrayElement(1).element('mpn').ir)).toBe(false); // computed receiver
+  expect(totalExpression({ ...total, args: [p.row.parts.arrayElement(1).ir, total.args[1]!] })).toBe(false);
+  // A known-origin expansion is outside the total fragment: evaluating it on fewer rows could hide a failure.
+  const { fn } = createKnownFunctions({ arraySort: { isAggregate: false, deterministic: true, aliasTo: '' } } as const);
+  const opaque = q.arrayJoin(r => fn.arraySort(r.ids).as(col.Array(col.String)), 'one').where(r => r.text.isNull());
+  expect(rewrite(opaque.ir).root).toBe(opaque.ir);
+  // An unsafe conjunct alone leaves the Filter where it is; total-but-unsafe arithmetic does not cross either.
+  for (const unsafe of [p.arrayJoin(r => r.parts.element('mpn'), 'mpn').where(r => cast(r.text, col.Nullable(col.UInt32)).gt(1)), p.arrayJoin(r => r.parts.element('mpn'), 'mpn').where(r => r.id.plus(1).gt(2n))]) {
+    expect(rewrite(unsafe.ir).root).toBe(unsafe.ir);
+  }
+});
+it('(vi) gates per conjunct: only safe conjuncts cross Join, ArrayJoin, Aggregate and Union; only total ones cross a Project', () => {
+  const unsafe = (text: typeof q.row.text) => cast(text, col.Nullable(col.UInt32)).gt(1);
+  const kinds = (e: import('@typedhouse/core').ExprNode) => conjuncts(e).map(c => c.kind === 'Call' && c.args.some(a => a.kind === 'Cast') ? 'cast' : safePredicate(c) ? 'safe' : 'arith');
+  const joined = rewrite(crossJoin({ a: q, b: q }).where(r => r.a.id.gt(1).and(r.a.id.plus(1).gt(2n)).and(unsafe(r.a.text))).ir);
+  expect(joined.hits.PushFilterJoin).toBe(1);
+  if (joined.root.kind !== 'Filter' || joined.root.input.kind !== 'Join' || joined.root.input.inputs[0]![1].kind !== 'Filter') throw new Error('shape');
+  expect(kinds(joined.root.pred)).toEqual(['arith', 'cast']);
+  expect(kinds(joined.root.input.inputs[0]![1].pred)).toEqual(['safe']);
+  expect(joined.root.input.inputs[1]![1]).toBe(q.ir);
+  const expanded = rewrite(q.arrayJoin(r => r.ids, 'part').where(r => r.id.gt(1).and(r.id.plus(1).gt(2n)).and(unsafe(r.text))).ir);
+  expect(expanded.hits.PushFilterArrayJoin).toBe(1);
+  if (expanded.root.kind !== 'Filter' || expanded.root.input.kind !== 'ArrayJoin' || expanded.root.input.input.kind !== 'Filter') throw new Error('shape');
+  expect(kinds(expanded.root.pred)).toEqual(['arith', 'cast']);
+  expect(kinds(expanded.root.input.input.pred)).toEqual(['safe']);
+  const grouped = q.groupBy(r => ({ key: r.id })).aggregate(() => ({ n: count() })).where(r => r.key.gt(1).and(r.key.plus(1).gt(2n)).and(cast(r.n, col.String).ne('x')));
+  const aggregated = rewrite(grouped.ir);
+  expect(aggregated.hits.PushFilterAggKey).toBe(1);
+  if (aggregated.root.kind !== 'Filter' || aggregated.root.input.kind !== 'Aggregate' || aggregated.root.input.input.kind !== 'Filter') throw new Error('shape');
+  expect(kinds(aggregated.root.pred)).toEqual(['arith', 'cast']);
+  expect(kinds(aggregated.root.input.input.pred)).toEqual(['safe']);
+  const union = rewrite(unionAll(q, q).where(r => r.id.gt(1).and(r.id.plus(1).gt(2n)).and(unsafe(r.text))).ir);
+  expect(union.hits.PushFilterUnion).toBe(1);
+  if (union.root.kind !== 'Filter' || union.root.input.kind !== 'Union') throw new Error('shape');
+  expect(kinds(union.root.pred)).toEqual(['arith', 'cast']);
+  for (const branch of union.root.input.inputs) { if (branch.kind !== 'Filter') throw new Error('shape'); expect(kinds(branch.pred)).toEqual(['safe']); expect(branch.input).toBe(q.ir); }
+  const projected = rewrite(q.map(r => ({ id: r.id, text: r.text })).where(r => r.id.gt(1).and(r.id.plus(1).gt(2n)).and(unsafe(r.text))).ir);
+  expect(projected.hits.PushFilterProject).toBe(1);
+  if (projected.root.kind !== 'Filter' || projected.root.input.kind !== 'Project' || projected.root.input.input.kind !== 'Filter') throw new Error('shape');
+  expect(kinds(projected.root.pred)).toEqual(['cast']);
+  expect(kinds(projected.root.input.input.pred)).toEqual(['safe', 'arith']);
+  expect(projected.root.input.input.input).toBe(q.ir);
+  // MergeFilter needs both predicates total, not safe: merging changes no evaluation set.
+  const merged = rewrite(q.where(r => r.id.plus(1).gt(2n)).where(r => r.id.gt(1)).ir);
+  expect(merged.hits.MergeFilter).toBe(1);
+  expect(merged.root.kind === 'Filter' && merged.root.input).toBe(q.ir);
+  const blocked = q.where(r => unsafe(r.text)).where(r => r.id.plus(1).gt(2n));
+  expect(rewrite(blocked.ir).root).toBe(blocked.ir);
 });

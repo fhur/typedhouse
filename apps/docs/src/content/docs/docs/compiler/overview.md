@@ -42,7 +42,7 @@ Rewrites retain parameter object identity. Placeholder allocation follows the em
 
 These transformations preserve query meaning, but do not promise faster execution for every query. ClickHouse still chooses the execution plan, and CTEs are not an execution cache.
 
-SELECT-block folding supports direct CTE references and safe typed integer arithmetic projections over scans and filters. Selection merging and filter pushdown substitute only expressions inside the compiler's closed total fragment; an expression that could fail or change value keeps its original evaluation set.
+SELECT-block folding supports direct CTE references, safe integer arithmetic projections over scans and filters, a `DISTINCT` flag before sorting and limiting, and one `ARRAY JOIN` per scan block. Selection merging and filter pushdown substitute only expressions inside the compiler's closed total fragment; an expression that could fail or change value keeps its original evaluation set.
 
 Currently absent: outer-join rewrites, join reordering, cost/statistics-based planning, explicit PREWHERE movement, limit/top-k pushdown through UNION, and real temporary-table materialization.
 
