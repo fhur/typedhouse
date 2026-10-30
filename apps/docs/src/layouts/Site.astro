@@ -19,12 +19,13 @@ const links = [
     <meta name="viewport" content="width=device-width" />
     <link rel="icon" type="image/svg+xml" href={withBase('/favicon.svg')} />
     <meta name="description" content={description} />
-    <meta property="og:title" content={title} />
+    <meta property="og:title" content={`${title} · TypedHouse`} />
+    <meta property="og:site_name" content="TypedHouse" />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
     <link rel="canonical" href={canonical} />
-    <link rel="alternate" type="application/rss+xml" title="chql blog" href={withBase('/blog/rss.xml')} />
-    <title>{title} · chql</title>
+    <link rel="alternate" type="application/rss+xml" title="TypedHouse blog" href={withBase('/blog/rss.xml')} />
+    <title>{title} · TypedHouse</title>
     <script is:inline>
       // Match Starlight's preference key and empty-string System convention.
       try {
@@ -39,7 +40,7 @@ const links = [
   <body class:list={{ 'workbench-page': fullPage }}>
     <a class="skip" href="#main">Skip to content</a>
     <header class="site-header">
-      <a class="wordmark" href={withBase('/')} aria-current={pathname === '/' ? 'page' : undefined}>chql</a>
+      <a class="wordmark" href={withBase('/')} aria-current={pathname === '/' ? 'page' : undefined}>TypedHouse</a>
       <div class="header-tools">
         <nav aria-label="Main">
           {links.map(({ href, label, prefix }) => <a href={withBase(href)} aria-current={pathname.startsWith(prefix) ? 'page' : undefined}>{label}</a>)}
@@ -55,7 +56,7 @@ const links = [
       </div>
     </header>
     <main id="main"><slot /></main>
-    {!fullPage && <footer><strong>chql</strong><nav aria-label="Footer"><a href={withBase('/blog/')}>Blog</a><a href={withBase('/llms.txt')}>For agents</a><a href="https://github.com/fhur/chql">GitHub</a></nav></footer>}
+    {!fullPage && <footer><strong>TypedHouse</strong><nav aria-label="Footer"><a href={withBase('/blog/')}>Blog</a><a href={withBase('/llms.txt')}>For agents</a><a href="https://github.com/fhur/chql">GitHub</a></nav></footer>}
     <script>
       const picker = document.querySelector<HTMLSelectElement>('#site-theme');
       const systemTheme = matchMedia('(prefers-color-scheme: dark)');

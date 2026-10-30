@@ -14,8 +14,8 @@ export default defineConfig({
   trailingSlash: 'ignore',
   integrations: [
     starlight({
-      title: 'chql',
-      description: 'Typed, composable queries for ClickHouse. Explicit APIs. Typed constraints. Inspectable SQL.',
+      title: 'TypedHouse',
+      description: 'TypedHouse is a type-safe ClickHouse query builder for TypeScript. Compose reusable queries and inspect the SQL you run.',
       customCss: ['./src/styles/docs.css'],
       components: { Head: './src/components/Head.astro', PageTitle: './src/components/DocTitle.astro' },
       sidebar: [

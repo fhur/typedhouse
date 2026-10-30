@@ -17,12 +17,12 @@ const guides = [
   { title: 'Advanced example', description: 'Combine tables without losing track of what you count.', path: '/docs/tutorials/advanced-example/' },
 ];
 ---
-<Site title="Typed ClickHouse queries" description="Typed, composable ClickHouse queries in TypeScript.">
+<Site title="Type-safe ClickHouse query builder for TypeScript" description="TypedHouse is a type-safe ClickHouse query builder for TypeScript. Compose reusable queries, keep values parameterized, and inspect the SQL you run.">
   <section class="home-hero" aria-labelledby="home-title">
-    <h1 id="home-title">chql</h1>
-    <p class="home-tagline">Typed, composable ClickHouse queries in TypeScript.</p>
+    <h1 id="home-title">TypedHouse</h1>
+    <p class="home-tagline">Type-safe ClickHouse query builder for TypeScript.</p>
     <div class="actions">
-      <a class="button primary" href={withBase('/docs/getting-started/')}>Learn chql</a>
+      <a class="button primary" href={withBase('/docs/getting-started/')}>Learn TypedHouse</a>
       <a class="button" href={withBase('/playground/')}>Try the playground</a>
     </div>
     <p class="meta">Preview</p>
@@ -49,7 +49,7 @@ const guides = [
   </section>
 
   <section class="home-guides" aria-labelledby="guides-title">
-    <h2 id="guides-title">Learn chql in three small steps.</h2>
+    <h2 id="guides-title">Learn TypedHouse in three small steps.</h2>
     <ol>
       {guides.map(guide => (
         <li>
@@ -63,7 +63,7 @@ const guides = [
 
 <style>
   .home-hero { padding: 6rem 0 5rem; text-align: center; }
-  .home-hero h1 { margin: 0 auto 1.25rem; font-size: clamp(3.5rem, 8vw, 5rem); letter-spacing: -.05em; }
+  .home-hero h1 { margin: 0 auto 1.25rem; font-size: clamp(2.75rem, 8vw, 5rem); letter-spacing: -.05em; }
   .home-tagline { margin: 0 auto; max-width: 32ch; font-size: clamp(1.35rem, 3vw, 1.85rem); line-height: 1.5; color: var(--muted); text-wrap: balance; }
   .home-hero .actions { justify-content: center; margin: 1.75rem 0 1rem; }
   .home-hero .meta { margin: 0 auto; }

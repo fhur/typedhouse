@@ -8,6 +8,6 @@ export async function getStaticPaths() {
 }
 const { tag, posts } = Astro.props;
 ---
-<Site title={`Articles tagged ${tag}`} description={`chql engineering articles about ${tag}.`}>
+<Site title={`Articles tagged ${tag}`} description={`TypedHouse engineering articles about ${tag}.`}>
   <section><a href={withBase('/blog/')}>← All articles</a><h1>#{tag}</h1><ul>{posts.map(post => <li><a href={withBase(`/blog/${post.id}/`)}>{post.data.title}</a> — {post.data.description}</li>)}</ul></section>
 </Site>

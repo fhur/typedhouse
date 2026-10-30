@@ -43,7 +43,7 @@ self.onmessage = (event: MessageEvent<unknown>) => {
     // Only runs in the opaque-origin, network-restricted sandbox worker.
     new Function('require', 'module', 'exports', result.outputText)(requireModule, module, module.exports);
     const query = module.exports.default;
-    if (!(query instanceof core.Query)) throw new Error('Export a chql query with: export default query');
+    if (!(query instanceof core.Query)) throw new Error('Export a TypedHouse query with: export default query');
     const output = query.toSQL();
     const text = JSON.stringify({ sql: formatSql(output.sql), params: output.params }, (_, value) =>
       typeof value === 'bigint' ? `${value}n` : value);

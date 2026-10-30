@@ -1,4 +1,6 @@
-# @chql/codegen (M2)
+# TypedHouse codegen (M2)
+
+The package remains `@chql/codegen` and the CLI command remains `chql` for compatibility.
 
 ```sh
 chql generate --url http://localhost:8123 --database analytics --out-dir src/generated

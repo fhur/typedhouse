@@ -43,7 +43,7 @@ export default function Playground({ fullPage = false }: { fullPage?: boolean })
         doc: examples.composition,
         extensions: [basicSetup, javascript({ typescript: true }), keymap.of([indentWithTab]),
           theme.of(isDark() ? oneDark : []),
-          EditorView.contentAttributes.of({ 'aria-label': 'chql TypeScript source' }),
+          EditorView.contentAttributes.of({ 'aria-label': 'TypedHouse TypeScript source' }),
           autocompletion({ override: [context => {
             const word = context.matchBefore(/\w*/);
             if (!word || (word.from === word.to && !context.explicit)) return null;
@@ -138,7 +138,7 @@ export default function Playground({ fullPage = false }: { fullPage?: boolean })
 
   const resize = (percent: number) => setSplit(Math.min(70, Math.max(30, Math.round(percent))));
 
-  return <section className={`chql-playground${fullPage ? ' pg-fullpage' : ''}`} aria-label="Interactive chql playground">
+  return <section className={`chql-playground${fullPage ? ' pg-fullpage' : ''}`} aria-label="Interactive TypedHouse playground">
     <div className="pg-toolbar">
       <label><span className="pg-label">Example</span> <select value={example} onChange={event => selectExample(event.target.value as ExampleName)}>
         <option value="composition">Reusable queries</option><option value="parameters">Safe parameters</option>

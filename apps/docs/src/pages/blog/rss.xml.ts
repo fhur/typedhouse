@@ -8,5 +8,5 @@ export const GET: APIRoute = async ({ site }) => {
     const url = new URL(withBase(`/blog/${post.id}/`), site).href;
     return `<item><title>${escape(post.data.title)}</title><description>${escape(post.data.description)}</description><link>${escape(url)}</link><guid>${escape(url)}</guid><pubDate>${post.data.date.toUTCString()}</pubDate></item>`;
   }).join('');
-  return new Response(`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>chql engineering notes</title><link>${escape(new URL(withBase('/'), site).href)}</link><description>Typed, composable ClickHouse queries</description>${items}</channel></rss>`, { headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' } });
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>TypedHouse engineering notes</title><link>${escape(new URL(withBase('/'), site).href)}</link><description>Type-safe ClickHouse query builder for TypeScript</description>${items}</channel></rss>`, { headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' } });
 };

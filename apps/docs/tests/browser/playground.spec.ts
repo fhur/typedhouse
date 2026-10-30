@@ -70,7 +70,7 @@ test('mobile playground fits the viewport and editor supports keyboard escape', 
   await page.goto('/playground/');
   await expect(page.getByRole('status')).toContainText('Compiled locally');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const editor = page.getByRole('textbox', { name: 'chql TypeScript source' });
+  const editor = page.getByRole('textbox', { name: 'TypedHouse TypeScript source' });
   await editor.focus();
   await page.keyboard.press('Escape');
   await page.keyboard.press('Tab');

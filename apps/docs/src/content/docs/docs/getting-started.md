@@ -9,7 +9,7 @@ This is guide **1 of 3**. Next, [Simple example](/docs/tutorials/composition/) b
 
 ## The mental model
 
-Think of chql as a **recipe for a query**, not an array of fetched rows:
+Think of TypedHouse as a **recipe for a query**, not an array of fetched rows:
 
 1. A **table descriptor** describes an existing ClickHouse table. It does not create it.
 2. A **query** records operations on that table. Each operation returns a new query.
@@ -21,6 +21,8 @@ Callbacks such as `e => e.id` receive typed **expressions**, not database values
 ## Install
 
 You need Node.js 20+, pnpm, and TypeScript with `strict: true`. This documentation describes the **current workspace preview**, not a guarantee that every package is published yet.
+
+TypedHouse was formerly chql. Packages still use `@chql/*` to keep existing imports and installations compatible; the `chql` codegen command is unchanged.
 
 If your release is available in your package registry:
 
