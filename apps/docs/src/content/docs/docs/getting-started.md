@@ -33,8 +33,8 @@ pnpm add @chql/core @chql/compiler
 For the source preview, clone the repository and build its workspace packages instead:
 
 ```sh
-git clone https://github.com/fhur/chql.git
-cd chql
+git clone https://github.com/fhur/typedhouse.git
+cd typedhouse
 pnpm install --frozen-lockfile
 pnpm --filter @chql/core --filter @chql/compiler build
 ```

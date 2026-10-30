@@ -44,7 +44,7 @@ const links = [
       <div class="header-tools">
         <nav aria-label="Main">
           {links.map(({ href, label, prefix }) => <a href={withBase(href)} aria-current={pathname.startsWith(prefix) ? 'page' : undefined}>{label}</a>)}
-          <a href="https://github.com/fhur/chql">GitHub</a>
+          <a href="https://github.com/fhur/typedhouse">GitHub</a>
         </nav>
         <label class="theme-picker"><span class="visually-hidden">Theme</span>
           <select id="site-theme" aria-label="Color theme">
@@ -56,7 +56,7 @@ const links = [
       </div>
     </header>
     <main id="main"><slot /></main>
-    {!fullPage && <footer><strong>TypedHouse</strong><nav aria-label="Footer"><a href={withBase('/blog/')}>Blog</a><a href={withBase('/llms.txt')}>For agents</a><a href="https://github.com/fhur/chql">GitHub</a></nav></footer>}
+    {!fullPage && <footer><strong>TypedHouse</strong><nav aria-label="Footer"><a href={withBase('/blog/')}>Blog</a><a href={withBase('/llms.txt')}>For agents</a><a href="https://github.com/fhur/typedhouse">GitHub</a></nav></footer>}
     <script>
       const picker = document.querySelector<HTMLSelectElement>('#site-theme');
       const systemTheme = matchMedia('(prefers-color-scheme: dark)');

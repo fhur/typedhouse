@@ -36,7 +36,7 @@ assert.match(home, /Generated SQL/);
 assert.match(home, /Learn TypedHouse/);
 assert.match(home, /Type-safe ClickHouse query builder for TypeScript/);
 assert.match(home, /property="og:site_name" content="TypedHouse"/);
-assert.match(home, /https:\/\/github\.com\/fhur\/chql/);
+assert.match(home, /https:\/\/github\.com\/fhur\/typedhouse/);
 assert.match(await readFile(join(dist, 'llms.txt'), 'utf8'), /^# TypedHouse\n/);
 assert.match(await readFile(join(dist, 'blog/rss.xml'), 'utf8'), /<title>TypedHouse engineering notes<\/title>/);
 assert.match(await readFile(join(dist, 'docs/getting-started.md'), 'utf8'), /@chql\/core/);

@@ -4,7 +4,7 @@ Static Astro 5 + Starlight app. This is a modest foundation / vertical slice, **
 
 ## Brand and compatibility
 
-Use TypedHouse in public prose. The project was formerly chql; retain `@chql/*` package names and imports, the `chql` codegen command, repository URLs and clone paths, and SQL identifiers for compatibility. TypedHouse is an independent project, not affiliated with ClickHouse.
+Use TypedHouse in public prose. The project was formerly chql; retain `@chql/*` package names and imports, the `chql` codegen command, and SQL identifiers for compatibility. The repository is now `fhur/typedhouse`; GitHub redirects old repository links, but the Pages site has moved to `/typedhouse/`. TypedHouse is an independent project, not affiliated with ClickHouse.
 
 ## Develop and validate
 
@@ -77,13 +77,13 @@ The sidebar teaches three progressively richer workflows: Getting started, Simpl
 
 ## GitHub Pages
 
-The public repository `fhur/chql` can host this static site for free at `https://fhur.github.io/chql/`. In repository **Settings → Pages**, select **GitHub Actions** as the source. `.github/workflows/docs.yml` builds and deploys on pushes to `master` or a manual workflow run. It derives the origin and base path from GitHub Pages configuration, including custom domains.
+The public repository `fhur/typedhouse` hosts this static site for free at `https://fhur.github.io/typedhouse/`. In repository **Settings → Pages**, select **GitHub Actions** as the source. `.github/workflows/docs.yml` builds and deploys on pushes to `master` or a manual workflow run. It derives the origin and base path from GitHub Pages configuration, including custom domains.
 
 To validate the project-site build locally:
 
 ```sh
-SITE_URL=https://fhur.github.io BASE_PATH=/chql pnpm docs:build
-BASE_PATH=/chql pnpm --filter @chql/docs test:site
+SITE_URL=https://fhur.github.io BASE_PATH=/typedhouse pnpm docs:build
+BASE_PATH=/typedhouse pnpm --filter @chql/docs test:site
 ```
 
 `BASE_PATH` defaults to `/` for local development and root-domain hosts. Navigation, Markdown links, agent indexes, RSS, search, and playground worker URLs honor it. GitHub Pages does not process `public/_headers`; its security headers, cache rules, and Markdown MIME overrides apply only on compatible hosts.
