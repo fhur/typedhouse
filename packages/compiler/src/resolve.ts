@@ -1,4 +1,4 @@
-import { setDescriptor, membershipBase, aggregateDefinitions, functionCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
+import { isDayDescriptor, setDescriptor, membershipBase, aggregateDefinitions, functionCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
 
 /** Closed descriptor grammar: no raw/Unknown type text ever reaches CAST syntax.
  * Nullable -> non-null is deliberately unsupported: cast_keep_nullable changes
@@ -58,7 +58,35 @@ export function resolveCall(e: Extract<ExprNode, { kind: 'Call' }>, resolve: (e:
   if (!def || e.fn.origin !== 'typed') throw new Error('unsupported_expression');
   if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || JSON.stringify(e.fn.argumentPolicies) !== JSON.stringify(def.argumentPolicies) || e.fn.repeatedArgs !== def.repeatedArgs) throw new Error('invalid_function_metadata');
   const repeated = def.name === 'greatest' && def.repeatedArgs === 'temporalGreatest';
-  if (repeated ? e.args.length < 2 : e.args.length !== def.args.length) throw new Error('invalid_argument_arity');
+  const conditional = def.name === 'multiIf' && def.repeatedArgs === 'stringMultiIf';
+  if (conditional ? e.args.length < 3 || e.args.length % 2 !== 1 : repeated ? e.args.length < 2 : e.args.length !== def.args.length) throw new Error('invalid_argument_arity');
+  // Heterogeneous signatures must resolve before generic sibling inference.
+  if (conditional || def.name === 'dateDiff') {
+    const string: CHType = { kind: 'scalar', name: 'String' };
+    const types = e.args.map((arg, i) => {
+      if (def.name === 'dateDiff') {
+        if (i === 0 || i === 3) {
+          if (arg.kind !== 'Param' || arg.value !== (i === 0 ? 'day' : 'UTC')) throw new Error('incompatible_operands');
+          const type = resolve(arg, string);
+          if (print(type) !== 'String') throw new Error('incompatible_operands');
+          return type;
+        }
+        if (!arg.type || !isDayDescriptor(arg.type)) throw new Error('incompatible_operands');
+        const type = resolve(arg);
+        if (!isDayDescriptor(type)) throw new Error('incompatible_operands');
+        return type;
+      }
+      const branch = i % 2 === 1 || i === e.args.length - 1;
+      if (!branch && arg.type === null) throw new Error('invalid_predicate');
+      const type = resolve(arg, branch ? string : undefined);
+      const base = unwrap(type);
+      if (branch ? print(type) !== 'String' : base.kind !== 'scalar' || base.name !== 'Bool') throw new Error('incompatible_operands');
+      return type;
+    });
+    const result: CHType = conditional ? string : { kind: 'scalar', name: 'Int64' };
+    if (print(result) !== print(e.type)) throw new Error('invalid_expression_type');
+    return { types, result, sqlName: def.name };
+  }
   if (repeated && e.args.some(arg => arg.type === null)) throw new Error('incompatible_operands');
   if (def.surface === 'membership') {
     const left = resolve(e.args[0]!);

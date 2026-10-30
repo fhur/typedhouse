@@ -12,7 +12,7 @@ export interface Definition<A extends readonly Argument[] = readonly Argument[],
   readonly args: A;
   readonly argumentPolicies?: readonly ArgumentPolicy[];
   /** Closed standalone policy; not permission for arbitrary variadic functions. */
-  readonly repeatedArgs?: 'temporalGreatest';
+  readonly repeatedArgs?: 'temporalGreatest' | 'stringMultiIf';
   readonly returns: Column<R> | 'arg0' | ((args: readonly CHType[], values: readonly unknown[]) => CHType);
   readonly tsReturns?: string;
   readonly nullable?: 'propagate' | 'never';
@@ -51,7 +51,7 @@ export function resolveReturn(def: Definition, args: readonly unknown[]): CHType
     const policy = def.argumentPolicies?.[index];
     if (!(a instanceof Expr) && policy && policy !== 'sibling') {
       const receiver = sibling ? unwrap(sibling) : unknownType;
-      if (policy === 'constantSelector') return { kind: 'scalar', name: 'String' } as const;
+      if (policy === 'constantSelector' || policy === 'dayUnit' || policy === 'utcZone') return { kind: 'scalar', name: 'String' } as const;
       if (policy === 'numericIndex') return { kind: 'scalar', name: 'Int64' } as const;
       if (policy === 'array') return receiver;
       if (policy === 'arrayElement' && receiver.kind === 'Array') return receiver.inner;

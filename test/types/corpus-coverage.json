@@ -31,7 +31,7 @@
     { "id": "filtering/path", "status": "supported", "queries": ["filterPath"] },
     { "id": "filtering/warnings", "status": "supported", "queries": ["filterWarnings"] },
     { "id": "filtering/subquery", "status": "supported", "queries": ["filterMembership"] },
-    { "id": "projection/spread-tuple-conditional", "status": "API-blocked", "missing": ["dateDiff", "now", "multiIf"], "source": "packages/core/src/index.ts and catalog", "remaining": "Full unchanged projection must compile and execute; projectionFragment covers only supported spread/null/array/tuple/val fields, not a stand-in for the complete example.", "queries": ["projectionFragment"] },
+    { "id": "projection/spread-tuple-conditional", "status": "owner-approved adaptation", "source": "packages/compiler/test/fixtures/corpus/projection-enrichment.ts", "remaining": "Owner approved UTC calendar-day boundaries for the unchanged public dateDiff('day', start, end) syntax. Broader units/timezones and conditional branch families remain backlog.", "queries": ["projectionFragment", "projectionEnrichment"] },
     { "id": "versioned/final", "status": "supported", "queries": ["cleanIndices"] },
     { "id": "versioned/latest-helper", "status": "owner-approved adaptation", "queries": ["latestIndices", "latestAvailability", "latestPartIndices", "latestPrices", "latestTotals"], "evidence": "low-stock.ts approved descriptor-preserving latest overload unchanged; original erased fallback remains in fixture-differential.ts" },
     { "id": "versioned/argMax", "status": "supported", "queries": ["argMaxIndices"] },

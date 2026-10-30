@@ -46,7 +46,7 @@ export function decoder(type: CHType): (value: unknown) => unknown {
     const date = new Date(`${v}T00:00:00Z`);
     return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === v ? date : invalid(v);
   };
-  if (type.kind === 'DateTime64' && type.precision <= 3) return v => {
+  if (type.kind === 'DateTime' || type.kind === 'scalar' && type.name === 'DateTime' || type.kind === 'DateTime64' && type.precision <= 3) return v => {
     if (typeof v !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(v)) return invalid(v);
     const day = new Date(`${v.slice(0, 10)}T00:00:00Z`);
     if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== v.slice(0, 10) || Number(v.slice(11, 13)) >= 24) return invalid(v);

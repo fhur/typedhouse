@@ -1,0 +1,2 @@
+// Generated from runtime CHType output.
+export type ProjectionEnrichment = { "tenantId": string; "entityId": string; "category": string; "state": string; "part_specifications": Array<{ "id": string; "mpn": (string) | null; "manufacturer": (string) | null; "description": (string) | null; "package": (string) | null; "part_type": (string) | null }>; "matched_part_ids": Array<string>; "countOfParts": bigint; "updatedAt": Date; "matched": bigint; "mpns": Array<(string) | null>; "firstDesc": (string) | null; "age": bigint; "tier": string; "source": string };

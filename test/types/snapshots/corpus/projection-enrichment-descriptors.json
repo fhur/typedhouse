@@ -1,0 +1,150 @@
+{
+  "shape": "flat",
+  "columns": {
+    "tenantId": {
+      "kind": "scalar",
+      "name": "String"
+    },
+    "entityId": {
+      "kind": "scalar",
+      "name": "String"
+    },
+    "category": {
+      "kind": "scalar",
+      "name": "String"
+    },
+    "state": {
+      "kind": "scalar",
+      "name": "String"
+    },
+    "part_specifications": {
+      "kind": "Array",
+      "inner": {
+        "kind": "Tuple",
+        "items": [
+          {
+            "name": "id",
+            "type": {
+              "kind": "scalar",
+              "name": "String"
+            }
+          },
+          {
+            "name": "mpn",
+            "type": {
+              "kind": "Nullable",
+              "inner": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            }
+          },
+          {
+            "name": "manufacturer",
+            "type": {
+              "kind": "Nullable",
+              "inner": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            }
+          },
+          {
+            "name": "description",
+            "type": {
+              "kind": "Nullable",
+              "inner": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            }
+          },
+          {
+            "name": "package",
+            "type": {
+              "kind": "Nullable",
+              "inner": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            }
+          },
+          {
+            "name": "part_type",
+            "type": {
+              "kind": "Nullable",
+              "inner": {
+                "kind": "scalar",
+                "name": "String"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "matched_part_ids": {
+      "kind": "Array",
+      "inner": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "countOfParts": {
+      "kind": "scalar",
+      "name": "UInt64"
+    },
+    "updatedAt": {
+      "kind": "DateTime64",
+      "precision": 3
+    },
+    "matched": {
+      "kind": "scalar",
+      "name": "UInt64"
+    },
+    "mpns": {
+      "kind": "Array",
+      "inner": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      }
+    },
+    "firstDesc": {
+      "kind": "Nullable",
+      "inner": {
+        "kind": "scalar",
+        "name": "String"
+      }
+    },
+    "age": {
+      "kind": "scalar",
+      "name": "Int64"
+    },
+    "tier": {
+      "kind": "scalar",
+      "name": "String"
+    },
+    "source": {
+      "kind": "scalar",
+      "name": "String"
+    }
+  },
+  "order": [
+    "tenantId",
+    "entityId",
+    "category",
+    "state",
+    "part_specifications",
+    "matched_part_ids",
+    "countOfParts",
+    "updatedAt",
+    "matched",
+    "mpns",
+    "firstDesc",
+    "age",
+    "tier",
+    "source"
+  ]
+}
