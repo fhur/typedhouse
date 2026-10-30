@@ -25,10 +25,10 @@ expectTypeOf(g.stock.as(col.String)).toEqualTypeOf<DescribedExpr<string, 'stock'
 expectTypeOf<Infer<typeof r>>().toEqualTypeOf<{ stock: bigint; nullable: number | null; name: string }>();
 expectTypeOf<Infer<typeof r.stock>>().toEqualTypeOf<{ stock: bigint }>();
 const distance = defineFunction({ name: 'editDistance', args: [stringLike, stringLike], returns: col.UInt64, deterministic: true });
-expectTypeOf(distance(r.name, 'abc')).toEqualTypeOf<Expr<bigint, 'name'>>();
-expectTypeOf(distance(g.name, 'abc')).toEqualTypeOf<Grouped<bigint, 'name'>>();
-expectTypeOf(distance('abc', g.name)).toEqualTypeOf<Grouped<bigint, 'name'>>();
-expectTypeOf(distance(val('abc'), g.name)).toEqualTypeOf<Grouped<bigint, 'name'>>();
+expectTypeOf(distance(r.name, 'abc')).toEqualTypeOf<DescribedExpr<bigint, 'name', 'row', typeof col.UInt64.type>>();
+expectTypeOf(distance(g.name, 'abc')).toEqualTypeOf<DescribedExpr<bigint, 'name', 'grouped', typeof col.UInt64.type>>();
+expectTypeOf(distance('abc', g.name)).toEqualTypeOf<DescribedExpr<bigint, 'name', 'grouped', typeof col.UInt64.type>>();
+expectTypeOf(distance(val('abc'), g.name)).toEqualTypeOf<DescribedExpr<bigint, 'name', 'grouped', typeof col.UInt64.type>>();
 const identity = defineFunction({ name: 'identity', args: [stringLike], returns: 'arg0', deterministic: true });
 expectTypeOf(identity(g.name)).toEqualTypeOf<Grouped<string, 'name'>>();
 expectTypeOf(identity(g.name)).not.toBeAny();

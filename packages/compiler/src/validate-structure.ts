@@ -1,7 +1,7 @@
 import type { Rel } from '@chql/core';
 import { ValidationError } from './validation-error.js';
 
-type Role = 'rel' | 'expr' | 'output' | 'flatOutput' | 'nestedOutput' | 'type' | 'castType' | 'table' | 'fn' | 'aggregateFn' | 'sort' | 'branch' | 'tupleItem' | 'enumItem' | 'provenance' | 'knownEvidence' | 'knownEntry' | 'knownDeclaration';
+type Role = 'rel' | 'expr' | 'output' | 'flatOutput' | 'nestedOutput' | 'type' | 'castType' | 'table' | 'fn' | 'aggregateFn' | 'sort' | 'branch' | 'tupleItem' | 'enumItem' | 'provenance' | 'knownEvidence' | 'knownEntry' | 'knownDeclaration' | 'userContract' | 'userArgument';
 type Shape = Role | 'string' | 'number' | 'boolean' | { array: Shape } | { record: Shape } | { pair: Shape };
 interface Visit { value: unknown; shape: Shape; path: string; exit?: boolean }
 const array = (shape: Shape): Shape => ({ array: shape });
@@ -132,8 +132,16 @@ export function validateStructure(root: Rel): void {
         case 'knownEvidence': field('catalog', record('knownEntry')); field('name', 'string'); field('declaration', 'knownDeclaration', true); break;
         case 'knownEntry': field('isAggregate', 'boolean'); if (object.deterministic !== null) field('deterministic', 'boolean'); field('aliasTo', 'string'); break;
         case 'knownDeclaration': choice('origin', ['as']); field('type', 'type'); break;
+        case 'userContract':
+          if (Object.getPrototypeOf(object) !== Object.prototype && Object.getPrototypeOf(object) !== null || Object.getOwnPropertySymbols(object).length || Object.getOwnPropertyNames(object).some(k => !['version', 'classification', 'name', 'sqlName', 'args', 'returns', 'nullable', 'deterministic'].includes(k))) fail('expected plain closed user contract');
+          choice('version', [1]); choice('classification', ['scalar']); field('name', 'string'); field('sqlName', 'string', true);
+          field('args', array('userArgument')); field('returns', 'type'); choice('nullable', ['propagate', 'never']); field('deterministic', 'boolean'); break;
+        case 'userArgument':
+          choice('kind', ['stringLike', 'column']);
+          if (Object.getPrototypeOf(object) !== Object.prototype && Object.getPrototypeOf(object) !== null || Object.getOwnPropertySymbols(object).length || Object.getOwnPropertyNames(object).some(k => k !== 'kind' && !(object.kind === 'column' && k === 'type'))) fail('expected plain closed user argument');
+          if (object.kind === 'column') field('type', 'type'); break;
         case 'aggregateFn': field('linear', 'boolean'); // falls through to shared metadata
-        case 'fn': field('known', 'knownEvidence', true); field('name', 'string'); field('sqlName', 'string', true); field('origin', 'string'); if (object.deterministic !== null) field('deterministic', 'boolean'); field('argumentPolicies', array('string'), true); break;
+        case 'fn': field('user', 'userContract', true); field('known', 'knownEvidence', true); field('name', 'string'); field('sqlName', 'string', true); field('origin', 'string'); if (object.deterministic !== null) field('deterministic', 'boolean'); field('argumentPolicies', array('string'), true); break;
         case 'sort': field('expr', 'expr'); break;
         case 'branch': field('when', 'expr'); field('then', 'expr'); break;
         case 'tupleItem': field('name', 'string', true); field('type', 'type'); break;

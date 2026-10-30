@@ -134,7 +134,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           }
           return expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.origin === 'typed' && e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope, qualifier, binding);
         });
-        if (e.fn.origin === 'known') return `${resolved.sqlName}(${args.join(', ')})`;
+        if (e.fn.origin !== 'typed') return `${resolved.sqlName}(${args.join(', ')})`;
         if (e.fn.name === 'in' || e.fn.name === 'notIn') {
           const receiver = resolved.types[0]!;
           const base = receiver.kind === 'Nullable' ? receiver.inner : receiver;

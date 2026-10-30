@@ -20,7 +20,19 @@ export interface KnownCallEvidence {
   readonly name: string;
   readonly declaration?: { readonly origin: 'as'; readonly type: CHType };
 }
+export type UserArgumentContract = { readonly kind: 'stringLike' } | { readonly kind: 'column'; readonly type: CHType };
+export interface UserFunctionContract {
+  readonly version: 1;
+  readonly classification: 'scalar';
+  readonly name: string;
+  readonly sqlName?: string;
+  readonly args: readonly UserArgumentContract[];
+  readonly returns: CHType;
+  readonly nullable: 'propagate' | 'never';
+  readonly deterministic: boolean;
+}
 export interface FunctionMetadata {
+  readonly user?: UserFunctionContract;
   readonly known?: KnownCallEvidence;
   readonly repeatedArgs?: 'temporalGreatest' | 'stringMultiIf';
   readonly argumentPolicies?: readonly ArgumentPolicy[];

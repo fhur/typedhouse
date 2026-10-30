@@ -36,7 +36,7 @@ it('rejects every forged operand and metadata/arity failure with a node path', (
     [{ ...call, args: [...call.args, param(null)] }, 'incompatible_operands'],
     [{ ...call, args: [...call.args, param(col.DateTime64(3, 'UTC').type)] }, 'unsupported_mixed_timezones'],
     [{ ...call, fn: { ...call.fn, deterministic: false } }, 'invalid_function_metadata'],
-    [{ ...call, fn: { ...call.fn, origin: 'user' } }, 'unsupported_expression'],
+    [{ ...call, fn: { ...call.fn, origin: 'user' } }, 'duplicate_function'],
     [{ ...call, fn: withoutPolicy }, 'invalid_function_metadata'],
     [{ ...call, fn: { ...call.fn, argumentPolicies: ['sibling'] } }, 'invalid_function_metadata'],
     [{ ...call, type: col.DateTime64(1, 'Europe/Amsterdam').type }, 'invalid_expression_type'],

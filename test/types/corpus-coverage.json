@@ -89,7 +89,7 @@
     { "id": "negative/outer-toFixed", "status": "deferred outer join", "missing": ["leftJoin"], "source": "packages/core/src/join.ts", "remaining": "Must fail on nullable expression misuse, not merely missing leftJoin import." },
     { "id": "reserved/live", "status": "deferred M8", "evidence": "No live() API in v1; capability preservation tested separately" },
     { "id": "reserved/changes", "status": "deferred M8", "evidence": "No changes() API in v1" },
-    { "id": "extension/editDistance", "status": "outside this bounded corpus", "evidence": "Existing defineFunction generated surface tests; full Part 2 extension acceptance not claimed here" },
+    { "id": "extension/editDistance", "status": "supported bounded tier", "queries": ["userEditDistance"], "source": "packages/compiler/test/fixtures/corpus/user-functions.ts", "remaining": "Owner-approved String/Nullable(String) execution subset of stringLike; LowCardinality, FixedString, Enum and address families rejected, not a full-spec waiver. Concrete String/UInt64 argument contracts only; callback/custom matcher/arg0 execution, advanced aggregates/state/raw remain backlog. Caller signature assertion, not server authentication." },
     { "id": "extension/topK", "status": "outside this bounded corpus", "evidence": "Existing defineAggregate tests; full unchanged parametric topK execution not claimed here" },
     { "id": "extension/method-merging", "status": "outside this bounded corpus", "evidence": "Existing extendExpr checks; full unchanged declaration-merging example not claimed here" }
   ]

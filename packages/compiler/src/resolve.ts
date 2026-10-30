@@ -1,6 +1,7 @@
 import { isDayDescriptor, setDescriptor, membershipBase, aggregateDefinitions, functionCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
 
 import { resolveKnown } from './resolve-known.js';
+import { resolveUser } from './resolve-user.js';
 
 /** Closed descriptor grammar: no raw/Unknown type text ever reaches CAST syntax.
  * Nullable -> non-null is deliberately unsupported: cast_keep_nullable changes
@@ -20,6 +21,8 @@ export function resolveCast(e: Extract<ExprNode, { kind: 'Cast' }>, resolve: (e:
 }
 
 export function resolveAggregate(e: Extract<ExprNode, { kind: 'Agg' }>, resolve: (e: ExprNode, expected?: CHType) => CHType): { result: CHType; sqlName: string } {
+  if (e.fn.origin === 'user') return resolveUser(e, resolve);
+  if (e.fn.user !== undefined) throw new Error('invalid_function_metadata');
   if (e.fn.origin === 'known') return resolveKnown(e, resolve);
   if (e.fn.known !== undefined) throw new Error('invalid_function_metadata');
   const def = aggregateDefinitions.find(d => d.name === e.fn.name);
@@ -58,6 +61,8 @@ function compatible(a: CHType, b: CHType): boolean {
 
 /** Catalog evidence, not caller-supplied Call metadata, determines argument/result types. */
 export function resolveCall(e: Extract<ExprNode, { kind: 'Call' }>, resolve: (e: ExprNode, expected?: CHType) => CHType): { types: CHType[]; result: CHType; sqlName: string } {
+  if (e.fn.origin === 'user') return resolveUser(e, resolve);
+  if (e.fn.user !== undefined) throw new Error('invalid_function_metadata');
   if (e.fn.origin === 'known') return resolveKnown(e, resolve);
   if (e.fn.known !== undefined) throw new Error('invalid_function_metadata');
   const def = functionCatalog.find(d => d.name === e.fn.name);

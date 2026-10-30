@@ -32,7 +32,7 @@ it('checks authoritative arity, unit, timezone, branches, metadata, bindings and
     ['age', { ...age, args: replace(age.args, 1, val('not date').ir) }, 'incompatible_operands'],
     ['age', { ...age, type: col.Float64.type }, 'invalid_expression_type'],
     ['age', { ...age, fn: { ...age.fn, deterministic: false } }, 'invalid_function_metadata'],
-    ['age', { ...age, fn: { ...age.fn, origin: 'user' } }, 'unsupported_expression'],
+    ['age', { ...age, fn: { ...age.fn, origin: 'user' } }, 'duplicate_function'],
     ['age', { ...age, fn: { ...age.fn, argumentPolicies: ['sibling'] } }, 'invalid_function_metadata'],
     ['tier', { ...tier, args: tier.args.slice(0, 2) }, 'invalid_argument_arity'],
     ['tier', { ...tier, args: replace(tier.args, 1, val(1n).ir) }, 'incompatible_operands'],
