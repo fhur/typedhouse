@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
+import { assertCompilerExit, assertControlDiagnostic, compilerOutput } from './corpus-control-diagnostics.mjs';
+import { controlLayout } from './corpus-control-layout.mjs';
 import { toTypeScript } from '../packages/core/dist/index.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const snapshots = join(root, 'test/types/snapshots/corpus');
@@ -12,15 +14,32 @@ const refresh = process.argv.includes('--refresh');
 const selfTest = process.argv.includes('--self-test');
 const version = process.env.CHQL_TYPESCRIPT_VERSION;
 const cli = [...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc'])];
+const logRoot = join(root, 'node_modules/.cache/corpus-controls');
+mkdirSync(logRoot, { recursive: true });
+const logDirectory = mkdtempSync(join(logRoot, 'run-'));
+console.log(`Raw corpus compiler logs: ${logDirectory}`);
+let invocation = 0;
 function run(args, success = true) {
   const result = spawnSync('pnpm', [...cli, ...args], { cwd: root, encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
-  if (success && result.status !== 0) throw new Error(result.stdout + result.stderr);
+  const log = join(logDirectory, String(++invocation).padStart(3, '0'));
+  writeFileSync(`${log}.stdout.log`, result.stdout ?? '');
+  writeFileSync(`${log}.stderr.log`, result.stderr ?? '');
+  writeFileSync(`${log}.json`, JSON.stringify({ cli, args, status: result.status, signal: result.signal, error: result.error?.message }, null, 2));
+  if (args[0] === '-p') {
+    const text = readFileSync(args[1], 'utf8');
+    writeFileSync(`${log}.tsconfig.json`, text);
+    for (const file of JSON.parse(text).files) {
+      if (basename(file) === 'control.ts') writeFileSync(`${log}.control.ts`, readFileSync(file, 'utf8'));
+    }
+  }
+  assertCompilerExit(result, success);
   return result;
 }
 const actualVersion = run(['--version']).stdout.trim().replace(/^Version /, '');
 assert.match(actualVersion, /^\d+\.\d+\.\d+$/);
 console.log(`Corpus official CLI TypeScript ${actualVersion}`);
 const directory = mkdtempSync(join(tmpdir(), 'chql-corpus-types-'));
+let controlDirectory;
 function verifySnapshot(path, text) {
   assert.equal(readFileSync(path, 'utf8'), text, `Stale snapshot: ${path}`);
 }
@@ -141,52 +160,68 @@ try {
     writeFileSync(stalePath, rows + '// stale');
     assert.throws(() => verifySnapshot(stalePath, rows), /Stale snapshot/);
     assert.throws(() => readable('export declare const broken: import("@chql/core").Query<Infer<Row<X>>>;', 'synthetic.d.ts'), /Unreadable/);
-    // Real compiler controls: mutate an expected field, then widen the inferred row.
-    const probe = join(directory, 'control.ts');
+    assertCompilerExit(spawnSync(process.execPath, [join(root, 'scripts/corpus-control-diagnostics.test.mjs')], { encoding: 'utf8' }), true);
+    assertCompilerExit(spawnSync(process.execPath, [join(root, 'scripts/corpus-control-layout.test.mjs')], { encoding: 'utf8' }), true);
+    // Controls stay outside node_modules, on the repository filesystem. Preserve
+    // the explicit built-declaration paths mapping, not source consumption.
+    // The external emit/runtime consumer above remains in OS temp unchanged.
+    const layout = controlLayout(root);
+    controlDirectory = mkdtempSync(layout.prefix);
+    const probe = join(controlDirectory, 'control.ts');
+    const configPath = join(controlDirectory, 'tsconfig.json');
+    config.files = [probe];
+    config.compilerOptions.rootDir = layout.rootDir;
+    writeFileSync(configPath, JSON.stringify(config));
+    function checkControl(prefix, query, correct, wrong, widen = false) {
+      const assertion = `expectTypeOf<Infer<typeof ${query}>>().toEqualTypeOf<Expected>();`;
+      const positive = prefix + `type Expected = ${correct};\n` + assertion;
+      writeFileSync(probe, positive);
+      run(['-p', configPath]); // identical imports/options must genuinely compile
+      const negativeAssertion = widen ? assertion.replace('>>()', '> | undefined>()') : assertion;
+      assert.ok(widen || correct !== wrong, 'Control must mutate a descriptor-derived field');
+      writeFileSync(probe, prefix + `type Expected = ${wrong};\n` + negativeAssertion);
+      const expected = { file: probe, line: 5, column: negativeAssertion.indexOf('<Expected>') + 2, code: 2344, message: /Type 'Expected' does not satisfy the constraint/, detail: /Expected:|Actual:/ };
+      assertControlDiagnostic(run(['-p', configPath], false), expected, root);
+      return { positive, expected };
+    }
     const row = 'supported_filterTenantActive';
     const prefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { filterTenantActive } from ${JSON.stringify(join(root, files[0]).replace(/\.ts$/, '.js'))};\n`;
-    for (const assertion of [
-      `type Expected = ${decoded(descriptors[row]).replace('"tenantId": string', '"tenantId": number')};\nexpectTypeOf<Infer<typeof filterTenantActive>>().toEqualTypeOf<Expected>();`,
-      `type Expected = ${decoded(descriptors[row])};\nexpectTypeOf<Infer<typeof filterTenantActive> | undefined>().toEqualTypeOf<Expected>();`,
-    ]) {
-      writeFileSync(probe, prefix + assertion);
-      config.files = [probe];
-      config.compilerOptions.rootDir = directory;
-      delete config.compilerOptions.rootDir;
-      writeFileSync(configPath, JSON.stringify(config));
-      const failure = run(['-p', configPath], false);
-      assert.notEqual(failure.status, 0);
-      assert.match(failure.stdout, /control\.ts.*error TS/);
-    }
+    const correctRow = decoded(descriptors[row]);
+    const first = checkControl(prefix, 'filterTenantActive', correctRow, correctRow.replace('"tenantId": string', '"tenantId": number'));
+    checkControl(prefix, 'filterTenantActive', correctRow, correctRow, true);
+    // A real broken-rootDir positive must not masquerade as a mismatch control.
+    writeFileSync(probe, first.positive);
+    config.compilerOptions.rootDir = controlDirectory;
+    writeFileSync(configPath, JSON.stringify(config));
+    const brokenRoot = run(['-p', configPath], false);
+    assert.match(compilerOutput(brokenRoot), /error TS6059:/);
+    assert.doesNotMatch(compilerOutput(brokenRoot), /error TS2344:/);
+    assert.throws(() => assertControlDiagnostic(brokenRoot, first.expected, root));
+    config.compilerOptions.rootDir = layout.rootDir;
+    writeFileSync(configPath, JSON.stringify(config));
     const latestPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { componentsLatest } from ${JSON.stringify(join(root, files[2]).replace(/\.ts$/, '.js'))};\n`;
     for (const [from, to] of [['"asOf": Date', '"asOf": string'], ['"category": (string) | null', '"category": string']]) {
       const wrong = decoded(latestOutput).replace(from, to);
-      assert.notEqual(wrong, decoded(latestOutput), 'Control must really mutate a descriptor-derived field');
-      writeFileSync(probe, latestPrefix + `type Expected = ${wrong};\nexpectTypeOf<Infer<typeof componentsLatest>>().toEqualTypeOf<Expected>();`);
-      const failure = run(['-p', configPath], false);
-      assert.notEqual(failure.status, 0);
-      assert.match(failure.stdout, /control\.ts.*error TS/);
+      checkControl(latestPrefix, 'componentsLatest', decoded(latestOutput), wrong);
     }
     const projectionPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { projectionEnrichment } from ${JSON.stringify(join(root, files[3]).replace(/\.ts$/, '.js'))};\n`;
     for (const [from, to] of [['"age": bigint', '"age": number'], ['"category": string', '"category": string | null'], ['"tier": string', '"tier": string | null']]) {
       const wrong = decoded(projectionOutput).replace(from, to);
-      assert.notEqual(wrong, decoded(projectionOutput));
-      writeFileSync(probe, projectionPrefix + `type Expected = ${wrong};\nexpectTypeOf<Infer<typeof projectionEnrichment>>().toEqualTypeOf<Expected>();`);
-      const failure = run(['-p', configPath], false);
-      assert.notEqual(failure.status, 0);
-      assert.match(failure.stdout, /control\.ts.*error TS/);
+      checkControl(projectionPrefix, 'projectionEnrichment', decoded(projectionOutput), wrong);
     }
     const knownPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { knownHash } from ${JSON.stringify(join(root, files[4]).replace(/\.ts$/, '.js'))};\n`;
     const wrongKnown = decoded(knownDescriptors.knownHash).replace('bigint', 'number');
-    assert.notEqual(wrongKnown, decoded(knownDescriptors.knownHash));
-    writeFileSync(probe, knownPrefix + `type Expected = ${wrongKnown};\nexpectTypeOf<Infer<typeof knownHash>>().toEqualTypeOf<Expected>();`);
-    const knownFailure = run(['-p', configPath], false);
-    assert.notEqual(knownFailure.status, 0);
-    assert.match(knownFailure.stdout, /control\.ts.*error TS/);
+    checkControl(knownPrefix, 'knownHash', decoded(knownDescriptors.knownHash), wrongKnown);
     console.log('Stale, descriptor-mismatch, inferred-widening, temporal/projection/known and unreadable-declaration controls passed.');
   }
   // Preserve both actual outputs even if the readability contract fails; do not bless them as readable.
   for (const [name, text] of declarations) sameOrRefresh(join(snapshots, name), text);
   for (const [name, text] of declarations) readable(text, name);
   console.log(`${Object.keys(descriptors).length + 3 + Object.keys(knownModule).length} exact/not-any runtime rows and emitted declarations passed (custom extensions removed by owner scope decision).`);
-} finally { rmSync(directory, { recursive: true, force: true }); }
+} finally {
+  try {
+    if (controlDirectory) rmSync(controlDirectory, { recursive: true, force: true });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}

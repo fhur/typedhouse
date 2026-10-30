@@ -11,5 +11,8 @@ coverage/
 .worktrees/
 .nx/
 
+# Ephemeral compiler controls; each invocation removes only its own directory.
+/.chql-corpus-control-*/
+
 # Local proprietary application; never commit its contents.
 /apps/playground/
