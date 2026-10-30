@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { gunzipSync } from 'node:zlib';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,16 @@ for (const entry of await readdir(dist, { recursive: true })) {
 for (const route of ['docs/getting-started.md', 'docs/tutorials/composition.md', 'docs/tutorials/advanced-example.md', 'docs/reference/queries.md', 'blog/composition-without-hiding-sql.md', 'llms.txt', 'llms-full.txt', 'blog/rss.xml', 'pagefind/pagefind.js']) {
   assert.ok(await exists(join(dist, route)), `Missing static output: ${route}`);
 }
+const home = await readFile(join(dist, 'index.html'), 'utf8');
+assert.equal((home.match(/<section\b/g) ?? []).length, 3, 'Homepage should have exactly three sections');
+assert.ok(!home.includes('<astro-island') && !home.includes('/Playground.'), 'Homepage must not load the editor');
+assert.ok(!home.includes('pagefind-ui'), 'Homepage must not load a search widget');
+assert.match(home, /Generated SQL/);
+assert.match(home, /Learn chql/);
+const share = home.match(/#v1=([A-Za-z0-9_-]+)/);
+assert.ok(share, 'Homepage example needs an editable playground link');
+const sharedSource = gunzipSync(Buffer.from(share[1], 'base64url')).toString('utf8');
+assert.equal(sharedSource, await readFile(new URL('../src/examples/homepage.ts', import.meta.url), 'utf8'), 'Playground must receive the exact homepage example');
 const markdown = await readFile(join(dist, 'docs/getting-started.md'), 'utf8');
 assert.match(markdown, /import\s*\{\s*col,\s*table,\s*from,?\s*\}/);
 assert.match(markdown, /SELECT/);

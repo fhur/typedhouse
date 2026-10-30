@@ -7,9 +7,8 @@ const { title, description, fullPage = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const pathname = withoutBase(Astro.url.pathname);
 const links = [
-  { href: '/docs/getting-started/', label: 'Docs', prefix: '/docs/' },
+  { href: '/docs/getting-started/', label: 'Guides', prefix: '/docs/' },
   { href: '/playground/', label: 'Playground', prefix: '/playground/' },
-  { href: '/blog/', label: 'Blog', prefix: '/blog/' },
 ];
 ---
 <!doctype html>
@@ -40,13 +39,13 @@ const links = [
   <body class:list={{ 'workbench-page': fullPage }}>
     <a class="skip" href="#main">Skip to content</a>
     <header class="site-header">
-      <a class="wordmark" href={withBase('/')} aria-current={pathname === '/' ? 'page' : undefined}>chql<span> / ClickHouse, composed.</span></a>
+      <a class="wordmark" href={withBase('/')} aria-current={pathname === '/' ? 'page' : undefined}>chql</a>
       <div class="header-tools">
         <nav aria-label="Main">
           {links.map(({ href, label, prefix }) => <a href={withBase(href)} aria-current={pathname.startsWith(prefix) ? 'page' : undefined}>{label}</a>)}
-          <a class="agent-link" href={withBase('/llms.txt')} aria-label="For agents: Markdown documentation index">For agents ↗</a>
+          <a href="https://github.com/fhur/chql">GitHub</a>
         </nav>
-        <label class="theme-picker">Theme
+        <label class="theme-picker"><span class="visually-hidden">Theme</span>
           <select id="site-theme" aria-label="Color theme">
             <option value="auto">System</option>
             <option value="light">Light</option>
@@ -56,7 +55,7 @@ const links = [
       </div>
     </header>
     <main id="main"><slot /></main>
-    {!fullPage && <footer><strong>chql</strong><span>Explicit APIs. Typed constraints. Inspectable SQL.</span><a href={withBase('/llms.txt')}>Markdown index for agents</a></footer>}
+    {!fullPage && <footer><strong>chql</strong><nav aria-label="Footer"><a href={withBase('/blog/')}>Blog</a><a href={withBase('/llms.txt')}>For agents</a><a href="https://github.com/fhur/chql">GitHub</a></nav></footer>}
     <script>
       const picker = document.querySelector<HTMLSelectElement>('#site-theme');
       const systemTheme = matchMedia('(prefers-color-scheme: dark)');

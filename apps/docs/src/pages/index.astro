@@ -1,48 +1,95 @@
 ---
+import { compile } from '@chql/compiler';
+import { format } from 'sql-formatter';
 import Site from '../layouts/Site.astro';
 import { withBase } from '../lib/urls';
-import HomeSearch from '../components/HomeSearch.astro';
-import Playground from '../components/playground/Playground';
-const composition = `import { col, table, from, count } from '@chql/core';
-const events = table('events', {
-  tenant: col.String, category: col.String, id: col.UInt32,
-}, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] });
+import query from '../examples/homepage';
+import source from '../examples/homepage.ts?raw';
+import { encodeShare } from '../playground/sharing';
 
-const base = from(events).where(e => e.tenant.eq('acme'));
-const dashboard = base.groupBy(e => e.category)
-  .aggregate(() => ({ total: count() }));
-const report = base.orderBy(e => e.id).limit(100);
-const drillDown = base.where(e => e.category.eq('purchase'));
-export default report;`;
+const example = source.slice(source.indexOf('const base'));
+const compiled = compile(query.ir);
+const sql = format(compiled.sql, { language: 'clickhouse' });
+const playground = `${withBase('/playground/')}#${await encodeShare(source)}`;
+const guides = [
+  { title: 'Getting started', description: 'Build and inspect your first query.', path: '/docs/getting-started/' },
+  { title: 'Simple example', description: 'Reuse queries for reports and dashboards.', path: '/docs/tutorials/composition/' },
+  { title: 'Advanced example', description: 'Combine tables without losing track of what you count.', path: '/docs/tutorials/advanced-example/' },
+];
 ---
-<Site title="Type-safe and composable. SQL's missing features." description="Build reusable ClickHouse queries in TypeScript—without stitching SQL strings together.">
-  <section class="hero">
-    <p class="eyebrow">A typed, composable query builder for ClickHouse</p>
-    <h1>Type-safe and composable.<br />SQL's missing features.</h1>
-    <p class="lede">Build reusable ClickHouse queries in TypeScript—without stitching SQL strings together. Keep values parameterized, catch schema mismatches earlier, and inspect the SQL you ship.</p>
-    <div class="actions"><a class="button primary" href={withBase('/playground/')}>Try the playground →</a><a class="button" href={withBase('/docs/getting-started/')}>Build your first query</a></div>
-    <div class="install-command"><span>Install</span><code>pnpm add @chql/core @chql/compiler</code></div>
-    <p class="meta preview-note">Bounded implementation preview. Adopt one query, not a new application architecture.</p>
-    <HomeSearch />
+<Site title="Typed ClickHouse queries" description="Typed, composable ClickHouse queries in TypeScript.">
+  <section class="home-hero" aria-labelledby="home-title">
+    <h1 id="home-title">chql</h1>
+    <p class="home-tagline">Typed, composable ClickHouse queries in TypeScript.</p>
+    <div class="actions">
+      <a class="button primary" href={withBase('/docs/getting-started/')}>Learn chql</a>
+      <a class="button" href={withBase('/playground/')}>Try the playground</a>
+    </div>
+    <p class="meta">Preview</p>
   </section>
-  <section>
-    <p class="eyebrow">01 / Compose queries, not strings</p>
-    <h2>One base. Three ways to use it.</h2>
-    <p>SQL has CTEs and subqueries. The missing piece is application-level composition: reusable query logic you can extend without duplicating SQL. Every operation below creates a new query; the base stays unchanged.</p>
-    <details class="composition-reference">
-      <summary>Read the static composition example · events fixture</summary>
-      <pre aria-label="Reusable query composition example"><code>{composition}</code></pre>
-      <p>The report selects tenant <code>acme</code>, sorts by <code>id ASC</code>, and limits to 100 rows. Its tenant value is a separate String parameter. The dashboard groups that same base by category; the drill-down adds another filter. The naive compiler nests SELECTs rather than optimizing these into a shared CTE.</p>
-    </details>
-    <p class="meta">A human interface for inspection: edit a query and review the generated SQL. This self-contained products fixture demonstrates the same reuse pattern; the static events example is the canonical documentation fixture.</p>
-    <Playground client:visible />
+
+  <section class="home-example" aria-labelledby="example-title">
+    <div class="section-intro">
+      <h2 id="example-title">Build queries from reusable pieces.</h2>
+      <p>Start with a shared query. Extend it without changing the original.</p>
+    </div>
+    <div class="code-pair">
+      <figure>
+        <figcaption>TypeScript</figcaption>
+        <pre tabindex="0" aria-label="TypeScript example"><code>{example.trim()}</code></pre>
+      </figure>
+      <figure>
+        <figcaption>Generated SQL</figcaption>
+        <pre tabindex="0" aria-label="Generated SQL"><code>{sql}</code></pre>
+        <p class="parameters">Parameters: <code>{JSON.stringify(compiled.params)}</code></p>
+      </figure>
+    </div>
+    <p class="example-context">Uses the <a href={withBase('/docs/getting-started/#define-and-compile')}>events table from Getting started</a>. Values stay separate from SQL.</p>
+    <a class="example-link" href={playground}>Edit in the playground →</a>
   </section>
-  <section class="grid">
-    <div class="panel"><p class="eyebrow">02 / Safer construction</p><h2>Input stays input.</h2><p><code>e.tenant.eq(userInput)</code> produces a typed placeholder, such as <code>{'{p0:String}'}</code>, and a separate parameter value—even when input contains quotes or SQL syntax.</p><p>This separates values from structure. It does not enforce authorization or prove query logic correct.</p><a href={withBase('/docs/reference/parameters/')}>See the parameter contract →</a></div>
-    <div class="panel"><p class="eyebrow">03 / Built for ClickHouse</p><h2>Native semantics. Explicit edges.</h2><p><code>from(events).final()</code> preserves ClickHouse FINAL semantics. Integer <code>sum</code> outputs decode as bigint. Inner ALL joins retain duplicates.</p><p>Outer joins and automatic optimizer rewrites are not available in this preview. No performance promises hidden behind an abstraction.</p><a href={withBase('/docs/reference/queries/')}>Read the supported surface →</a></div>
-  </section>
-  <section class="grid">
-    <div><p class="eyebrow">04 / Catch schema drift earlier</p><h2>Refresh. Typecheck. Review.</h2><p>Regenerate descriptors after a column rename. A query still using <code>e.category</code> fails TypeScript checking if that property no longer exists.</p><p>Make generation and typechecking a CI step. Stale descriptors cannot detect live schema drift; not every semantic change alters a type.</p><a href={withBase('/docs/getting-started/#refresh-your-schema')}>Set up the feedback loop →</a></div>
-    <div class="panel agent-panel"><p class="eyebrow">Agent-first reference / human inspection</p><h2>Explicit APIs.<br />Inspectable SQL.</h2><p>Give coding agents documented query-building primitives, typed constraints, compiler validation, and generated SQL you can review. Every documentation page is also available as full Markdown from the same source.</p><a class="button" href={withBase('/llms.txt')}>Start with llms.txt →</a></div>
+
+  <section class="home-guides" aria-labelledby="guides-title">
+    <h2 id="guides-title">Learn chql in three small steps.</h2>
+    <ol>
+      {guides.map(guide => (
+        <li>
+          <a href={withBase(guide.path)}>{guide.title} <span aria-hidden="true">→</span></a>
+          <p>{guide.description}</p>
+        </li>
+      ))}
+    </ol>
   </section>
 </Site>
+
+<style>
+  .home-hero { padding: 6rem 0 5rem; text-align: center; }
+  .home-hero h1 { margin: 0 auto 1.25rem; font-size: clamp(3.5rem, 8vw, 5rem); letter-spacing: -.05em; }
+  .home-tagline { margin: 0 auto; max-width: 32ch; font-size: clamp(1.35rem, 3vw, 1.85rem); line-height: 1.5; color: var(--muted); text-wrap: balance; }
+  .home-hero .actions { justify-content: center; margin: 1.75rem 0 1rem; }
+  .home-hero .meta { margin: 0 auto; }
+  .home-example { padding: 4rem 0; text-align: center; }
+  .section-intro p { margin: 0 auto 2.25rem; color: var(--muted); }
+  .code-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); text-align: left; border: 1px solid var(--border); border-radius: .75rem; overflow: hidden; }
+  figure { margin: 0; min-width: 0; background: var(--panel); }
+  figure + figure { border-left: 1px solid var(--border); }
+  figcaption { padding: .75rem 1.25rem; font-size: .8rem; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .code-pair pre { margin: 0; border: 0; border-radius: 0; padding: 1.25rem; font-size: .8rem; background: transparent; }
+  .code-pair pre:focus-visible { outline-offset: -3px; }
+  .parameters { max-width: none; margin: 0; padding: 0 1.25rem 1.25rem; font-size: .75rem; color: var(--muted); }
+  .example-context { margin: 1.25rem auto .5rem; font-size: .85rem; color: var(--muted); }
+  .example-link { font-size: .9rem; }
+  .home-guides { padding: 4rem 0; max-width: 42rem; margin: 0 auto; }
+  .home-guides h2 { text-align: center; }
+  .home-guides ol { margin: 2rem 0 0; padding-left: 1.75rem; }
+  .home-guides li { padding: .75rem 0 .75rem .5rem; }
+  .home-guides li::marker { color: var(--muted); }
+  .home-guides a { font-weight: 600; text-decoration: none; }
+  .home-guides a:hover { text-decoration: underline; }
+  .home-guides li p { margin: .15rem 0 0; color: var(--muted); font-size: .95rem; }
+  @media (max-width: 800px) {
+    .home-hero { padding: 4rem 0; }
+    .home-example, .home-guides { padding: 3rem 0; }
+    .code-pair { grid-template-columns: 1fr; }
+    figure + figure { border-left: 0; border-top: 1px solid var(--border); }
+  }
+</style>
