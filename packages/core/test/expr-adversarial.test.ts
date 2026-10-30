@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GenericContainer, Wait } from 'testcontainers';
-import { Expr, col, columnExpr, defineAggregate, defineFunction, exprNode, max, maxIf, sum, sumIf, sumState, sumMerge, maxMerge, parseCHType, stringLike, val, type Column, type Decimal, type Mode, type NodeId } from '../src/index.js';
+import { Expr, col, columnExpr, exprNode, max, maxIf, sum, sumIf, sumState, sumMerge, maxMerge, parseCHType, val, type Column, type Decimal, type Mode, type NodeId } from '../src/index.js';
 function ref<T, M extends Mode>(descriptor: Column<T>, mode: M) {
   return new Expr<T, 'value', M>(exprNode({ kind: 'ColumnRef', rel: 1 as NodeId, path: ['value'], type: descriptor.type }), 'value', mode);
 }
@@ -130,37 +130,6 @@ describe('expression adversarial boundaries', () => {
     expect(state).toMatchObject({ name: 'sum', mode: 'agg' });
     expect(state.ir.type).toEqual(col.AggregateFunction('sum', col.UInt64).type);
     expect(value.ir).toMatchObject({ kind: 'Param', value: 7n, type: col.UInt64.type });
-  });
-  it('owns parametric constants and keeps declared constants rootless without inlining', () => {
-    const aggregate = defineAggregate({ name: 'customText', params: [col.String], args: [stringLike], returns: col.String, deterministic: true, linear: false });
-    const hostile = "x'); DROP TABLE secrets; --";
-    const input = val(hostile);
-    const result = aggregate(hostile)(input);
-    expect(result).toMatchObject({ name: 'customText', mode: 'agg' });
-    if (result.ir.kind !== 'Agg') throw new Error('Agg expected');
-    expect(result.ir.args[0]).toBe(input.ir);
-    expect(result.ir.params[0]).toMatchObject({ kind: 'Param', value: hostile, type: col.String.type });
-    expect(result.ir.params[0]).not.toBe(input.ir);
-    expect(Object.isFrozen(result.ir.params)).toBe(true);
-    expect(Reflect.set(result.ir.params[0]!, 'value', 'changed')).toBe(false);
-    expect(result.ir.params[0]).toMatchObject({ value: hostile });
-  });
-  it('names rootless application aggregates and never turns hostile constants into literals', () => {
-    const rootless = defineAggregate({ name: 'customCount', args: [], returns: col.UInt64, nullable: 'never', deterministic: true, linear: true });
-    expect(rootless()).toMatchObject({ name: 'customCount', mode: 'agg' });
-    const aggregate = defineAggregate({ name: 'customText', args: [stringLike], returns: col.String, deterministic: true, linear: false });
-    const hostile = "x'); DROP TABLE secrets; --";
-    const result = aggregate(hostile);
-    expect(result).toMatchObject({ name: 'customText', mode: 'agg' });
-    if (result.ir.kind !== 'Agg') throw new Error('Agg expected');
-    expect(result.ir.args[0]).toMatchObject({ kind: 'Param', value: hostile, type: null });
-    const identity = defineFunction({ name: 'identity', args: [stringLike], returns: 'arg0', deterministic: true });
-    const unresolved = val(null);
-    const call = identity(unresolved);
-    if (call.ir.kind !== 'Call') throw new Error('Call expected');
-    expect(call.ir.args[0]).toBe(unresolved.ir);
-    expect(unresolved.ir.type).toBeNull();
-    expect(call.ir.type).toMatchObject({ kind: 'Nullable' });
   });
   it('keeps null from an unresolved constant in comparison result metadata', () => {
     const result = ref(col.String, 'row').eq(val(null));

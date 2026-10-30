@@ -47,11 +47,11 @@ export class Expr<T, N extends string = never, M extends Mode = 'row'> extends E
     return new Expr(exprNode({ ...fields, ...(fields.kind === 'Raw' ? { resolution: 'declared' as const } : {}), type: descriptor.type }), this.name, this.mode);
   }
 }
-// Application extensions merge into this interface; generated declarations extend it once.
-export interface ExprMethods<T, N extends string = never, M extends Mode = 'row'> extends GeneratedExprMethods<T, N, M> {}
-export interface Expr<T, N extends string = never, M extends Mode = 'row'> extends ExprMethods<T, N, M> {}
+// The builtin method surface is generated once for all expression modes.
+export interface Expr<T, N extends string = never, M extends Mode = 'row'> extends GeneratedExprMethods<T, N, M> {}
 
-export function extendExpr(methods: Record<string, (...args: never[]) => unknown>): void {
+/** Internal installer for the generated builtin surface. */
+export function installBuiltinMethods(methods: Record<string, (...args: never[]) => unknown>): void {
   for (const name of Object.keys(methods)) {
     if (name in Expr.prototype) throw new Error(`duplicate_function: ${name}`);
   }

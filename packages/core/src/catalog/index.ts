@@ -12,7 +12,6 @@ export const functionCatalog = Object.freeze([...methodCatalog, greatestDefiniti
 export { now, dateDiff, multiIf, isDayDescriptor } from './projection.js';
 export { greatest } from './greatest.js';
 export { orderingCatalog } from './ordering.js';
-export * from './define.js';
-export * from './matchers.js';
+export { unwrap, anyType, numeric, stringLike, boolean, dateLike, arrayOf, byteString, stringOrArray, tupleLike, isNullable, nullable } from './matchers.js';
 export * from './aggregate.js';
 export { exp } from './arithmetic.js';

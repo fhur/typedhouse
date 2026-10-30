@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GenericContainer, Wait } from 'testcontainers';
-import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, Expr, aggregateDefinitions, col, count, countIf, countState, defineAggregate, defineFunction, exprNode, extendExpr, max, maxMerge, methodCatalog, orderingCatalog, stringLike, sum, sumIf, sumMerge, sumState, val, parseCHType, type Column, type NodeId } from '../src/index.js';
+import { quantile, quantileIf, avg, avgIf, argMax, argMaxIf, Expr, aggregateDefinitions, col, count, countIf, countState, exprNode, max, maxMerge, methodCatalog, orderingCatalog, sum, sumIf, sumMerge, sumState, val, parseCHType, type Column, type NodeId } from '../src/index.js';
 function grouped<T>(column: Column<T>) { return new Expr<T, 'value', 'grouped'>(exprNode({ kind: 'ColumnRef', rel: 1 as NodeId, path: ['value'], type: column.type }), 'value', 'grouped'); }
 describe('catalog slice', () => {
   it('installs exactly its generated method surface', () => {
@@ -69,28 +69,7 @@ describe('catalog slice', () => {
     expect(argMaxIf(val('constant'), version, version.gt(0)).name).toBe('argMax');
     expect(argMaxIf(value, version, val(false)).ir).toMatchObject({ combinators: ['If'], type: value.ir.type });
   });
-  it('supports application functions without putting executable resolvers into IR', () => {
-    const distance = defineFunction({ name: 'editDistance', args: [stringLike, stringLike], returns: col.UInt64, deterministic: true });
-    const call = distance(grouped(col.String), 'abc');
-    expect(call).toMatchObject({ name: 'value', mode: 'grouped', ir: { kind: 'Call', type: col.UInt64.type, fn: { origin: 'user' } } });
-    expect(call.ir).not.toHaveProperty('definition');
-    const topK = defineAggregate({ name: 'topK', params: [col.UInt64], args: [stringLike], returns: col.Array(col.String), deterministic: true, linear: false });
-    expect(topK(3)(grouped(col.String)).ir).toMatchObject({ kind: 'Agg', params: [{ kind: 'Param', value: 3 }], type: col.Array(col.String).type });
-    const sameName = defineFunction({ name: 'eq', args: [stringLike], returns: col.Bool, deterministic: true });
-    expect(sameName(grouped(col.String)).ir).toMatchObject({ fn: { name: 'eq', origin: 'user' } });
-  });
-  it('resolves application names, modes and nullable policies without changing parameters', () => {
-    const identity = defineFunction({ name: 'identity', args: [stringLike], returns: 'arg0', deterministic: true });
-    const distance = defineFunction({ name: 'distance', args: [stringLike, stringLike], returns: col.UInt64, deterministic: true });
-    const input = grouped(col.Nullable(col.String));
-    expect(identity(input).ir.type).toEqual(input.ir.type);
-    const constant = val('abc');
-    const call = distance(constant, input);
-    expect(call).toMatchObject({ name: 'value', mode: 'grouped', ir: { type: col.Nullable(col.UInt64).type } });
-    if (call.ir.kind !== 'Call') throw new Error('Call expected');
-    expect(call.ir.args[0]).toBe(constant.ir);
-    const aggregate = defineAggregate({ name: 'nullableResult', args: [stringLike], returns: col.UInt64, deterministic: true, linear: false });
-    expect(aggregate(input).ir.type).toEqual(col.Nullable(col.UInt64).type);
+  it('normalizes wrapped builtin Merge descriptors', () => {
     expect(maxMerge(grouped(col.AggregateFunction('max', col.LowCardinality(col.Nullable(col.String))))).ir.type).toEqual(col.Nullable(col.String).type);
   });
   it('preserves sum storage boundaries and recursive Merge argument descriptors', () => {
@@ -108,11 +87,6 @@ describe('catalog slice', () => {
     expect(Object.isFrozen(merged.ir.type)).toBe(true);
     if (merged.ir.kind !== 'Agg') throw new Error('Agg expected');
     expect(merged.ir.args[0]).toBe(state.ir);
-  });
-  it('rejects method collisions atomically', () => {
-    expect(() => extendExpr({ uniqueNotInstalled() {}, eq() {} })).toThrow('duplicate_function: eq');
-    expect(Expr.prototype).not.toHaveProperty('uniqueNotInstalled');
-    expect(() => extendExpr({ constructor() {} })).toThrow('duplicate_function');
   });
   it('agrees with actual ClickHouse 24.8 numeric/nullable/decimal result types', async () => {
     const container = await new GenericContainer('clickhouse/clickhouse-server:24.8').withEnvironment({ CLICKHOUSE_SKIP_USER_SETUP: '1' }).withExposedPorts(8123).withWaitStrategy(Wait.forHttp('/ping', 8123)).start();

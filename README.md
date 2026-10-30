@@ -179,6 +179,8 @@ After a database column is renamed, regenerate the descriptors: queries using th
 | Array expansion | `arrayJoin` and `leftArrayJoin` | [Array expansion](https://fhur.github.io/typedhouse/docs/query-builder/array-expansion/) |
 | ClickHouse-specific operations | `FINAL`, `SAMPLE`, and CTE hints with explicit semantics | [Scan modifiers](https://fhur.github.io/typedhouse/docs/query-builder/scan-modifiers/) · [CTEs](https://fhur.github.io/typedhouse/docs/query-builder/cte-hints/) |
 
+Custom scalar/aggregate declarations (`defineFunction`, `defineAggregate`) and method extensions (`extendExpr`) are intentionally removed by owner scope decision, superseding those requirements in the original `spec.md`. Builtin typed functions, generated known-function `fn`/`agg` calls, and ordinary TypeScript expression helpers remain supported. Typed SQL snippets are a next step pending a runtime-descriptor decision; no raw SQL API is implemented by this change.
+
 These are supported building blocks, not a promise that every ClickHouse type, function, or combination is implemented. Refer to each API's constraints and the [current roadmap](TODO.md).
 
 ## Learn TypedHouse in three guides

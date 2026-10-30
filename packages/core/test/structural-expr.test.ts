@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GenericContainer, Wait } from 'testcontainers';
-import { arrayOf, byteString, col, columnExpr, defineFunction, methodCatalog, parseCHType, stringOrArray, tupleLike, val, type Column, type NodeId } from '../src/index.js';
-import { resolveReturn } from '../src/catalog/define.js';
+import { arrayOf, byteString, col, columnExpr, methodCatalog, parseCHType, stringOrArray, tupleLike, val, type Column, type NodeId } from '../src/index.js';
+import { defineFunction, resolveReturn } from '../src/catalog/define.js';
 const column = <C extends Column>(c: C) => columnExpr(c, 1 as NodeId, ['a.b'], 'a.b', 'grouped');
 describe('structural expressions', () => {
   it('keeps exact children, hostile selectors, names, modes and distinct immutable Params', () => {

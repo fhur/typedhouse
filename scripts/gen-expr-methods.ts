@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { methodCatalog, type Definition } from '../packages/core/src/catalog/index.js';
+import { methodCatalog } from '../packages/core/src/catalog/index.js';
+import type { Definition } from '../packages/core/src/catalog/define.js';
 
 import { orderingCatalog } from '../packages/core/src/catalog/ordering.js';
 

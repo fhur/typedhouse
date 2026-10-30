@@ -7,6 +7,8 @@ sidebar:
 
 Expression helpers give names to business rules you use across queries. They accept typed expressions and return an expression built from TypedHouse's methods. Import them like any other TypeScript function—no registration or database setup is required.
 
+Custom scalar/aggregate declarations (`defineFunction`, `defineAggregate`) and method extensions (`extendExpr`) were intentionally removed by owner scope decision. Use ordinary TypeScript helpers over builtin expressions, as below, or the generated known-function `fn`/`agg` tier with an explicit result descriptor. Typed SQL snippets are a next-step design decision, not an available API.
+
 The helper runs when you build the query. ClickHouse evaluates the resulting SQL against the rows; it does not call your JavaScript function.
 
 ## Flag inventory that needs replenishment

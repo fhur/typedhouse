@@ -80,7 +80,7 @@ type MergeResult<E extends AggregateOperand<unknown>, F, R> = E['ir']['type'] ex
 type MergeDescriptor<E extends AggregateOperand<unknown>, F> = F extends 'sum' | 'max' ? E['ir']['type'] extends { kind: 'AggregateFunction'; args: readonly [infer D extends CHType, ...CHType[]] } ? ResultDescriptor<D, F> : CHType : CHType;
 interface Merge<F extends string, R> { <E extends AggregateOperand<AggregateState<F>>>(state: E): ResolvedExpr<MergeResult<E, F, R>, OperandName<E, F>, 'agg', MergeDescriptor<E, F>> }
 /** Combinators are constructed from each base definition, not separate catalog entries. */
-export function deriveAggregate(def: AggregateDefinition, rootName?: 'first') {
+function deriveAggregate(def: AggregateDefinition, rootName?: 'first') {
   return Object.freeze({
     base: (...args: readonly unknown[]) => aggregateCall(def, args, [], [], rootName),
     If: (...args: readonly unknown[]) => aggregateCall(def, args, [], ['If'], rootName),
