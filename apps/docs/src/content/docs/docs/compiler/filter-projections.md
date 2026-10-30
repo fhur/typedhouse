@@ -1,13 +1,13 @@
 ---
 title: Push filters through selections
-description: Move filters before direct column selections and renames.
+description: Move filters below selections by substituting the projected expressions into the predicate.
 sidebar:
   order: 2
 ---
 
-**`PushFilterProject`** moves a safe filter through a direct column selection or rename, rebinding references to the original input columns. This exposes filtering closer to the source.
+**`PushFilterProject`** moves a safe filter below a selection. Each conjunct of the predicate is rewritten by substituting the projected expressions for the output names it references; the rewritten conjunct moves below the `map` when it stays inside the compiler's closed total fragment, and the remaining conjuncts stay above the selection as a residual filter. Filtering happens closer to the source, where it can combine with other filters and fold into the scan's `WHERE`.
 
-## Example
+## Renames
 
 The query filters the renamed `eventId`; the final SQL filters the source `id` column.
 
@@ -65,4 +65,76 @@ Parameters:
 
 <!-- generated-sql:end -->
 
-For this filter-pushdown rule, every projected expression must be a direct input-column reference. General computed projections are not substituted or merged. Unsupported predicates retain their boundary. Separately, [SELECT-block folding](/docs/compiler/select-blocks/) can combine a safe integer arithmetic projection with an underlying scan and its filters; that does not move filters through computed projections.
+## Computed selections
+
+The filter references a computed output. The predicate is rewritten over the source expression, so the inner block's `WHERE` compares `id + {p0}` against the source column before the selection runs. The parameter inside the projected expression keeps its identity: it is one `{p0}` in both places. The selection itself stays a derived table here because [SELECT-block folding](/docs/compiler/select-blocks/) folds integer arithmetic only when its parameters carry an explicit type; written as `e.id.plus(val(1, col.UInt32))`, the same query is a single `SELECT`.
+
+<details>
+<summary>Setup: imports and table definitions</summary>
+
+```ts
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
+
+const events = table(
+  'events',
+  {
+    id: col.UInt32,
+    tenant: col.String,
+  },
+  {
+    engine: 'MergeTree',
+    sortingKey: ['id'],
+    partitionKey: [],
+  },
+);
+```
+
+</details>
+
+```ts
+const query = from(events)
+  .map((e) => ({ eventId: e.id.plus(1) }))
+  .where((e) => e.eventId.gt(100n));
+
+export default compile(query.ir);
+```
+
+<!-- generated-sql:start -->
+
+Final SQL:
+
+```sql
+SELECT
+  `__typedhouse_input`.`id` + {p0:UInt32} AS `eventId`
+FROM
+  (
+    SELECT
+      `id`
+    FROM
+      `events`
+    WHERE
+      `id` + {p0:UInt32} > {p1:UInt64}
+  ) AS `__typedhouse_input`
+```
+
+Parameters:
+
+```json
+{
+  "p0": "1",
+  "p1": "100"
+}
+```
+
+<!-- generated-sql:end -->
+
+## Conditions
+
+A conjunct moves below the selection only when all of the following hold:
+
+- After substitution it still references only the selection's input.
+- The substituted predicate is inside the closed total fragment: comparisons, boolean operators and null checks over supported String, Bool and integer operands, typed integer `plus`/`minus`/`multiply`, and `ifNull` between operands of the same family. Raw SQL, casts, division, volatile calls such as `now()`, known or user-defined functions and subqueries keep the filter above the selection, so an expression that could fail or change value is never copied into `WHERE`.
+- Every projected expression the conjunct does **not** copy is total as well. After the move the selection is evaluated on fewer rows; an expression that could fail must keep its original evaluation set, so a selection with an unused `cast` or division stays a fence even for a conjunct that never touches it.
+
+Determinism alone is not enough for any of these checks; the fragment is checked by resolution against the catalog. When a projected alias shadows a physical column of the scan (`map(r => ({ stock: r.stock.plus(1) })).where(r => r.stock.gt(0))`), the pushed filter still moves below the selection, but [SELECT-block folding](/docs/compiler/select-blocks/) keeps the selection in its own derived table so ClickHouse cannot resolve the `WHERE` against the alias. Consecutive selections are collapsed first by [merging stacked selections](/docs/compiler/merge-projections/).

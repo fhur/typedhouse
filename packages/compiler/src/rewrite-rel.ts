@@ -1,5 +1,5 @@
 import { outputLeaves, print, relNode as constructRel, type ExprNode, type Rel } from '@typedhouse/core';
-import { exprNode, conjunction, conjuncts, mapExpression, rebind, references, safeAggregate, safePredicate } from './rewrite-expressions.js';
+import { exprNode, conjunction, conjuncts, contains, mapExpression, rebind, references, safeAggregate, safePredicate, substitute, totalExpression, totalPredicate } from './rewrite-expressions.js';
 
 function mapRecord(es: Readonly<Record<string, ExprNode>>, visit: (e: ExprNode) => ExprNode): Readonly<Record<string, ExprNode>> {
   const out: Record<string, ExprNode> = {};
@@ -32,28 +32,49 @@ function relNode(fields: Parameters<typeof constructRel>[0]): Rel {
   return Object.keys(edges).every(k => same(edges[k], (made as unknown as Record<string, unknown>)[k])) ? made : Object.freeze({ ...made, ...edges });
 }
 
-export type RewriteRule = 'MergeFilter' | 'PushFilterProject' | 'PushFilterJoin' | 'PushFilterArrayJoin' | 'PushFilterAggKey' | 'PushFilterUnion';
+export type RewriteRule = 'MergeFilter' | 'MergeProject' | 'PushFilterProject' | 'PushFilterJoin' | 'PushFilterArrayJoin' | 'PushFilterAggKey' | 'PushFilterUnion';
 export interface RewriteResult { readonly root: Rel; readonly hits: Readonly<Record<RewriteRule, number>> }
 const filter = (input: Rel, pred: ExprNode): Rel => relNode({ kind: 'Filter', input, pred, output: input.output });
+const values = (r: Readonly<Record<string, ExprNode>>) => Object.getOwnPropertyNames(r).map(k => r[k]!);
+/** Direct relational and expression edges of one node; repeated slots are retained. */
+function edges(node: Rel): { readonly rels: readonly Rel[]; readonly exprs: readonly ExprNode[] } {
+  const rels = 'input' in node ? [node.input] : node.kind === 'Join' ? node.inputs.map(([, r]) => r) : node.kind === 'Union' ? node.inputs : [];
+  const exprs = node.kind === 'Filter' ? [node.pred] : node.kind === 'Project' ? values(node.exprs) : node.kind === 'Aggregate' ? [...values(node.keys), ...values(node.aggs)] : node.kind === 'Join' ? node.on : node.kind === 'Sort' ? node.keys.map(k => k.expr) : node.kind === 'ArrayJoin' ? [node.expr] : node.kind === 'RawRel' ? node.args : [];
+  return { rels, exprs };
+}
+/** Parents per node by identity, counting every slot and every Subquery occurrence once per parent. */
+function countUses(root: Rel): Map<Rel, number> {
+  const uses = new Map<Rel, number>(), visited = new Set<Rel>();
+  function visit(node: Rel): void {
+    if (visited.has(node)) return;
+    visited.add(node);
+    const edge = (child: Rel) => { uses.set(child, (uses.get(child) ?? 0) + 1); visit(child); };
+    const { rels, exprs } = edges(node);
+    rels.forEach(edge);
+    for (const e of exprs) mapExpression(e, r => r, sub => { edge(sub); return sub; });
+  }
+  visit(root);
+  return uses;
+}
 /** Lexicographic occurrence-tree measure. Filters do not contribute to distance,
- * so splitting one join predicate cannot increase a residual's distance. */
-export function rewriteMeasure(root: Rel): readonly [number, number] {
-  const memo = new Map<Rel, readonly [number, number, number]>();
-  function visit(node: Rel): readonly [number, number, number] {
+ * so splitting one join predicate cannot increase a residual's distance. The
+ * third component counts non-Filter occurrences, including subquery scopes. */
+export function rewriteMeasure(root: Rel): readonly [number, number, number] {
+  const memo = new Map<Rel, readonly [number, number, number, number]>();
+  function visit(node: Rel): readonly [number, number, number, number] {
     const old = memo.get(node);
     if (old) return old;
-    const children = 'input' in node ? [node.input] : node.kind === 'Join' ? node.inputs.map(([, r]) => r) : node.kind === 'Union' ? node.inputs : [];
-    let size = node.kind === 'Filter' ? 0 : 1, distance = 0, filters = node.kind === 'Filter' ? 1 : 0;
-    for (const child of children) { const [s, d, f] = visit(child); size += s; distance += d; filters += f; }
+    const { rels, exprs } = edges(node);
+    let size = node.kind === 'Filter' ? 0 : 1, distance = 0, filters = node.kind === 'Filter' ? 1 : 0, nodes = size;
+    for (const child of rels) { const [s, d, f, n] = visit(child); size += s; distance += d; filters += f; nodes += n; }
     if (node.kind === 'Filter') distance += size * conjuncts(node.pred).length;
-    const es = node.kind === 'Filter' ? [node.pred] : node.kind === 'Project' ? Object.getOwnPropertyNames(node.exprs).map(k => node.exprs[k]!) : node.kind === 'Aggregate' ? [...Object.values(node.keys), ...Object.values(node.aggs)] : node.kind === 'Join' ? node.on : node.kind === 'Sort' ? node.keys.map(k => k.expr) : node.kind === 'ArrayJoin' ? [node.expr] : node.kind === 'RawRel' ? node.args : [];
-    for (const e of es) mapExpression(e, r => r, sub => { const [, d, f] = visit(sub); distance += d; filters += f; return sub; });
-    const result = [size, distance, filters] as const;
+    for (const e of exprs) mapExpression(e, r => r, sub => { const [, d, f, n] = visit(sub); distance += d; filters += f; nodes += n; return sub; });
+    const result = [size, distance, filters, nodes] as const;
     memo.set(node, result);
     return result;
   }
-  const [, distance, filters] = visit(root);
-  return [distance, filters];
+  const [, distance, filters, nodes] = visit(root);
+  return [distance, filters, nodes];
 }
 /** Validated graphs only. No mutation, registry or predicate memoization by input.
  * Each pass memoizes original occurrences, never consumer-specific pushdowns.
@@ -62,11 +83,31 @@ export function rewriteMeasure(root: Rel): readonly [number, number] {
  * when that distance is unchanged. Union replication replaces weight
  * 1 + sum(branch sizes) with sum(branch sizes) per conjunct, strictly decreasing
  * distance despite increasing Filter count. Repeated slots count as occurrences.
+ * MergeProject changes neither distance nor Filter count unless a Filter sits above
+ * it (then distance drops); it strictly decreases the non-Filter occurrence count.
  * No rule pulls predicates upward. Fifty passes are a safety limit, never partial success.
  */
 export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
-  const hits: Record<RewriteRule, number> = { MergeFilter: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 };
+  const hits: Record<RewriteRule, number> = { MergeFilter: 0, MergeProject: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 };
+  let uses = new Map<Rel, number>();
+  const scoped = (e: ExprNode) => contains(e, a => a.kind === 'Subquery' || a.kind === 'Agg');
+  const repeatable = (e: ExprNode) => !contains(e, a => a.kind === 'Raw' || (a.kind === 'Call' || a.kind === 'Agg') && a.fn.deterministic !== true);
+  function mergeProject(outer: Extract<Rel, { kind: 'Project' }>): Rel {
+    const inner = outer.input;
+    // (a) one parent by identity, Subquery occurrences included; (b) Materialize is its own node kind.
+    if (inner.kind !== 'Project' || uses.get(inner) !== 1) return outer;
+    const counts = new Map<string, number>();
+    for (const e of values(outer.exprs)) for (const r of references(e)) if (r.rel === inner.id && r.path.length === 1) counts.set(r.path[0]!, (counts.get(r.path[0]!) ?? 0) + 1);
+    for (const name of Object.getOwnPropertyNames(inner.exprs)) {
+      const e = inner.exprs[name]!, n = counts.get(name) ?? 0;
+      // (e) scope hygiene; (c) duplicated evaluation; (d) dropped evaluation must be total.
+      if (scoped(e) || n > 1 && !repeatable(e) || n === 0 && !totalExpression(e)) return outer;
+    }
+    hits.MergeProject++;
+    return relNode({ kind: 'Project', input: inner.input, exprs: mapRecord(outer.exprs, e => substitute(e, inner)), columns: outer.columns, output: outer.output });
+  }
   function local(node: Rel): Rel {
+    if (node.kind === 'Project') return mergeProject(node);
     if (node.kind !== 'Filter' || !safePredicate(node.pred)) return node;
     const child = node.input;
     if (child.kind === 'Filter' && safePredicate(child.pred)) {
@@ -103,6 +144,23 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
       hits.PushFilterProject++;
       return relNode({ kind: 'Project', input, output: child.output, columns: child.columns, exprs: mapRecord(child.exprs, e => rebind(e, child.input, input)) });
     }
+    if (child.kind === 'Project') {
+      const names = Object.getOwnPropertyNames(child.exprs);
+      const pushed: ExprNode[] = [], residual: ExprNode[] = [];
+      for (const pred of conjuncts(node.pred)) {
+        const used = new Set(references(pred).filter(r => r.rel === child.id && r.path.length === 1).map(r => r.path[0]!));
+        const substituted = substitute(pred, child);
+        // (a) binds to the input only; (b) the copy is total; (c) what is not copied is total too.
+        const qualifies = references(substituted).every(r => r.rel === child.input.id) && totalPredicate(substituted)
+          && names.every(n => used.has(n) || totalExpression(child.exprs[n]!));
+        if (qualifies) pushed.push(substituted); else residual.push(pred);
+      }
+      if (!pushed.length) return node;
+      const input = filter(child.input, conjunction(pushed));
+      const project = relNode({ kind: 'Project', input, output: child.output, columns: child.columns, exprs: mapRecord(child.exprs, e => rebind(e, child.input, input)) });
+      hits.PushFilterProject++;
+      return residual.length ? filter(project, rebind(conjunction(residual), child, project)) : project;
+    }
     if (child.kind === 'ArrayJoin' && child.expr.kind === 'ColumnRef' && child.expr.rel === child.input.id && references(node.pred).every(r => r.rel === child.id && !(r.path.length === 1 && r.path[0] === child.alias))) {
       const input = filter(child.input, rebind(node.pred, child, child.input));
       hits.PushFilterArrayJoin++;
@@ -133,6 +191,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
   }
   for (let pass = 0; pass < maxPasses; pass++) {
     const memo = new Map<Rel, Rel>();
+    uses = countUses(root);
     function visit(node: Rel): Rel {
       const cached = memo.get(node);
       if (cached) return cached;
@@ -166,13 +225,15 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
         if (inputs.some((r, i) => r !== node.inputs[i])) result = relNode({ kind: 'Union', inputs, all: node.all, output: node.output });
       }
       result = local(result);
+      // A rewritten occurrence replaces its original in every parent slot.
+      if (result !== node) uses.set(result, uses.get(node) ?? 0);
       memo.set(node, result);
       return result;
     }
     const next = visit(root);
     if (next === root) return Object.freeze({ root, hits: Object.freeze(hits) });
     const before = rewriteMeasure(root), after = rewriteMeasure(next);
-    if (!(after[0] < before[0] || after[0] === before[0] && after[1] < before[1])) throw new Error('rewrite_nonconvergence: non-decreasing measure');
+    if (!(after[0] < before[0] || after[0] === before[0] && (after[1] < before[1] || after[1] === before[1] && after[2] < before[2]))) throw new Error('rewrite_nonconvergence: non-decreasing measure');
     root = next;
   }
   throw new Error(`rewrite_nonconvergence: exceeded ${maxPasses} passes`);

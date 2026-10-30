@@ -28,9 +28,20 @@ it('retains fences for alias collisions, fallible expressions and limits', () =>
     input.map(r => ({ onHand: r.onHand.minus(r.reserved) })),
     input.map(r => ({ available: r.onHand.divide(r.reserved) })),
     input.limit(1).map(r => ({ available: r.onHand.minus(r.reserved) })),
-    input.map(r => ({ available: r.onHand.minus(r.reserved) })).where(r => r.available.gt(0n)),
+    input.map(r => ({ available: r.onHand.minus(r.reserved), ratio: r.onHand.divide(r.reserved) })).where(r => r.available.gt(0n)),
   ];
   for (const query of queries) expect(compile(query.ir).sql).toContain(') AS `__typedhouse_input`');
+});
+
+it('pushes a filter on a total computed output below the selection and folds to one SELECT', () => {
+  const query = from(inventory).where(r => r.onHand.gt(0))
+    .map(r => ({ available: r.onHand.minus(r.reserved) })).where(r => r.available.gt(0n));
+  const result = compile(query.ir);
+  expect(result.sql.match(/SELECT /g)).toHaveLength(1);
+  // The filter is emitted on the source expression, never on the output alias.
+  expect(result.sql).toBe('SELECT `onHand` - `reserved` AS `available` FROM `inventory` WHERE `onHand` > {p0:UInt32} AND `onHand` - `reserved` > {p1:Int64}');
+  expect(result.sql).not.toContain('`available` >');
+  expect(result.columns).toEqual(emitNaive(query.ir).columns);
 });
 
 it('checks collisions against columns hidden by an earlier selection', () => {

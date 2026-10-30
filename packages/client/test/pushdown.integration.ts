@@ -94,7 +94,7 @@ it('executes 500 bounded shrinkable multi-operator recipes with actual rule/topo
   console.info('pushdown differential', { runs: result.numRuns, seed: result.seed, milliseconds: Math.round(performance.now() - start), rules: [...hits], topologies: shapes.size });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(500);
-  expect([...hits].sort()).toEqual(['MergeFilter', 'PushFilterArrayJoin', 'PushFilterJoin', 'PushFilterProject']);
+  expect([...hits].sort()).toEqual(['MergeFilter', 'MergeProject', 'PushFilterArrayJoin', 'PushFilterJoin', 'PushFilterProject']);
   expect(shapes.size).toBe(15);
 }, 120000);
 it('detects real decoded duplicate loss, genuinely shrinks and exactly replays', async () => {

@@ -58,8 +58,13 @@ function family(t: CHType): string | undefined {
   if (b.kind !== 'scalar') return undefined;
   return b.name === 'String' || b.name === 'Bool' ? b.name : /^U?Int(8|16|32|64|128|256)$/.test(b.name) ? 'integer' : undefined;
 }
-/** Closed total fragment, checked against the authoritative resolver, not flags. */
-export function safePredicate(e: ExprNode): boolean {
+const booleanFamily = ['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'and', 'or', 'not', 'isNull', 'isNotNull'];
+const comparisons = ['eq', 'ne', 'lt', 'le', 'gt', 'ge'];
+const arithmeticFamily = ['plus', 'minus', 'multiply'];
+/** Closed total fragment, checked against the authoritative resolver, not flags.
+ * `wide` admits integer `plus`/`minus`/`multiply` (ClickHouse wraps) and same-family
+ * `ifNull` as operands; the boolean family alone is the predicate fragment. */
+function resolveTotal(e: ExprNode, wide: boolean): CHType | undefined {
   function resolve(a: ExprNode, expected?: CHType): CHType {
     if (a.kind === 'ColumnRef' || a.kind === 'Param') {
       const t = a.type ?? expected;
@@ -68,13 +73,30 @@ export function safePredicate(e: ExprNode): boolean {
     }
     if (a.kind !== 'Call' || a.fn.origin !== 'typed') throw new Error('unsafe expression');
     const name = a.fn.name;
-    if (!['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'and', 'or', 'not', 'isNull', 'isNotNull'].includes(name)) throw new Error('unsafe function');
+    const arithmetic = wide && arithmeticFamily.includes(name), fallback = wide && name === 'ifNull';
+    if (!booleanFamily.includes(name) && !arithmetic && !fallback) throw new Error('unsafe function');
     const resolved = resolveCall(a, resolve);
-    if (['eq', 'ne', 'lt', 'le', 'gt', 'ge'].includes(name) && print(base(resolved.types[0]!)) !== print(base(resolved.types[1]!))) throw new Error('unsafe comparison coercion');
+    if ((comparisons.includes(name) || fallback) && print(base(resolved.types[0]!)) !== print(base(resolved.types[1]!))) throw new Error('unsafe comparison coercion');
+    if (arithmetic && ![...resolved.types, resolved.result].every(t => family(t) === 'integer')) throw new Error('unsafe arithmetic');
     if (!methodCatalog.find(d => d.name === name)?.deterministic) throw new Error('unsafe metadata');
     return resolved.result;
   }
-  try { return print(base(resolve(e))) === 'Bool'; } catch { return false; }
+  try { return resolve(e); } catch { return undefined; }
+}
+export function safePredicate(e: ExprNode): boolean {
+  const t = resolveTotal(e, false);
+  return t !== undefined && print(base(t)) === 'Bool';
+}
+/** Boolean result over the wide fragment: substituted predicates may carry
+ * projected arithmetic. `safePredicate` (and every rule gated on it) is unchanged. */
+export function totalPredicate(e: ExprNode): boolean {
+  const t = resolveTotal(e, true);
+  return t !== undefined && print(base(t)) === 'Bool';
+}
+/** Dropping or re-evaluating a total expression can neither suppress nor add a
+ * failure: bare column/Param reads of any type, and the wide fragment over families. */
+export function totalExpression(e: ExprNode): boolean {
+  return e.kind === 'ColumnRef' || e.kind === 'Param' || resolveTotal(e, true) !== undefined;
 }
 /** Whole-computation envelope, not merely determinism: direct non-null
  * String/Bool/integer keys, count(), max of those direct columns and integer
@@ -103,4 +125,18 @@ export function references(e: ExprNode): Ref[] {
   const refs: Ref[] = [];
   mapExpression(e, r => { refs.push(r); return r; });
   return refs;
+}
+export function contains(e: ExprNode, test: (e: ExprNode) => boolean): boolean {
+  if (test(e)) return true;
+  switch (e.kind) {
+    case 'Call': case 'Raw': case 'Agg': return e.args.some(a => contains(a, test)) || (e.kind === 'Agg' && e.params.some(a => contains(a, test)));
+    case 'Cast': return contains(e.expr, test);
+    case 'Case': return e.branches.some(b => contains(b.when, test) || contains(b.then, test)) || contains(e.otherwise, test);
+    default: return false; // Subquery scopes are opaque here, as in mapExpression.
+  }
+}
+/** Inline a flat Project's outputs: refs bound to it (path length 1) become its
+ * expressions, already bound to `project.input`. Shared subtrees keep identity. */
+export function substitute(e: ExprNode, project: Extract<Rel, { kind: 'Project' }>): ExprNode {
+  return mapExpression(e, r => r.rel === project.id && r.path.length === 1 && Object.hasOwn(project.exprs, r.path[0]!) ? project.exprs[r.path[0]!]! : r);
 }

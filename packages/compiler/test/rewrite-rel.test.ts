@@ -71,10 +71,10 @@ it('keeps all explicit fences and unused fallible projections', () => {
   const fences = [q.orderBy(r => r.id), q.limit(1), q.distinct(), q.cte()];
   for (const fence of fences) { const root = fence.where(r => r.id.gt(1)).ir; expect(rewriteRel(root).root).toBe(root); }
 });
-it('does not move across computed projections, casts, aggregates or unsafe filters', () => {
+it('does not move across fallible projections, casts, aggregates or unsafe filters', () => {
   const queries = [
     q.map(r => ({ id: r.id, unused: cast(r.text, col.Nullable(col.UInt32)) })).where(r => r.id.gt(1)),
-    q.map(r => ({ id: r.id.plus(1) })).where(r => r.id.gt(1n)),
+    q.map(r => ({ id: r.id.plus(1), unused: cast(r.text, col.Nullable(col.UInt32)) })).where(r => r.id.gt(1n)),
     q.where(r => cast(r.text, col.Nullable(col.UInt32)).gt(1)).where(r => r.id.gt(1)),
     q.aggregate(() => ({ n: count() })).where(r => r.n.gt(1n)),
   ];
@@ -165,7 +165,7 @@ it('keeps diagnostic paths on original objects and equal-valued Params distinct 
   expect(compiled.parameterTypes).toEqual({ p0: col.UInt32.type, p1: col.UInt32.type });
   const rewritten = rewrite(query.ir);
   expect(rewritten.hits.PushFilterJoin).toBeGreaterThan(0);
-  expect(rewriteRel(rewritten.root).hits).toEqual({ MergeFilter: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 });
+  expect(rewriteRel(rewritten.root).hits).toEqual({ MergeFilter: 0, MergeProject: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 });
 });
 it('pushes direct aggregate keys, splitting AND but retaining aggregate/mixed OR predicates', () => {
   const a = q.groupBy(r => ({ key: r.id })).aggregate(g => ({ n: count(), highest: max(g.id), total: sum(g.id) }));
