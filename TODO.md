@@ -2,7 +2,15 @@
 
 ## Accepted owner-approved slice — trusted scalar SQL snippets
 
-### Independent harness review — scoped PASS; merged-tree matrix pending
+### Combined SQL acceptance verified — scoped PASS after harness merge
+
+Harness implementation `f7d55f8` merged normally as `8e74d9585eb13ae093fb27aeec1655e77f37e28c` onto owner main `e461125c4e174f0fc8aed338bab5f9c0b977eb82`, with no conflicts or tracked owner dirt. This resolves the combined-tree blocker for the accepted SQL snippet slice; it does not complete full M3/v1. The harness commit changes only its five script/helper/test files, its narrow ignore rule and TODO; no production source, snapshots, benchmark inputs or budgets changed. Owner IR changes remain intact.
+
+Fresh postmerge helper tests, build, all three official nonincremental root CLIs and forced-color corpus self-tests pass. Independent raw-log audit again verifies all eight zero-exit positive controls per compiler, identical positive/negative configs, exact single TS2344 location/message/detail, broken-rootDir rejection and cleanup. Corpus remains **253** rows. Exactly one new uncached full check per compiler, sequentially: **5.8.3 exit 0 / 266.647 s**, **5.5.4 exit 0 / 266.168 s**, **7.0.2 exit 0 / 227.229 s**. Each passes **822 runtime / 7 codegen / 167 SQL** tests, **337** precise diagnostics, existing package/performance gates and an actual **10,000,000-row** stream with checksum **49,999,995,000,000**. Peak heaps: **75,277,864 / 75,318,952 / 75,266,136 bytes**, below unchanged **200,000,000**. Runtime count increased by the owner's two IR tests, not this harness. No failed-gate retry, budget increase, assertion weakening or snapshot refresh.
+
+All nonprotected input hashes matched before/after every command; owner `.playwright-cli/` byte hashes remain unchanged without content inspection. The worker matrix is attributed premerge evidence only; these merged-tree full runs are fresh independent evidence. Logs/manifests/raw audit: `/tmp/chql-diagnostic-review-evidence/merged-*`; drivers `/tmp/chql-diagnostic-{review,audit}.py`. Owned diagnostic-colors cache and raw compiler evidence are archived under that evidence directory before normal removal of only its clean worktree. SQL-snippets, canceled user-aggregates and diagnosis worktrees remain untouched; prior failures remain retained. No push, reset, rewrite, protected-document read/edit or foreign cleanup.
+
+### Independent harness review — scoped PASS; merged-tree matrix completed above
 
 Independent review found no actionable defect in the actual pending harness, diagnostic/layout helpers, tests, temporary config, built declaration mapping, external consumer/symlinks, cleanup and narrow ignore rule. Fresh helper tests, build, all three official nonincremental root checks and forced-color corpus self-tests pass (5.8.3 / 5.5.4 / 7.0.2). Independently audited all 24 real positive/negative pairs: positives exit zero, identical configs/imports precede each mismatch, and negatives have one TS2344 at the exact assertion location with mismatch detail; broken-rootDir positives reject with TS6059 only. Owned control directories are removed. Windows distinct-drive/UNC tests exercise the actual path selector with path.win32; this is not native Windows execution. Real filesystem selection/compilation is exercised by the corpus runs.
 
