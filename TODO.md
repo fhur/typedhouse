@@ -18,6 +18,12 @@ Count changes are intentional: runtime **844 → 807** removes 36 dedicated user
 
 Evidence: `/tmp/chql-remove-{full,root,source,version}-{5.8.3,5.5.4,7.0.2}.log`, `/tmp/chql-remove-{build,surface,docs-check,readme,function-docs,format}.log`; matrix driver `/tmp/chql-remove-matrix.sh`. The surface log retains the initial development-only missing-export wording failure; final surface success is in each full log. Main remains `91fde029947ca554a310ae74daec9c198d8a2b94` with only owner-untracked `.playwright-cli/`. `spec.md`, generated surfaces/codegen snapshots, benchmark inputs/budgets, and accepted SQL snapshots have no diff. Ready for independent review; no commit/stage/merge/push performed.
 
+### Postmerge removal verification — scoped PASS
+
+Normal `git merge --no-edit remove-custom-functions` fast-forwarded unchanged main `91fde029947ca554a310ae74daec9c198d8a2b94` to removal commit `0f0eea27114a4d01e96fc308bc34b56c09abdc80`; no combined-tree source/config delta or conflict. Fresh main checks passed: **50/50 focused tests**, build, nonincremental root TypeScript and diff hygiene. All 455 non-TODO review input hashes still match the tested three-full-matrix tree, so that fresh matrix remains applicable without a duplicate run. All 10 owner-untracked `.playwright-cli/` byte hashes remain unchanged, with no content inspection, stashing or deletion. Main has no other tracked changes. This postmerge record is documentation only.
+
+Postmerge evidence: `/tmp/chql-removal-final-evidence/removal-resume/postmerge-{results,inputs}.json` and `postmerge-{focused,build,root,hygiene}.log`; driver `/tmp/chql-removal-postmerge.py`. Owned worktree cache evidence is preserved before normal removal of only `.worktrees/remove-custom-functions`; canceled user-aggregates and diagnosis worktrees remain untouched. No push, reset, rewrite, protected-document read/edit or original-spec change. Historical failures remain recorded below; full original-spec M3/v1 and raw snippets are not claimed.
+
 ### Docker-restored continuation — scoped acceptance
 
 Owner explicitly authorized continuation after restoring Docker (server 29.1.5). The independent 456-file manifest SHA256 `a583375044b3c736cc4360a210e2b1ea4357840e6c12944ffe9007faad0f4c4a` and every recorded review log hash matched before execution; all input hashes remained unchanged throughout. No production/test repair followed independent review. Fresh focused **50/50** passed, including all three previously Docker-blocked native builtin cases.
