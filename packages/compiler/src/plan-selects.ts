@@ -35,7 +35,7 @@ function safeProjection(e: ExprNode): boolean {
   const integer = (t: CHType | null): boolean => t !== null && (t.kind === 'Nullable' || t.kind === 'LowCardinality'
     ? integer(t.inner) : t.kind === 'scalar' && /^U?Int(8|16|32|64|128|256)$/.test(t.name));
   if (e.kind === 'ColumnRef' || e.kind === 'Param') return true;
-  return e.kind === 'Call' && ['plus', 'minus', 'multiply'].includes(e.fn.name) && integer(e.type)
+  return e.kind === 'Call' && e.fn.origin === 'typed' && ['plus', 'minus', 'multiply'].includes(e.fn.name) && integer(e.type)
     && e.args.every(a => integer(a.type) && safeProjection(a));
 }
 
@@ -58,7 +58,7 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
     let block: SelectBlock;
     if (rel.kind === 'Scan') {
       block = { source: Object.freeze({ kind: 'table', scan: rel }), clauses: Object.freeze([]) };
-    } else if (rel.kind === 'Join' && (rel.joinKind === 'inner' || rel.joinKind === 'cross') && rel.on.every(e => e.kind === 'Call' && e.fn.name === 'eq' && e.args.every(a => a.kind === 'ColumnRef'))) {
+    } else if (rel.kind === 'Join' && (rel.joinKind === 'inner' || rel.joinKind === 'cross') && rel.on.every(e => e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'eq' && e.args.every(a => a.kind === 'ColumnRef'))) {
       block = { source: Object.freeze({ kind: 'join', rel }), clauses: Object.freeze([]) };
     } else if (rel.kind === 'Project' && directSelection(rel) && rel.input.kind === 'Join' && !ctes?.names.has(rel.input)) {
       const child = plan(rel.input);

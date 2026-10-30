@@ -1,5 +1,7 @@
 import { isDayDescriptor, setDescriptor, membershipBase, aggregateDefinitions, functionCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
 
+import { resolveKnown } from './resolve-known.js';
+
 /** Closed descriptor grammar: no raw/Unknown type text ever reaches CAST syntax.
  * Nullable -> non-null is deliberately unsupported: cast_keep_nullable changes
  * that conversion's descriptor, and NULL removal must never be implicit here.
@@ -18,6 +20,8 @@ export function resolveCast(e: Extract<ExprNode, { kind: 'Cast' }>, resolve: (e:
 }
 
 export function resolveAggregate(e: Extract<ExprNode, { kind: 'Agg' }>, resolve: (e: ExprNode, expected?: CHType) => CHType): { result: CHType; sqlName: string } {
+  if (e.fn.origin === 'known') return resolveKnown(e, resolve);
+  if (e.fn.known !== undefined) throw new Error('invalid_function_metadata');
   const def = aggregateDefinitions.find(d => d.name === e.fn.name);
   if (!def || e.fn.origin !== 'typed') throw new Error('unsupported_aggregate');
   if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || e.fn.linear !== def.linear || e.fn.argumentPolicies !== undefined || e.fn.repeatedArgs !== undefined) throw new Error('invalid_function_metadata');
@@ -54,6 +58,8 @@ function compatible(a: CHType, b: CHType): boolean {
 
 /** Catalog evidence, not caller-supplied Call metadata, determines argument/result types. */
 export function resolveCall(e: Extract<ExprNode, { kind: 'Call' }>, resolve: (e: ExprNode, expected?: CHType) => CHType): { types: CHType[]; result: CHType; sqlName: string } {
+  if (e.fn.origin === 'known') return resolveKnown(e, resolve);
+  if (e.fn.known !== undefined) throw new Error('invalid_function_metadata');
   const def = functionCatalog.find(d => d.name === e.fn.name);
   if (!def || e.fn.origin !== 'typed') throw new Error('unsupported_expression');
   if (e.fn.sqlName !== def.sqlName || e.fn.deterministic !== def.deterministic || JSON.stringify(e.fn.argumentPolicies) !== JSON.stringify(def.argumentPolicies) || e.fn.repeatedArgs !== def.repeatedArgs) throw new Error('invalid_function_metadata');
@@ -149,7 +155,7 @@ export function resolveCall(e: Extract<ExprNode, { kind: 'Call' }>, resolve: (e:
     // opaque, scalar-subquery or volatile receiver, even if future catalogs grow.
     const repeatable = (arg: ExprNode): boolean => arg.kind === 'ColumnRef' || arg.kind === 'Param' ||
       (arg.kind === 'Cast' && repeatable(arg.expr)) ||
-      ((arg.kind === 'Call' || arg.kind === 'Agg') && arg.fn.deterministic === true && arg.args.every(repeatable));
+      ((arg.kind === 'Call' || arg.kind === 'Agg') && arg.fn.origin === 'typed' && arg.fn.deterministic === true && arg.args.every(repeatable));
     if (!repeatable(e.args[0]!)) throw new Error('unsupported_between_receiver');
   }
   if (def.surface === 'comparison' && !compatible(types[0]!, types[1]!)) throw new Error('incompatible_operands');

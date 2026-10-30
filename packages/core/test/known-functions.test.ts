@@ -1,0 +1,32 @@
+import { expect, it } from 'vitest';
+import { col, columnExpr, createKnownFunctions, val, type Expr, type NodeId } from '../src/index.js';
+const { fn, agg } = createKnownFunctions({ hash: { isAggregate: false, deterministic: true, aliasTo: 'alias' }, count: { isAggregate: true, deterministic: null, aliasTo: '' } });
+const row = columnExpr(col.String, 1 as NodeId, ['id'], 'id', 'row');
+const grouped = columnExpr(col.String, 1 as NodeId, ['id'], 'id', 'grouped');
+it('owns frozen evidence, keeps parameter edges and names, and records explicit declarations', () => {
+  const p = val('x');
+  const unknown = fn.hash(row, p, p);
+  expect(unknown.name).toBe('id'); expect(unknown.mode).toBe('row');
+  expect(unknown.ir.type?.kind).toBe('Unknown');
+  const known = unknown.as(col.UInt64);
+  if (known.ir.kind !== 'Call') throw new Error('expected call');
+  expect(known.ir.args[1]).toBe(p.ir); expect(known.ir.args[2]).toBe(p.ir);
+  expect(known.ir.fn.known?.declaration).toEqual({ origin: 'as', type: col.UInt64.type });
+  expect(Object.isFrozen(known.ir.fn.known?.declaration?.type)).toBe(true);
+  expect(Object.isFrozen(known.ir.fn.known?.catalog)).toBe(true);
+  expect(Object.isFrozen(fn)).toBe(true); expect(Object.isFrozen(agg)).toBe(true);
+  expect(fn.hash().name).toBe('hash');
+  expect(agg.count().name).toBe('count');
+  expect(fn.hash(grouped).mode).toBe('grouped');
+  expect(fn.hash(agg.count(grouped), p).mode).toBe('agg');
+  expect(agg.count(grouped).name).toBe('id');
+});
+it('rejects primitive arguments and mixed modes at runtime without relying on TypeScript', () => {
+  const scalar = fn.hash as (...args: unknown[]) => Expr<unknown, string>;
+  const aggregate = agg.count as (...args: unknown[]) => unknown;
+  for (const value of ['x', 1, null, {}, () => 1]) expect(() => scalar(value)).toThrow('known_function_requires_expression');
+  expect(() => scalar(row, grouped)).toThrow('invalid_expression_mode');
+  expect(() => scalar(agg.count(), grouped)).toThrow('invalid_expression_mode');
+  expect(() => aggregate(row)).toThrow('invalid_expression_mode');
+  expect(() => aggregate(agg.count())).toThrow('invalid_expression_mode');
+});

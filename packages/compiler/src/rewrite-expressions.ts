@@ -66,7 +66,7 @@ export function safePredicate(e: ExprNode): boolean {
       if (!t || !family(t)) throw new Error('unsafe operand');
       return a.kind === 'Param' && a.value === null && t.kind !== 'Nullable' ? { kind: 'Nullable', inner: t } : t;
     }
-    if (a.kind !== 'Call') throw new Error('unsafe expression');
+    if (a.kind !== 'Call' || a.fn.origin !== 'typed') throw new Error('unsafe expression');
     const name = a.fn.name;
     if (!['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'and', 'or', 'not', 'isNull', 'isNotNull'].includes(name)) throw new Error('unsafe function');
     const resolved = resolveCall(a, resolve);
@@ -86,14 +86,14 @@ export function safeAggregate(rel: Extract<Rel, { kind: 'Aggregate' }>): boolean
   if (!Object.getOwnPropertyNames(rel.keys).every(k => direct(rel.keys[k]!))) return false;
   return Object.getOwnPropertyNames(rel.aggs).every(k => {
     const e = rel.aggs[k]!;
-    if (e.kind !== 'Agg' || e.params.length || e.combinators.length) return false;
+    if (e.kind !== 'Agg' || e.fn.origin !== 'typed' || e.params.length || e.combinators.length) return false;
     if (e.fn.name !== 'count' && e.fn.name !== 'max' && e.fn.name !== 'sum') return false;
     if (!e.args.every(a => direct(a) && (e.fn.name !== 'sum' || family(a.type!) === 'integer'))) return false;
     try { resolveAggregate(e, a => { if (!a.type) throw new Error('untyped'); return a.type; }); return true; } catch { return false; }
   });
 }
 export function conjuncts(e: ExprNode): ExprNode[] {
-  return e.kind === 'Call' && e.fn.name === 'and' ? e.args.flatMap(conjuncts) : [e];
+  return e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'and' ? e.args.flatMap(conjuncts) : [e];
 }
 export function conjunction(es: readonly ExprNode[]): ExprNode {
   if (!es.length) throw new Error('empty conjunction');

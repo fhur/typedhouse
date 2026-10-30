@@ -2,6 +2,7 @@ import type { CHType } from './ch-type.js';
 import type { GeneratedExprMethods } from './expr-methods.generated.js';
 import { exprNode, type ExprNode } from './ir.js';
 import type { Column, Mode, NodeId, Value } from './types.js';
+import type { KnownResultDescriptor } from './known-functions.js';
 
 /** Refine the existing runtime twin, without adding a value phantom to Expr. */
 export type DescribedExpr<T, N extends string, M extends Mode, D extends CHType> = Expr<T, N, M> & { readonly ir: ExprNode & { readonly type: D } };
@@ -33,10 +34,16 @@ export class Expr<T, N extends string = never, M extends Mode = 'row'> extends E
   declare readonly [exprMode]: M;
   constructor(readonly ir: ExprNode, readonly name: N, readonly mode: M) { super(); Object.freeze(this); }
   as<C extends Column>(this: Constant<T>, descriptor: C): DescribedConstant<C>;
-  as<C extends Column>(descriptor: C): DescribedExpr<Value<C>, N, M, C['type']>;
+  as<C extends Column>(descriptor: C & (this extends { readonly knownResult: true } ? C['type'] extends KnownResultDescriptor ? unknown : never : unknown)): DescribedExpr<Value<C>, N, M, C['type']>;
   as<U>(descriptor: Column<U>): Expr<U, string, Mode> {
     // A declaration, not a SQL cast; edges keep their identity and owned values are recaptured.
     const { id: _id, ...fields } = this.ir;
+    if (fields.kind === 'Call' && fields.fn.origin === 'known' && fields.fn.known) {
+      return new Expr(exprNode({ ...fields, fn: { ...fields.fn, known: { ...fields.fn.known, declaration: { origin: 'as', type: descriptor.type } } }, type: descriptor.type }), this.name, this.mode);
+    }
+    if (fields.kind === 'Agg' && fields.fn.origin === 'known' && fields.fn.known) {
+      return new Expr(exprNode({ ...fields, fn: { ...fields.fn, known: { ...fields.fn.known, declaration: { origin: 'as', type: descriptor.type } } }, type: descriptor.type }), this.name, this.mode);
+    }
     return new Expr(exprNode({ ...fields, ...(fields.kind === 'Raw' ? { resolution: 'declared' as const } : {}), type: descriptor.type }), this.name, this.mode);
   }
 }
