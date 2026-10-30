@@ -1,4 +1,4 @@
-import { from, table, col, scalar, count } from '@chql/core';
+import { from, table, col, scalar, count } from '@typedhouse/core';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.cte().final(); // expect: TS2339 Property 'final' does not exist
 q.cte().sample(0.1); // expect: TS2339 Property 'sample' does not exist

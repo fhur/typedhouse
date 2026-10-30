@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, table, from, val, relNode, flatOutput, count, type SortKey } from '@chql/core';
+import { col, table, from, val, relNode, flatOutput, count, type SortKey } from '@typedhouse/core';
 import { emitNaive } from '../src/index.js';
 const t = table('t', { id: col.UInt64, name: col.Nullable(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 it('emits explicit scoped sort/distinct columns and parameters in SQL occurrence order', () => {
@@ -7,11 +7,11 @@ it('emits explicit scoped sort/distinct columns and parameters in SQL occurrence
   const input = from(t).map(r => ({ id: r.id.plus(shared), name: r.name }));
   const q = input.orderBy(r => r.id.plus(shared).desc()).thenBy(r => r.name.asc().nullsFirst());
   const compiled = emitNaive(q.ir);
-  expect(compiled.sql).toBe('SELECT `__chql_input`.`id`, `__chql_input`.`name` FROM (SELECT plus(`__chql_input`.`id`, {p0:UInt64}) AS `id`, `__chql_input`.`name` AS `name` FROM (SELECT `id`, `name` FROM `t`) AS `__chql_input`) AS `__chql_input` ORDER BY plus(`__chql_input`.`id`, {p0:UInt64}) DESC, `__chql_input`.`name` ASC NULLS FIRST');
+  expect(compiled.sql).toBe('SELECT `__typedhouse_input`.`id`, `__typedhouse_input`.`name` FROM (SELECT plus(`__typedhouse_input`.`id`, {p0:UInt64}) AS `id`, `__typedhouse_input`.`name` AS `name` FROM (SELECT `id`, `name` FROM `t`) AS `__typedhouse_input`) AS `__typedhouse_input` ORDER BY plus(`__typedhouse_input`.`id`, {p0:UInt64}) DESC, `__typedhouse_input`.`name` ASC NULLS FIRST');
   expect(compiled.params).toEqual({ p0: '2' });
-  expect(emitNaive(q.map(r => r.name).distinct().ir).sql).toContain('SELECT DISTINCT `__chql_input`.`name` FROM (SELECT');
+  expect(emitNaive(q.map(r => r.name).distinct().ir).sql).toContain('SELECT DISTINCT `__typedhouse_input`.`name` FROM (SELECT');
   expect(emitNaive(q.limit(1).ir).sql).toMatch(/ORDER BY .*\) LIMIT 1$/);
-  expect(emitNaive(input.limit(1).orderBy(r => r.id).ir).sql).toMatch(/LIMIT 1\) AS `__chql_input` ORDER BY `__chql_input`.`id` ASC$/);
+  expect(emitNaive(input.limit(1).orderBy(r => r.id).ir).sql).toMatch(/LIMIT 1\) AS `__typedhouse_input` ORDER BY `__typedhouse_input`.`id` ASC$/);
 });
 it('rebinds sort-row expressions without cloning shared Params or legitimizing foreign refs', () => {
   const shared = val(2n, col.UInt64);
@@ -21,7 +21,7 @@ it('rebinds sort-row expressions without cloning shared Params or legitimizing f
   expect(appended.ir.keys[1]!.expr.args[1]).toBe(shared.ir);
   expect(emitNaive(appended.ir).params).toEqual({ p0: '2' });
   const replacement = appended.orderBy(() => appended.row.id.plus(shared));
-  expect(emitNaive(replacement.ir).sql).toContain('ORDER BY plus(`__chql_input`.`id`, {p0:UInt64}) ASC');
+  expect(emitNaive(replacement.ir).sql).toContain('ORDER BY plus(`__typedhouse_input`.`id`, {p0:UInt64}) ASC');
   expect(() => emitNaive(q.thenBy(() => from(t).row.id).ir)).toThrow(/unbound_column/);
 });
 it('rejects malformed sort keys, schema mismatch, aggregation and foreign bindings by named paths', () => {

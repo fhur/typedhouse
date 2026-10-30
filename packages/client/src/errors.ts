@@ -1,4 +1,4 @@
-import type { CompiledQuery, Rel } from '@chql/core';
+import type { CompiledQuery, Rel } from '@typedhouse/core';
 export class QueryError extends Error {
   readonly sql: string;
   readonly params: CompiledQuery['params'];

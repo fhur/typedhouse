@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, from, greatest, max, table, val, type ExprNode } from '@chql/core';
+import { col, from, greatest, max, table, val, type ExprNode } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 import { componentsLatest } from './fixtures/corpus/components-latest.js';
 const q = from(table('dates', { a: col.DateTime64(1, 'Europe/Amsterdam'), b: col.DateTime64(3, 'Europe/Amsterdam'), c: col.DateTime64(2, 'Europe/Amsterdam') }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));

@@ -15,8 +15,13 @@ Integer and float operands return `Float64` (`number`); NULL values are skipped 
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, quantile, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  quantile,
+  table,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const requests = table(
   'requests',
@@ -46,12 +51,12 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`endpoint` AS `endpoint`,
-  quantile({p0:Float64}) (`__chql_input`.`durationMs`) AS `medianDurationMs`
+  `__typedhouse_input`.`endpoint` AS `endpoint`,
+  quantile({p0:Float64}) (`__typedhouse_input`.`durationMs`) AS `medianDurationMs`
 FROM
-  `requests` AS `__chql_input`
+  `requests` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`endpoint`
+  `__typedhouse_input`.`endpoint`
 ```
 
 Parameters:

@@ -14,7 +14,7 @@ index 1d3a33c2b16122a1c4df85550f9c95b9d3c5f6b3..dbb705658d055d39791fa8efdc82794e
      }
      async start() {
          const client = await (0, container_runtime_1.getContainerRuntimeClient)();
-+        // chql: Docker Desktop for Mac must allocate dynamic TCP ports on the host,
++        // typedhouse: Docker Desktop for Mac must allocate dynamic TCP ports on the host,
 +        // not in its Linux VM (testcontainers-node#1602). Keep other runtimes intact.
 +        if (process.platform === "darwin" &&
 +            client.info.containerRuntime.operatingSystem === "Docker Desktop" &&

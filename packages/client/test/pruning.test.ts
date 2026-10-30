@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import fc from 'fast-check';
-import { compile, emitNaive } from '@chql/compiler';
+import { compile, emitNaive } from '@typedhouse/compiler';
 import { pruneColumns } from '../../compiler/src/prune-columns.js';
 import { build, recipeArbitrary, seed, topology } from './pruning-arbitrary.js';
 it('generates variable nested/shared recipes, preserves schema and genuinely shrinks topology', () => {

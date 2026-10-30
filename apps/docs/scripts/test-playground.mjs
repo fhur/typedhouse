@@ -54,7 +54,7 @@ assert.equal(formatSql(formattedSql), formattedSql, 'Formatting is idempotent');
 const unsupported = "SELECT 'unterminated";
 assert.equal(formatSql(unsupported), unsupported, 'Formatter failures preserve raw SQL');
 
-const cache = new URL('../node_modules/.cache/chql-docs-examples/', import.meta.url);
+const cache = new URL('../node_modules/.cache/typedhouse-docs-examples/', import.meta.url);
 await mkdir(cache, { recursive: true });
 const files = [];
 for (const [name, source] of Object.entries(fixtureModule.exports.examples)) {
@@ -66,7 +66,7 @@ const program = ts.createProgram(files, {
   strict: true, noEmit: true, skipLibCheck: true,
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
   moduleResolution: ts.ModuleResolutionKind.NodeNext,
-  paths: { '@chql/core': [fileURLToPath(new URL('../../../packages/core/src/index.ts', import.meta.url))] },
+  paths: { '@typedhouse/core': [fileURLToPath(new URL('../../../packages/core/src/index.ts', import.meta.url))] },
 });
 const diagnostics = ts.getPreEmitDiagnostics(program);
 assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, {

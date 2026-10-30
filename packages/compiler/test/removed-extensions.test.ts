@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import * as core from '@chql/core';
-import { col, count, from, table, type Rel } from '@chql/core';
+import * as core from '@typedhouse/core';
+import { col, count, from, table, type Rel } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 
 it('does not export custom function declarations or method installers', () => {

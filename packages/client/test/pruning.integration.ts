@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { count, crossJoin, join, unionAll, type Caps } from '@chql/core';
+import { count, crossJoin, join, unionAll, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys, verify } from './backend-harness.js';
 import { build, native, recipeArbitrary, seed, source, topology, type Recipe } from './pruning-arbitrary.js';
@@ -56,7 +56,7 @@ it('anchors disjoint shared demands, duplicate expansions and full-interface fen
 it('executes 500 bounded variable nested/shared recipes with independent native bag anchors', async () => {
   const shapes = new Set<string>();
   const start = performance.now();
-  const result = await fc.check(fc.asyncProperty(recipeArbitrary, async recipe => { shapes.add(topology(recipe.tree)); await check(recipe); }), { seed: Number(process.env.CHQL_PRUNING_SEED ?? seed), numRuns: 500, ...(process.env.CHQL_PRUNING_PATH ? { path: process.env.CHQL_PRUNING_PATH } : {}) });
+  const result = await fc.check(fc.asyncProperty(recipeArbitrary, async recipe => { shapes.add(topology(recipe.tree)); await check(recipe); }), { seed: Number(process.env.TYPEDHOUSE_PRUNING_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_PRUNING_PATH ? { path: process.env.TYPEDHOUSE_PRUNING_PATH } : {}) });
   console.info('pruning differential', { runs: result.numRuns, seed: result.seed, topologies: shapes.size, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(500); expect(shapes.size).toBeGreaterThan(50);

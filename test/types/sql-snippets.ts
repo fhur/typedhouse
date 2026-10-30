@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, sql, val, type DescribedExpr, type Infer, from, table } from '@chql/core';
+import { col, sql, val, type DescribedExpr, type Infer, from, table } from '@typedhouse/core';
 const distance = sql`editDistance(${'x'}, ${'y'})`.as(col.UInt64);
 expectTypeOf(distance).toEqualTypeOf<DescribedExpr<bigint, never, 'row', typeof col.UInt64.type>>();
 expectTypeOf(distance).not.toBeAny();

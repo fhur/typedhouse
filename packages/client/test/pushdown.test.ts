@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import fc from 'fast-check';
-import { compile, emitNaive } from '@chql/compiler';
+import { compile, emitNaive } from '@typedhouse/compiler';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { build, recipeArbitrary, seed } from './pushdown-arbitrary.js';
 it('reconstructs shrinkable multi-operator recipes with all four actual rewrite hits', () => {

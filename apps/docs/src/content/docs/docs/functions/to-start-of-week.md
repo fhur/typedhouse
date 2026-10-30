@@ -11,8 +11,8 @@ sidebar:
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -45,22 +45,22 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
+  `__typedhouse_input`.`id` AS `id`,
   addDays(
     toDate(
-      toStartOfWeek(toDate32(`__chql_input`.`occurredAt`), 0)
+      toStartOfWeek(toDate32(`__typedhouse_input`.`occurredAt`), 0)
     ),
     throwIf(
       ifNull(
         (
-          toStartOfWeek(toDate32(`__chql_input`.`occurredAt`), 0) < toDate32('1970-01-01')
+          toStartOfWeek(toDate32(`__typedhouse_input`.`occurredAt`), 0) < toDate32('1970-01-01')
         )
         OR (
-          toStartOfWeek(toDate32(`__chql_input`.`occurredAt`), 0) > toDate32('2149-06-06')
+          toStartOfWeek(toDate32(`__typedhouse_input`.`occurredAt`), 0) > toDate32('2149-06-06')
         ),
         0
       ),
-      'chql_date_out_of_range'
+      'typedhouse_date_out_of_range'
     )
   ) AS `week`
 FROM
@@ -70,7 +70,7 @@ FROM
       `occurredAt`
     FROM
       `events`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 SETTINGS
   enable_extended_results_for_datetime_functions = 1
 ```

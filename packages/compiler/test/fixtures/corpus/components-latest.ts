@@ -1,4 +1,4 @@
-import { from, greatest, join, type Row } from '@chql/core';
+import { from, greatest, join, type Row } from '@typedhouse/core';
 import { cIndices, components, db, forTenant, isActive, latest, type ComponentRow } from './low-stock.js';
 
 const inCategory = (path: string) => (c: Row<ComponentRow>) => c.category.startsWith(path);

@@ -1,4 +1,4 @@
-import { col, from, table, max, scalar, type Query } from '@chql/core';
+import { col, from, table, max, scalar, type Query } from '@typedhouse/core';
 const q = from(table('dates', { d32: col.Date32, dt: col.DateTime(), dt64: col.DateTime64(3), precise: col.DateTime64(6), n: col.Nullable(col.Date32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 scalar(q.aggregate(g => max(g.d32))); // expect: TS2345 unsupported_scalar_temporal_descriptor
 scalar(q.aggregate(g => max(g.dt))); // expect: TS2345 unsupported_scalar_temporal_descriptor

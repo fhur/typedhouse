@@ -1,4 +1,4 @@
-import { from, table, col, count } from '@chql/core';
+import { from, table, col, count } from '@typedhouse/core';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.where(r => r.id); // expect: TS2322 Type 'bigint' is not assignable to type 'boolean | null'.
 q.map(r => ({ nested: { id: r.id } })); // expect: TS2353 'id' does not exist in type 'Expr<unknown, string, "row">'.

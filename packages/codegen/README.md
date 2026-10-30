@@ -1,10 +1,10 @@
 # TypedHouse codegen (M2)
 
-The package remains `@chql/codegen` and the CLI command remains `chql` for compatibility.
+The CLI command is `typedhouse`.
 
 ```sh
-chql generate --url http://localhost:8123 --database analytics --out-dir src/generated
-chql check --database analytics --out-dir src/generated
+typedhouse generate --url http://localhost:8123 --database analytics --out-dir src/generated
+typedhouse check --database analytics --out-dir src/generated
 ```
 
 `--database` and `--out-dir` are required. URL defaults to `CLICKHOUSE_URL`, then
@@ -46,7 +46,7 @@ implementation and `.as()`; this metadata is not the final v1 callable API.
 
 `pnpm check:all` builds the executable before real testcontainers integration,
 then compiles generated snapshots and hostile-name/type examples in an isolated
-consumer resolving the built packages. `CHQL_TYPESCRIPT_VERSION` selects that
+consumer resolving the built packages. `TYPEDHOUSE_TYPESCRIPT_VERSION` selects that
 consumer's compiler, as in the existing M1 gate. The root compiler matrix still
 requires the explicit TypeScript 5.5/current commands documented in TODO.
 
@@ -62,7 +62,7 @@ To deliberately refresh snapshots after reviewing a schema/server change:
 
 ```sh
 pnpm build
-CHQL_UPDATE_CODEGEN_SNAPSHOTS=1 pnpm test:codegen-integration
+TYPEDHOUSE_UPDATE_CODEGEN_SNAPSHOTS=1 pnpm test:codegen-integration
 ```
 
 Normal acceptance only compares snapshots and never updates them. Seed data,

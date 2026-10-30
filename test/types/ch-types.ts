@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, table, type Infer, type Column, type Decimal, type UUID, type IPv4, type IPv6, type AggregateState } from '@chql/core';
+import { col, table, type Infer, type Column, type Decimal, type UUID, type IPv4, type IPv6, type AggregateState } from '@typedhouse/core';
 export const scalars = table('scalars', {
   u8: col.UInt8, u16: col.UInt16, u32: col.UInt32, i8: col.Int8, i16: col.Int16, i32: col.Int32,
   f32: col.Float32, f64: col.Float64, u64: col.UInt64, u128: col.UInt128, u256: col.UInt256,

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, table, from, val } from '@chql/core';
+import { col, table, from, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 
 const products = table('products', { id: col.UInt64, category: col.String, stock: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
@@ -25,8 +25,8 @@ it('keeps reversed and repeated clause boundaries', () => {
     q.limit(4, 1).limit(2, 1),
   ];
   for (const query of cases) expect(selects(compile(query.ir).sql)).toBe(2);
-  expect(compile(cases[1]!.ir).sql).toContain('LIMIT 2) AS `__chql_input` ORDER BY');
-  expect(compile(cases[3]!.ir).sql).toContain('LIMIT 4 OFFSET 1) AS `__chql_input` LIMIT 2 OFFSET 1');
+  expect(compile(cases[1]!.ir).sql).toContain('LIMIT 2) AS `__typedhouse_input` ORDER BY');
+  expect(compile(cases[3]!.ir).sql).toContain('LIMIT 4 OFFSET 1) AS `__typedhouse_input` LIMIT 2 OFFSET 1');
 });
 
 it('folds above but not through projection and distinct fences', () => {

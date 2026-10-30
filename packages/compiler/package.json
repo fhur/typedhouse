@@ -1,5 +1,5 @@
 {
-  "name": "@chql/compiler",
+  "name": "@typedhouse/compiler",
   "version": "0.1.0",
   "type": "module",
   "files": [
@@ -15,6 +15,6 @@
     "build": "tsup src/index.ts --format esm --dts --clean"
   },
   "dependencies": {
-    "@chql/core": "workspace:*"
+    "@typedhouse/core": "workspace:*"
   }
 }

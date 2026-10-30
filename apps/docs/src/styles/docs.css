@@ -3,27 +3,27 @@
 :root,
 :root[data-theme='light'],
 :root[data-theme='dark'] {
-  --sl-font: var(--chql-font-sans);
-  --sl-font-mono: var(--chql-font-mono);
-  --sl-color-bg: var(--chql-bg);
-  --sl-color-bg-nav: var(--chql-surface);
-  --sl-color-bg-sidebar: var(--chql-bg);
-  --sl-color-hairline-light: var(--chql-border);
-  --sl-color-hairline: var(--chql-border);
-  --sl-color-text: var(--chql-text);
-  --sl-color-text-accent: var(--chql-text);
-  --sl-color-accent-low: var(--chql-surface-muted);
-  --sl-color-accent: var(--chql-text);
-  --sl-color-accent-high: var(--chql-text);
+  --sl-font: var(--typedhouse-font-sans);
+  --sl-font-mono: var(--typedhouse-font-mono);
+  --sl-color-bg: var(--typedhouse-bg);
+  --sl-color-bg-nav: var(--typedhouse-surface);
+  --sl-color-bg-sidebar: var(--typedhouse-bg);
+  --sl-color-hairline-light: var(--typedhouse-border);
+  --sl-color-hairline: var(--typedhouse-border);
+  --sl-color-text: var(--typedhouse-text);
+  --sl-color-text-accent: var(--typedhouse-text);
+  --sl-color-accent-low: var(--typedhouse-surface-muted);
+  --sl-color-accent: var(--typedhouse-text);
+  --sl-color-accent-high: var(--typedhouse-text);
 }
-:focus-visible { outline: 2px solid var(--chql-accent); outline-offset: 4px; }
+:focus-visible { outline: 2px solid var(--typedhouse-accent); outline-offset: 4px; }
 .sl-markdown-content { line-height: 1.75; }
 .sl-markdown-content :is(h1, h2, h3) { letter-spacing: -.025em; }
 .sl-markdown-content pre { border-radius: .25rem; }
-.markdown-actions a { color: var(--chql-text); text-underline-offset: .2em; }
-.markdown-actions button { background: var(--chql-surface); border-color: var(--chql-border); border-radius: .25rem; }
-.markdown-actions button:hover { border-color: var(--chql-text); }
-.expressive-code pre { background: var(--chql-surface) !important; }
+.markdown-actions a { color: var(--typedhouse-text); text-underline-offset: .2em; }
+.markdown-actions button { background: var(--typedhouse-surface); border-color: var(--typedhouse-border); border-radius: .25rem; }
+.markdown-actions button:hover { border-color: var(--typedhouse-text); }
+.expressive-code pre { background: var(--typedhouse-surface) !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }

@@ -1,4 +1,4 @@
-import { col, columnExpr, maxMerge, sumState, val, type NodeId } from '@chql/core';
+import { col, columnExpr, maxMerge, sumState, val, type NodeId } from '@typedhouse/core';
 const sumStateColumn = columnExpr(col.AggregateFunction('sum', col.Float64), 1 as NodeId, ['s'], 's', 'grouped');
 maxMerge(sumStateColumn); // expect: TS2345 Argument of type 'DescribedExpr<AggregateState<"sum">
 val([['1.25', null]], col.Map(col.Decimal64(2), col.Nullable(col.String))); // expect: TS2322 Type 'string' is not assignable to type 'Decimal<18, 2>'.

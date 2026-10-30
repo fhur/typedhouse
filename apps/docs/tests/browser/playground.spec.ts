@@ -37,8 +37,8 @@ test('sandbox blocks storage, network and external scripts; loops time out', asy
   await expect(page.getByRole('status')).toContainText('Compiled locally');
   const failures: string[] = [];
   const responses: string[] = [];
-  page.on('requestfailed', request => { if (request.url().includes('example.com/chql-probe')) failures.push(request.failure()?.errorText ?? 'unknown'); });
-  page.on('response', response => { if (response.url().includes('example.com/chql-probe')) responses.push(response.url()); });
+  page.on('requestfailed', request => { if (request.url().includes('example.com/typedhouse-probe')) failures.push(request.failure()?.errorText ?? 'unknown'); });
+  page.on('response', response => { if (response.url().includes('example.com/typedhouse-probe')) responses.push(response.url()); });
   const results = await page.evaluate(async () => {
     // @ts-expect-error Vite serves this source module in the browser.
     const { compileIsolated } = await import('/src/playground/sandbox.ts');
@@ -49,8 +49,8 @@ test('sandbox blocks storage, network and external scripts; loops time out', asy
     return {
       storage: await probe('throw new Error(typeof localStorage)'),
       document: await probe('throw new Error(typeof document)'),
-      network: await probe('const x = new XMLHttpRequest(); x.open("GET", "https://example.com/chql-probe", false); x.send();'),
-      script: await probe('importScripts("https://example.com/chql-probe.js");'),
+      network: await probe('const x = new XMLHttpRequest(); x.open("GET", "https://example.com/typedhouse-probe", false); x.send();'),
+      script: await probe('importScripts("https://example.com/typedhouse-probe.js");'),
       timeout: await probe('while (true) {}'),
     };
   });
@@ -80,7 +80,7 @@ test('mobile playground fits the viewport and editor supports keyboard escape', 
 test('dedicated playground fills the desktop viewport without a surrounding card', async ({ page }) => {
   await page.goto('/playground/');
   await expect(page.getByRole('status')).toContainText('Compiled locally');
-  const geometry = await page.locator('.chql-playground').evaluate(el => {
+  const geometry = await page.locator('.typedhouse-playground').evaluate(el => {
     const rect = el.getBoundingClientRect();
     return { left: rect.left, right: rect.right, bottom: rect.bottom, width: innerWidth, height: innerHeight,
       border: getComputedStyle(el).borderWidth, pageHeight: document.documentElement.scrollHeight };
@@ -117,11 +117,11 @@ test('light and dark preferences update the site and editor', async ({ page }) =
   await theme.selectOption('dark');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   const darkToken = await page.locator('.cm-line span').first().evaluate(el => getComputedStyle(el).color);
-  const dark = await page.locator('.chql-playground').evaluate(el => getComputedStyle(el).backgroundColor);
+  const dark = await page.locator('.typedhouse-playground').evaluate(el => getComputedStyle(el).backgroundColor);
   await theme.selectOption('light');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await expect.poll(() => page.locator('.cm-line span').first().evaluate(el => getComputedStyle(el).color)).not.toBe(darkToken);
-  const light = await page.locator('.chql-playground').evaluate(el => getComputedStyle(el).backgroundColor);
+  const light = await page.locator('.typedhouse-playground').evaluate(el => getComputedStyle(el).backgroundColor);
   expect(light).not.toBe(dark);
   await page.reload();
   await expect(theme).toHaveValue('light');

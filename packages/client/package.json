@@ -1,5 +1,5 @@
 {
-  "name": "@chql/client",
+  "name": "@typedhouse/client",
   "version": "0.1.0",
   "type": "module",
   "files": [
@@ -15,8 +15,8 @@
     "build": "tsup src/index.ts --format esm --dts --clean"
   },
   "dependencies": {
-    "@chql/compiler": "workspace:*",
-    "@chql/core": "workspace:*",
+    "@typedhouse/compiler": "workspace:*",
+    "@typedhouse/core": "workspace:*",
     "@clickhouse/client": "^1.11.0"
   }
 }

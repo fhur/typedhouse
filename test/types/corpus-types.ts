@@ -1,6 +1,6 @@
 // Generated exact/not-any correspondence to independently runtime-derived snapshots.
 import { expectTypeOf } from 'expect-type';
-import type { Infer } from '@chql/core';
+import type { Infer } from '@typedhouse/core';
 import * as supported from '../../packages/compiler/test/fixtures/corpus/supported-types.js';
 import * as bench from './bench/queries.js';
 import type * as Snapshot from './snapshots/corpus/rows.js';

@@ -1,5 +1,5 @@
 import { expect } from 'vitest';
-import { canonicalKey, outputLeaves, type Caps, type Query } from '@chql/core';
+import { canonicalKey, outputLeaves, type Caps, type Query } from '@typedhouse/core';
 import { createClientFromBackend, type Backend, type Plan } from '../src/index.js';
 export function decodedRecord(row: unknown): Record<string, unknown> {
   if (row === null || typeof row !== 'object' || Array.isArray(row)) throw new Error('expected decoded row object');

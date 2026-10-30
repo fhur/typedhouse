@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { cast, col, count, from, max, scalar, sum, table, val, unionAll, type Caps } from '@chql/core';
+import { cast, col, count, from, max, scalar, sum, table, val, unionAll, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys, verify } from './backend-harness.js';
 import { source } from './pruning-arbitrary.js';
@@ -44,13 +44,13 @@ async function check(r: Recipe) {
   return expected;
 }
 it('runs 500 fixed-seed recursive aggregate/Union recipes against native bags with rule evidence', async () => {
-  const path = process.env.CHQL_AGG_UNION_PATH;
+  const path = process.env.TYPEDHOUSE_AGG_UNION_PATH;
   const shapes = new Set<string>(); let agg = 0, union = 0;
   const start = performance.now();
   const result = await fc.check(fc.asyncProperty(recipeArbitrary, async r => {
     shapes.add(shape(r.composition)); const hits = rewriteRel(build(r).ir).hits; agg += hits.PushFilterAggKey; union += hits.PushFilterUnion;
     await check(r);
-  }), { seed: Number(process.env.CHQL_AGG_UNION_SEED ?? seed), numRuns: 500, ...(path ? { path } : {}) });
+  }), { seed: Number(process.env.TYPEDHOUSE_AGG_UNION_SEED ?? seed), numRuns: 500, ...(path ? { path } : {}) });
   console.info('aggregate/Union differential', { mode: path ? 'replay-only (not full acceptance)' : 'full-500', path, runs: result.numRuns, seed: result.seed, shapes: shapes.size, agg, union, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   assertAggregateUnionAccounting(result.numRuns, path, { shapes: shapes.size, agg, union });

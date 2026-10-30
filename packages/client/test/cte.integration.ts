@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { col, count, crossJoin, from, join, scalar, sum, table, unionAll, type Caps } from '@chql/core';
+import { col, count, crossJoin, from, join, scalar, sum, table, unionAll, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys, verify } from './backend-harness.js';
 import { build, decodeNative, native, recipeArbitrary, seed, shape, type Recipe } from './cte-arbitrary.js';
@@ -22,8 +22,8 @@ beforeAll(async () => {
     { id: 'b', tenant: 'acme', amount: '3', spare: 'y', ids: [], waste: 'unused' },
     { id: 'a', tenant: 'other', amount: '5', spare: 'z', ids: ['orphan'], waste: 'unused' },
   ], format: 'JSONEachRow' });
-  await driver.command({ query: 'CREATE TABLE t0 (id String, __chql_input String, t1 String) ENGINE=Memory' });
-  await driver.insert({ table: 't0', values: [{ id: 'a', __chql_input: 'i', t1: 'j' }], format: 'JSONEachRow' });
+  await driver.command({ query: 'CREATE TABLE t0 (id String, __typedhouse_input String, t1 String) ENGINE=Memory' });
+  await driver.insert({ table: 't0', values: [{ id: 'a', __typedhouse_input: 'i', t1: 'j' }], format: 'JSONEachRow' });
 }, 120000);
 afterAll(async () => { warning?.mockRestore(); for (const b of backends) await b.close(); await driver?.close(); await container?.stop(); });
 async function direct(r: Recipe) {
@@ -47,7 +47,7 @@ const anchor: Recipe = { tree: { kind: 'scan' }, mode: 'union', fence: 'none', t
 it('executes 500 fixed-seed variable shared DAGs through official Backend plugins and native decoded bags', async () => {
   const shapes = new Set<string>();
   const start = performance.now();
-  const result = await fc.check(fc.asyncProperty(recipeArbitrary, async r => { shapes.add(shape(r)); await check(r); }), { seed: Number(process.env.CHQL_CTE_SEED ?? seed), numRuns: 500, ...(process.env.CHQL_CTE_PATH ? { path: process.env.CHQL_CTE_PATH } : {}) });
+  const result = await fc.check(fc.asyncProperty(recipeArbitrary, async r => { shapes.add(shape(r)); await check(r); }), { seed: Number(process.env.TYPEDHOUSE_CTE_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_CTE_PATH ? { path: process.env.TYPEDHOUSE_CTE_PATH } : {}) });
   console.info('CTE differential', { runs: result.numRuns, seed: result.seed, shapes: shapes.size, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(500); expect(shapes.size).toBeGreaterThan(100);
@@ -63,10 +63,10 @@ it('anchors repeated references, empty/duplicate expansions, scalar totals and l
   expect(await check({ ...anchor, fence: 'limit', take: 0 })).toEqual([]);
 });
 it('executes collision-safe physical names and checks a total-order client sequence', async () => {
-  const s = from(table('t0', { id: col.String, __chql_input: col.String, t1: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-  const q = join({ t2: s, __chql_input: s, t0: s }).on(r => [r.t2.id.eq(r.__chql_input.id), r.t2.id.eq(r.t0.id)]).map(r => ({ id: r.t2.id, x: r.__chql_input.__chql_input, y: r.t0.t1 })).orderBy(r => r.id);
+  const s = from(table('t0', { id: col.String, __typedhouse_input: col.String, t1: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const q = join({ t2: s, __typedhouse_input: s, t0: s }).on(r => [r.t2.id.eq(r.__typedhouse_input.id), r.t2.id.eq(r.t0.id)]).map(r => ({ id: r.t2.id, x: r.__typedhouse_input.__typedhouse_input, y: r.t0.t1 })).orderBy(r => r.id);
   await verify(backends, q, [{ id: 'a', x: 'i', y: 'j' }], async () => {
-    const result = await driver.query({ query: 'SELECT a.id AS id,b.__chql_input AS x,c.t1 AS y FROM t0 a INNER ALL JOIN t0 b ON a.id=b.id INNER ALL JOIN t0 c ON a.id=c.id ORDER BY id', format: 'JSONEachRow' });
+    const result = await driver.query({ query: 'SELECT a.id AS id,b.__typedhouse_input AS x,c.t1 AS y FROM t0 a INNER ALL JOIN t0 b ON a.id=b.id INNER ALL JOIN t0 c ON a.id=c.id ORDER BY id', format: 'JSONEachRow' });
     try { return await result.json<{ id: string; x: string; y: string }>(); } finally { result.close(); }
   }, true);
 });

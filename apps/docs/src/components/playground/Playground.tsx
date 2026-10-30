@@ -12,7 +12,7 @@ import { decodeShare, encodeShare } from '../../playground/sharing';
 import SqlPreview from './SqlPreview';
 import './playground.css';
 
-const STORAGE_KEY = 'chql-playground-v1';
+const STORAGE_KEY = 'typedhouse-playground-v1';
 const words = ['from', 'table', 'col', 'count', 'sum', 'join', 'unionAll', 'where', 'map', 'groupBy', 'aggregate', 'orderBy', 'limit'];
 
 export default function Playground({ fullPage = false }: { fullPage?: boolean }) {
@@ -138,7 +138,7 @@ export default function Playground({ fullPage = false }: { fullPage?: boolean })
 
   const resize = (percent: number) => setSplit(Math.min(70, Math.max(30, Math.round(percent))));
 
-  return <section className={`chql-playground${fullPage ? ' pg-fullpage' : ''}`} aria-label="Interactive TypedHouse playground">
+  return <section className={`typedhouse-playground${fullPage ? ' pg-fullpage' : ''}`} aria-label="Interactive TypedHouse playground">
     <div className="pg-toolbar">
       <label><span className="pg-label">Example</span> <select value={example} onChange={event => selectExample(event.target.value as ExampleName)}>
         <option value="composition">Reusable queries</option><option value="parameters">Safe parameters</option>
@@ -180,7 +180,7 @@ export default function Playground({ fullPage = false }: { fullPage?: boolean })
       {notice && (output || error || busy) && <p>{notice}</p>}
       {output && <details open={!fullPage}><summary>Parameters <span className="pg-count">{Object.keys(output.params).length}</span></summary><pre>{JSON.stringify(output.params, null, 2)}</pre></details>}
       {fullPage ? <details className="pg-help"><summary>Usage & safety</summary>
-        <p className="pg-hint">Import from @chql/core, define tables inline, and export default one query. Compilation never runs a database query. Highlighting and completions are not TypeScript type checking. Press Escape, then Tab to leave the editor. Do not paste secrets: drafts stay in this browser and shared links contain your source. No external packages or network access.</p>
+        <p className="pg-hint">Import from @typedhouse/core, define tables inline, and export default one query. Compilation never runs a database query. Highlighting and completions are not TypeScript type checking. Press Escape, then Tab to leave the editor. Do not paste secrets: drafts stay in this browser and shared links contain your source. No external packages or network access.</p>
       </details> : <p className="pg-hint">Highlighting and completions are not TypeScript type checking. Press Escape, then Tab to leave the editor. Do not paste secrets: drafts stay in this browser and shared links contain your source.</p>}
     </div>
   </section>;

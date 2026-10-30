@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { Expr, col, table, from, val, countIf, scalar, count, exprNode, relNode, flatOutput, type ExprNode } from '@chql/core';
+import { Expr, col, table, from, val, countIf, scalar, count, exprNode, relNode, flatOutput, type ExprNode } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 const q = from(table('membership', { id: col.String, n: col.Nullable(col.Int64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 function fields<T extends { readonly id: unknown }>(n: T): Omit<T, 'id'> { const { id: _id, ...f } = n; return f; }

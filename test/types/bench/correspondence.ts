@@ -1,6 +1,6 @@
 // Generated runtime correspondence for the isolated 200+2 bench.
 import { expectTypeOf } from 'expect-type';
-import type { Infer } from '@chql/core';
+import type { Infer } from '@typedhouse/core';
 import * as bench from './queries.js';
 import type * as Snapshot from '../snapshots/corpus/rows.js';
 expectTypeOf<Infer<typeof bench.argMaxLatest_arrayEnrichment>>().toEqualTypeOf<Snapshot.bench_argMaxLatest_arrayEnrichment>();

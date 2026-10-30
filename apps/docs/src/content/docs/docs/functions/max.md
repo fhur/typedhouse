@@ -15,8 +15,8 @@ Use `argMax` instead when you want a different column from the row with the larg
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, max, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, max, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const orders = table(
   'orders',
@@ -46,12 +46,12 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`customer` AS `customer`,
-  max(`__chql_input`.`amount`) AS `largestAmount`
+  `__typedhouse_input`.`customer` AS `customer`,
+  max(`__typedhouse_input`.`amount`) AS `largestAmount`
 FROM
-  `orders` AS `__chql_input`
+  `orders` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`customer`
+  `__typedhouse_input`.`customer`
 ```
 
 Parameters:

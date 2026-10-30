@@ -122,39 +122,39 @@ const cases = {
   countState: 'countState()', sumState: 'sumState(grouped)', maxState: 'maxState(grouped)', countMerge: 'countMerge(state)',
 };
 assert.deepEqual(Object.getOwnPropertyNames(Expr.prototype).filter(n => !['constructor', 'as'].includes(n)).sort(), [...core.methodCatalog, ...core.orderingCatalog].map(d => d.name).sort());
-const directory = mkdtempSync(join(tmpdir(), 'chql-expr-surface-'));
+const directory = mkdtempSync(join(tmpdir(), 'typedhouse-expr-surface-'));
 function run(command, args) {
   const r = spawnSync(command, args, { encoding: 'utf8', timeout: 90000 });
   if (r.status !== 0) throw new Error(`${command} failed\n${r.stdout}\n${r.stderr}`);
 }
 try {
-  mkdirSync(join(directory, 'node_modules/@chql'), { recursive: true });
-  symlinkSync(resolve('packages/core'), join(directory, 'node_modules/@chql/core'), 'dir');
+  mkdirSync(join(directory, 'node_modules/@typedhouse'), { recursive: true });
+  symlinkSync(resolve('packages/core'), join(directory, 'node_modules/@typedhouse/core'), 'dir');
   symlinkSync(resolve('node_modules/expect-type'), join(directory, 'node_modules/expect-type'), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
   const declaration = readFileSync('packages/core/src/expr-methods.generated.d.ts', 'utf8');
   assert.equal(declaration, readFileSync('test/types/snapshots/expr-methods.generated.d.ts', 'utf8'));
   writeFileSync(join(directory, 'surface.d.ts'), declaration);
   // Only published type re-exports, not core source or a fake expression implementation.
-  writeFileSync(join(directory, 'ordering.d.ts'), "export { Ordering } from '@chql/core';\n");
-  writeFileSync(join(directory, 'expr.d.ts'), "export type { Expr, Constant, ExprOperand, ConstantOperand } from '@chql/core';\n");
-  writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery, DateSetQuery, DateMembershipDescriptor } from '@chql/core';\n");
-  writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@chql/core';\n");
+  writeFileSync(join(directory, 'ordering.d.ts'), "export { Ordering } from '@typedhouse/core';\n");
+  writeFileSync(join(directory, 'expr.d.ts'), "export type { Expr, Constant, ExprOperand, ConstantOperand } from '@typedhouse/core';\n");
+  writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery, DateSetQuery, DateMembershipDescriptor } from '@typedhouse/core';\n");
+  writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@typedhouse/core';\n");
   mkdirSync(join(directory, 'catalog'));
-  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { BetweenReceiver, ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@chql/core';\n");
+  writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { BetweenReceiver, ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@typedhouse/core';\n");
   let source = `import { expectTypeOf } from 'expect-type';
-import { Expr, columnExpr, col, exprNode, count, countIf, sum, max, sumIf, sumState, countState, maxState, countMerge, val, cast, type Mode, type Column, type NodeId, type AggregateState, type Decimal, type DescribedExpr, sumMerge, maxMerge } from '@chql/core';
+import { Expr, columnExpr, col, exprNode, count, countIf, sum, max, sumIf, sumState, countState, maxState, countMerge, val, cast, type Mode, type Column, type NodeId, type AggregateState, type Decimal, type DescribedExpr, sumMerge, maxMerge } from '@typedhouse/core';
 import type { GeneratedExprMethods } from './surface.js';
 // Compare all three phantoms exactly, independently of retained descriptor intersections.
 type ExpressionPhantoms<E> = E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
 function column<C extends Column, N extends string, M extends Mode>(descriptor: C, name: N, mode: M) { return columnExpr(descriptor, 1 as NodeId, [name], name, mode); }
 const id = column(col.UInt64, 'id', 'row');
-expectTypeOf(id.asc()).toEqualTypeOf<import('@chql/core').Ordering<'row'>>();
+expectTypeOf(id.asc()).toEqualTypeOf<import('@typedhouse/core').Ordering<'row'>>();
 expectTypeOf(id.desc().nullsFirst().nullsLast()).not.toBeAny();
 const nullable = column(col.Nullable(col.UInt64), 'nullable', 'row');
 const predicate = column(col.Nullable(col.Bool), 'predicate', 'grouped');
 const grouped = column(col.UInt64, 'stock', 'grouped');
-expectTypeOf(grouped.desc()).toEqualTypeOf<import('@chql/core').Ordering<'grouped'>>();
+expectTypeOf(grouped.desc()).toEqualTypeOf<import('@typedhouse/core').Ordering<'grouped'>>();
 const state = column(col.AggregateFunction('count'), 'state', 'grouped');
 const groupedString = column(col.String, 'text', 'grouped');
 const groupedNullable = column(col.Nullable(col.UInt64), 'maybe', 'grouped');
@@ -173,7 +173,7 @@ expectTypeOf<keyof GeneratedExprMethods<bigint>>().toEqualTypeOf<Exclude<Extract
   }
   writeFileSync(join(directory, 'consumer.ts'), source);
   writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, types: [], skipLibCheck: false }, include: ['consumer.ts', 'surface.d.ts'] }));
-  const version = process.env.CHQL_TYPESCRIPT_VERSION;
+  const version = process.env.TYPEDHOUSE_TYPESCRIPT_VERSION;
   run('pnpm', [...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc']), '--project', join(directory, 'tsconfig.json')]);
   console.log(`Built ESM installation, removed extension exports, standalone generated declarations and ${Object.keys(cases).length} exact/not-any runtime-type cases passed.`);
 } finally { rmSync(directory, { recursive: true, force: true }); }

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, sql, val, from, table } from '@chql/core';
+import { col, sql, val, from, table } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 
 it('rejects executable own Date fields before snapshotting a snippet value', () => {

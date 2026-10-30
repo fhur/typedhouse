@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, dateDiff, from, multiIf, now, table, val, type DescribedExpr, type Infer, type NodeId } from '@chql/core';
+import { col, columnExpr, dateDiff, from, multiIf, now, table, val, type DescribedExpr, type Infer, type NodeId } from '@typedhouse/core';
 import { projectionEnrichment } from '../../packages/compiler/test/fixtures/corpus/projection-enrichment.js';
 import type { ComponentRow } from '../../packages/compiler/test/fixtures/corpus/low-stock.js';
 type Expected = Omit<ComponentRow, 'category'> & { category: string; matched: bigint; mpns: (string | null)[]; firstDesc: string | null; age: bigint; tier: string; source: string };

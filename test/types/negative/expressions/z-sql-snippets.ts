@@ -1,4 +1,4 @@
-import { col, sql, cast, from, table, count, sum, columnExpr, type NodeId } from '@chql/core';
+import { col, sql, cast, from, table, count, sum, columnExpr, type NodeId } from '@typedhouse/core';
 const q = from(table('items', { id: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 const grouped = columnExpr(col.String, 1 as NodeId, ['id'], 'id', 'grouped');
 sql`1`.as(); // expect: TS2554 Expected 1 arguments

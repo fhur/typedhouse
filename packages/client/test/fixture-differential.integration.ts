@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, afterAll, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { print, from, sum, type Query, type CHType } from '@chql/core';
+import { print, from, sum, type Query, type CHType } from '@typedhouse/core';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClickHouseBackend, createClientFromBackend } from '../src/index.js';
@@ -67,10 +67,10 @@ async function check(r: Recipe, fault = false, evidence?: Set<string>) {
   }
 }
 // Explicit nightly-sized local invocation (no hosted schedule claim):
-// CHQL_FIXTURE_RUNS=10000 pnpm test:compiler-integration packages/client/test/fixture-differential.integration.ts
+// TYPEDHOUSE_FIXTURE_RUNS=10000 pnpm test:compiler-integration packages/client/test/fixture-differential.integration.ts
 it('executes recursive six-table recipes against independent native SQL', async () => {
-  const runs = Number(process.env.CHQL_FIXTURE_RUNS ?? 500);
-  if (runs !== 500 && runs !== 10000) throw new Error('CHQL_FIXTURE_RUNS must be 500 or 10000');
+  const runs = Number(process.env.TYPEDHOUSE_FIXTURE_RUNS ?? 500);
+  if (runs !== 500 && runs !== 10000) throw new Error('TYPEDHOUSE_FIXTURE_RUNS must be 500 or 10000');
   const shapes = new Set<string>();
   const seen = new Map<string, number>();
   const evidence = new Set<string>();
@@ -82,7 +82,7 @@ it('executes recursive six-table recipes against independent native SQL', async 
     const rows = await check(recipe, false, evidence);
     if (rows.length) nonempty++; else empty++;
     nativeRows += rows.length;
-  }), { numRuns: runs, seed: Number(process.env.CHQL_FIXTURE_SEED ?? seed), ...(process.env.CHQL_FIXTURE_PATH ? { path: process.env.CHQL_FIXTURE_PATH } : {}) });
+  }), { numRuns: runs, seed: Number(process.env.TYPEDHOUSE_FIXTURE_SEED ?? seed), ...(process.env.TYPEDHOUSE_FIXTURE_PATH ? { path: process.env.TYPEDHOUSE_FIXTURE_PATH } : {}) });
   console.info('six-table differential', { runs: result.numRuns, seed: result.seed, path: result.counterexamplePath, shrinks: result.numShrinks, shapes: shapes.size, empty, nonempty, nativeRows, coverage: Object.fromEntries(seen), observed: [...evidence].sort(), milliseconds: Math.round(performance.now() - started) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(runs);

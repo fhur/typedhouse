@@ -54,8 +54,13 @@ our account IDs are only unique within a tenant.
 <summary>Setup: imports and all three table definitions</summary>
 
 ```ts
-import { col, from, table, unionAll } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  table,
+  unionAll,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -131,17 +136,17 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`tenant`,
-  `__chql_input`.`id`,
-  `__chql_input`.`accountId`,
-  `__chql_input`.`tags`
+  `__typedhouse_input`.`tenant`,
+  `__typedhouse_input`.`id`,
+  `__typedhouse_input`.`accountId`,
+  `__typedhouse_input`.`tags`
 FROM
   (
     SELECT
-      `__chql_input`.`tenant` AS `tenant`,
-      `__chql_input`.`id` AS `id`,
-      `__chql_input`.`accountId` AS `accountId`,
-      `__chql_input`.`tags` AS `tags`
+      `__typedhouse_input`.`tenant` AS `tenant`,
+      `__typedhouse_input`.`id` AS `id`,
+      `__typedhouse_input`.`accountId` AS `accountId`,
+      `__typedhouse_input`.`tags` AS `tags`
     FROM
       (
         SELECT
@@ -153,13 +158,13 @@ FROM
           `events`
         WHERE
           `tenant` = {p0:String}
-      ) AS `__chql_input`
+      ) AS `__typedhouse_input`
     UNION ALL
     SELECT
-      `__chql_input`.`tenant` AS `tenant`,
-      `__chql_input`.`id` AS `id`,
-      `__chql_input`.`accountId` AS `accountId`,
-      `__chql_input`.`tags` AS `tags`
+      `__typedhouse_input`.`tenant` AS `tenant`,
+      `__typedhouse_input`.`id` AS `id`,
+      `__typedhouse_input`.`accountId` AS `accountId`,
+      `__typedhouse_input`.`tags` AS `tags`
     FROM
       (
         SELECT
@@ -171,11 +176,11 @@ FROM
           `archived_events`
         WHERE
           `tenant` = {p1:String}
-      ) AS `__chql_input`
-  ) AS `__chql_input`
+      ) AS `__typedhouse_input`
+  ) AS `__typedhouse_input`
 WHERE
   in (
-    `__chql_input`.`accountId`,
+    `__typedhouse_input`.`accountId`,
     (
       SELECT
         `id`
@@ -231,8 +236,8 @@ import {
   join,
   table,
   unionAll,
-} from '@chql/core';
-import { compile } from '@chql/compiler';
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -349,17 +354,17 @@ WITH
   ),
   `t1` AS (
     SELECT
-      `__chql_input`.`tenant`,
-      `__chql_input`.`id`,
-      `__chql_input`.`accountId`,
-      `__chql_input`.`tags`
+      `__typedhouse_input`.`tenant`,
+      `__typedhouse_input`.`id`,
+      `__typedhouse_input`.`accountId`,
+      `__typedhouse_input`.`tags`
     FROM
       (
         SELECT
-          `__chql_input`.`tenant` AS `tenant`,
-          `__chql_input`.`id` AS `id`,
-          `__chql_input`.`accountId` AS `accountId`,
-          `__chql_input`.`tags` AS `tags`
+          `__typedhouse_input`.`tenant` AS `tenant`,
+          `__typedhouse_input`.`id` AS `id`,
+          `__typedhouse_input`.`accountId` AS `accountId`,
+          `__typedhouse_input`.`tags` AS `tags`
         FROM
           (
             SELECT
@@ -371,13 +376,13 @@ WITH
               `events`
             WHERE
               `tenant` = {p2:String}
-          ) AS `__chql_input`
+          ) AS `__typedhouse_input`
         UNION ALL
         SELECT
-          `__chql_input`.`tenant` AS `tenant`,
-          `__chql_input`.`id` AS `id`,
-          `__chql_input`.`accountId` AS `accountId`,
-          `__chql_input`.`tags` AS `tags`
+          `__typedhouse_input`.`tenant` AS `tenant`,
+          `__typedhouse_input`.`id` AS `id`,
+          `__typedhouse_input`.`accountId` AS `accountId`,
+          `__typedhouse_input`.`tags` AS `tags`
         FROM
           (
             SELECT
@@ -389,11 +394,11 @@ WITH
               `archived_events`
             WHERE
               `tenant` = {p3:String}
-          ) AS `__chql_input`
-      ) AS `__chql_input`
+          ) AS `__typedhouse_input`
+      ) AS `__typedhouse_input`
     WHERE
       in (
-        `__chql_input`.`accountId`,
+        `__typedhouse_input`.`accountId`,
         (
           SELECT
             `t0`.`id`
@@ -403,31 +408,31 @@ WITH
       )
   )
 SELECT
-  `__chql_input`.`accountId` AS `accountId`,
-  `__chql_input`.`accountName` AS `accountName`,
-  `__chql_input`.`tag` AS `tag`,
+  `__typedhouse_input`.`accountId` AS `accountId`,
+  `__typedhouse_input`.`accountName` AS `accountName`,
+  `__typedhouse_input`.`tag` AS `tag`,
   count() AS `total`
 FROM
   (
     SELECT DISTINCT
-      `__chql_input`.`eventId`,
-      `__chql_input`.`accountId`,
-      `__chql_input`.`accountName`,
-      `__chql_input`.`tag`
+      `__typedhouse_input`.`eventId`,
+      `__typedhouse_input`.`accountId`,
+      `__typedhouse_input`.`accountName`,
+      `__typedhouse_input`.`tag`
     FROM
       (
         SELECT
-          `__chql_input`.`eventId` AS `eventId`,
-          `__chql_input`.`accountId` AS `accountId`,
-          `__chql_input`.`accountName` AS `accountName`,
-          `__chql_input`.`tag` AS `tag`
+          `__typedhouse_input`.`eventId` AS `eventId`,
+          `__typedhouse_input`.`accountId` AS `accountId`,
+          `__typedhouse_input`.`accountName` AS `accountName`,
+          `__typedhouse_input`.`tag` AS `tag`
         FROM
           (
             SELECT
-              `__chql_input`.`eventId` AS `eventId`,
-              `__chql_input`.`accountId` AS `accountId`,
-              `__chql_input`.`accountName` AS `accountName`,
-              `__chql_element` AS `tag`
+              `__typedhouse_input`.`eventId` AS `eventId`,
+              `__typedhouse_input`.`accountId` AS `accountId`,
+              `__typedhouse_input`.`accountName` AS `accountName`,
+              `__typedhouse_element` AS `tag`
             FROM
               (
                 SELECT
@@ -438,15 +443,15 @@ FROM
                 FROM
                   `t1` AS `event`
                   INNER ALL JOIN `t0` AS `account` ON `event`.`accountId` = `account`.`id`
-              ) AS `__chql_input`
-              ARRAY JOIN `__chql_input`.`tags` AS `__chql_element`
-          ) AS `__chql_input`
-      ) AS `__chql_input`
-  ) AS `__chql_input`
+              ) AS `__typedhouse_input`
+              ARRAY JOIN `__typedhouse_input`.`tags` AS `__typedhouse_element`
+          ) AS `__typedhouse_input`
+      ) AS `__typedhouse_input`
+  ) AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`accountId`,
-  `__chql_input`.`accountName`,
-  `__chql_input`.`tag`
+  `__typedhouse_input`.`accountId`,
+  `__typedhouse_input`.`accountName`,
+  `__typedhouse_input`.`tag`
 ORDER BY
   `total` DESC,
   `accountId` ASC,

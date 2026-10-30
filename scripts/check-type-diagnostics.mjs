@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 const require = createRequire(import.meta.url);
-const version = process.env.CHQL_TYPESCRIPT_VERSION;
+const version = process.env.TYPEDHOUSE_TYPESCRIPT_VERSION;
 const cli = version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc'];
 let api;
 if (!version) api = require('typescript');
@@ -37,10 +37,10 @@ assert.deepEqual(parseCliDiagnostics('a.ts(4,1): error TS2769: No overload match
   { file: 'a.ts', line: 4, code: 2769, message: 'No overload matches this call.\n  Wrong mode' },
   { file: 'b.ts', line: 3, code: 2345, message: 'Wrong state' },
 ]);
-const directory = mkdtempSync(join(tmpdir(), 'chql-diagnostics-'));
+const directory = mkdtempSync(join(tmpdir(), 'typedhouse-diagnostics-'));
 try {
-  mkdirSync(join(directory, 'node_modules/@chql'), { recursive: true });
-  symlinkSync(resolve('packages/core'), join(directory, 'node_modules/@chql/core'), 'dir');
+  mkdirSync(join(directory, 'node_modules/@typedhouse'), { recursive: true });
+  symlinkSync(resolve('packages/core'), join(directory, 'node_modules/@typedhouse/core'), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
   const expected = [];
   const files = readdirSync('test/types/negative/expressions').filter(f => f.endsWith('.ts'));
@@ -57,7 +57,7 @@ try {
   }
   const config = { compilerOptions: { strict: true, exactOptionalPropertyTypes: true, noEmit: true, target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', types: [], skipLibCheck: false }, include: ['*.ts'] };
   if (process.argv.includes('--source')) {
-    config.compilerOptions.paths = { '@chql/core': [resolve('packages/core/src/index.ts')] };
+    config.compilerOptions.paths = { '@typedhouse/core': [resolve('packages/core/src/index.ts')] };
   }
   console.log(`Checking ${process.argv.includes('--source') ? 'source' : 'built'} declarations.`);
   writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify(config));

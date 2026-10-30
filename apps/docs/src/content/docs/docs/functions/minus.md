@@ -13,8 +13,8 @@ sidebar:
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const orders = table(
   'orders',
@@ -48,8 +48,8 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
-  `__chql_input`.`subtotal` - `__chql_input`.`discount` AS `discountedTotal`
+  `__typedhouse_input`.`id` AS `id`,
+  `__typedhouse_input`.`subtotal` - `__typedhouse_input`.`discount` AS `discountedTotal`
 FROM
   (
     SELECT
@@ -58,7 +58,7 @@ FROM
       `discount`
     FROM
       `orders`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { crossJoin, join, type Query, type Infer } from '@chql/core';
+import { crossJoin, join, type Query, type Infer } from '@typedhouse/core';
 import { components, parts } from './differential-arbitrary.js';
 export const seed = 20261101;
 export const recipeArbitrary = fc.record({

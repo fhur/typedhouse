@@ -13,8 +13,8 @@ sidebar:
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const articles = table(
   'articles',
@@ -48,9 +48,9 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
-  arrayElement(`__chql_input`.`tags`, {p0:Int64}) AS `firstTag`,
-  arrayElement(`__chql_input`.`tags`, {p1:Int64}) AS `lastTag`
+  `__typedhouse_input`.`id` AS `id`,
+  arrayElement(`__typedhouse_input`.`tags`, {p0:Int64}) AS `firstTag`,
+  arrayElement(`__typedhouse_input`.`tags`, {p1:Int64}) AS `lastTag`
 FROM
   (
     SELECT
@@ -58,7 +58,7 @@ FROM
       `tags`
     FROM
       `articles`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

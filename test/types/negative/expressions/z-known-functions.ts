@@ -1,4 +1,4 @@
-import { col, columnExpr, createKnownFunctions, from, table, val, type NodeId } from '@chql/core';
+import { col, columnExpr, createKnownFunctions, from, table, val, type NodeId } from '@typedhouse/core';
 const { fn, agg } = createKnownFunctions({ hash: { isAggregate: false, deterministic: true, aliasTo: '' }, count: { isAggregate: true, deterministic: null, aliasTo: '' } });
 const q = from(table('items', { id: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 const row = columnExpr(col.String, 1 as NodeId, ['id'], 'id', 'row');

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, dateDiff, multiIf, now, val, type ExprNode } from '@chql/core';
+import { col, dateDiff, multiIf, now, val, type ExprNode } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 import { components } from './fixtures/corpus/low-stock.js';
 import { projectionEnrichment } from './fixtures/corpus/projection-enrichment.js';

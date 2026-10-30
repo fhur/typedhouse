@@ -15,8 +15,8 @@ The filter is written after the join, but its tenant predicate applies only to e
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, join, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, join, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -64,9 +64,9 @@ Final SQL:
 
 ```sql
 SELECT
-  `event`.`id` AS `__chql_leaf_0`,
-  `event`.`tenant` AS `__chql_leaf_1`,
-  `account`.`id` AS `__chql_leaf_2`
+  `event`.`id` AS `__typedhouse_leaf_0`,
+  `event`.`tenant` AS `__typedhouse_leaf_1`,
+  `account`.`id` AS `__typedhouse_leaf_2`
 FROM
   (
     SELECT

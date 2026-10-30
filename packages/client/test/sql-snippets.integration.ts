@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { col, from, table, sql } from '@chql/core';
+import { col, from, table, sql } from '@typedhouse/core';
 import { createClickHouseBackend, createClientFromBackend } from '../src/index.js';
 import { collect } from './backend-harness.js';
 let container: StartedTestContainer;

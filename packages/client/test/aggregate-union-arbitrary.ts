@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { Query, count, join, max, sum, unionAll } from '@chql/core';
+import { Query, count, join, max, sum, unionAll } from '@typedhouse/core';
 import { buildTree, nativeTree, recipeArbitrary as trees, topology, type Tree } from './pruning-arbitrary.js';
 export const seed = 20261118;
 type Row = { id: string; amount: bigint };

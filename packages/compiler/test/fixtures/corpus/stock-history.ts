@@ -1,4 +1,4 @@
-import { from, join } from '@chql/core';
+import { from, join } from '@typedhouse/core';
 import { components, db, forTenant } from './low-stock.js';
 const availability = from(db.metric_group_ots_component_market_availability);
 /** Spec history example with its clock supplied explicitly for reproducible tests. */

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { avg, avgIf, argMax, argMaxIf, type CHType, from, table, col, count, sum, sumState, val, columnExpr, exprNode, relNode, flatOutput, Expr } from '@chql/core';
+import { avg, avgIf, argMax, argMaxIf, type CHType, from, table, col, count, sum, sumState, val, columnExpr, exprNode, relNode, flatOutput, Expr } from '@typedhouse/core';
 import { emitNaive } from '../src/index.js';
 const t = table('t', { k: col.String, n: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 it('validates mean operands, modes, metadata and result descriptors authoritatively with paths', () => {

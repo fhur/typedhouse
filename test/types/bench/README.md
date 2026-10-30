@@ -9,7 +9,7 @@ prior wall-time failure below remains real historical evidence, not retried away
 Default and minimum full matrices pass. Latest fails container setup for the
 aggregate/Union suite (`No host port found for host IP`), so full acceptance is
 still blocked; no retry or test exclusion was applied. See the latest TODO section
-and `/tmp/chql-readable-*.log` for measurements and limitations. Full M3 and v1
+and `/tmp/typedhouse-readable-*.log` for measurements and limitations. Full M3 and v1
 remain incomplete.
 
 ## Historical acceptance (after a2409ad, before readability repair)
@@ -30,8 +30,8 @@ node scripts/generate-type-bench.mjs
 node scripts/check-type-performance.mjs --self-test
 node scripts/check-type-performance.mjs --all
 node scripts/check-corpus-types.mjs --self-test
-CHQL_TYPESCRIPT_VERSION=5.5.4 node scripts/check-corpus-types.mjs --self-test
-CHQL_TYPESCRIPT_VERSION=latest node scripts/check-corpus-types.mjs --self-test
+TYPEDHOUSE_TYPESCRIPT_VERSION=5.5.4 node scripts/check-corpus-types.mjs --self-test
+TYPEDHOUSE_TYPESCRIPT_VERSION=latest node scripts/check-corpus-types.mjs --self-test
 ```
 
 The last three commands currently **fail intentionally on the actual acceptance
@@ -79,11 +79,11 @@ The initial full normal comparison and three wired matrix performance phases pas
 A final follow-up failed: unchanged default/built 2,132,446 instantiations, but
 wall times 8.716 / 14.118 / 4.264 s exceeded the unchanged 4.2405 s ceiling.
 Subsequent host load was 12.98 / 11.92 / 11.25 (Virtualization ~252% CPU); contention
-is plausible, not proven. See `/tmp/chql-m3-performance-final.log`. No retries to
+is plausible, not proven. See `/tmp/typedhouse-m3-performance-final.log`. No retries to
 hide that result, no budget increase: final local performance status is red.
 
 The synthetic controls include missing metrics, unknown baseline, wall-only excess
-and tiny ceilings. A real run with `/tmp/chql-m3-tiny-budget.json` also failed with
+and tiny ceilings. A real run with `/tmp/typedhouse-m3-tiny-budget.json` also failed with
 2,132,446 instantiations over its ceiling of 1. No budget was raised after testing.
 
 `--refresh` on the corpus script explicitly regenerates runtime snapshots, exact
@@ -107,7 +107,7 @@ against source (`-p test/types/bench/tsconfig.source.json`). No intermediates we
 annotated and no compiler budget, suppression, or descriptor erasure was added.
 
 Before editing, freshly rebuilt declarations reproduced TS2590 at chain step5
-and in the original `/tmp/chql-m3-minimal.mts`. The fresh default failure used
+and in the original `/tmp/typedhouse-m3-minimal.mts`. The fresh default failure used
 1,856,858 instantiations, 513,377K memory, 3.28s check / 3.41s total.
 
 The single-precise-proxy change alone **did not fix it**: 1,827,814 instantiations,
@@ -132,7 +132,7 @@ external time includes pnpm startup, build excluded; same host as below):
 | 5.5.4 | source | 843,995 | 1.29 / 1.43 | 1.71 | 258,809 |
 | 7.0.2 | source | 674,339 | 0.351 / 0.375 | 0.96 | 223,104 |
 
-Logs: `/tmp/chql-repair-bench-{default,5.5.4,latest}-{tsconfig.json,tsconfig.source.json}.log`.
+Logs: `/tmp/typedhouse-repair-bench-{default,5.5.4,latest}-{tsconfig.json,tsconfig.source.json}.log`.
 These are diagnostic measurements, **not** initial 200+2 budget baselines.
 No repeated-run budgeting policy or ceiling has been fabricated.
 
@@ -158,7 +158,7 @@ coverage ledger, readable declarations, budget enforcement and failure controls
 remain unimplemented; do not treat this directory as closing M3.
 
 ```sh
-pnpm --filter @chql/core build
+pnpm --filter @typedhouse/core build
 node scripts/generate-type-stress.mjs # check only; --refresh explicitly regenerates
 pnpm exec tsc -p test/types/bench/tsconfig.json --extendedDiagnostics --pretty false
 pnpm --package typescript@5.5.4 dlx tsc -p test/types/bench/tsconfig.json --extendedDiagnostics --pretty false
@@ -177,7 +177,7 @@ to represent.” This is not TS2589, nor an absent API. A separate default-CLI r
 of `join10.ts` passes. A smaller public-package reproduction is:
 
 ```ts
-import { col, table, from, join } from '@chql/core';
+import { col, table, from, join } from '@typedhouse/core';
 const q = from(table('counter', { id: col.String, countOfParts: col.UInt64 },
   { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 const a = q.map(r => ({ id: r.id, count: r.countOfParts }));
@@ -190,8 +190,8 @@ const e = join({ a: d, b: q }).on(r => r.a.id.eq(r.b.id))
 export const f = e.map(r => ({ id: r.id, count: r.count.plus(1n) })); // TS2590
 ```
 
-Default CLI reproduction: `/tmp/chql-m3-minimal.mts`, config
-`/tmp/chql-m3-minimal-config.json`, log `/tmp/chql-m3-minimal.log`.
+Default CLI reproduction: `/tmp/typedhouse-m3-minimal.mts`, config
+`/tmp/typedhouse-m3-minimal-config.json`, log `/tmp/typedhouse-m3-minimal.log`.
 Six maps without joins, and the version without renaming countOfParts to count,
 did not reproduce in exploratory probes. The original stress input is unchanged.
 
@@ -219,7 +219,7 @@ TS check/total time is separately reported. Core build is outside these timings.
 | 7.0.2 | 643,901 | 1.026 / 1.057 | 1.65 | 349,571 |
 
 TS7 is the actual native CLI, not a JS API fallback. Its instantiation counts are
-not directly comparable to TS5. Logs: `/tmp/chql-m3-stress-{default,5.5.4,latest}.log`.
+not directly comparable to TS5. Logs: `/tmp/typedhouse-m3-stress-{default,5.5.4,latest}.log`.
 The small failing reproduction uses 1,384,999 instantiations, 1.69s check / 1.80s
 total, 339,671K TS memory on 5.8.3. No budget is created from a failed compile.
 Initial unresolved-package setup errors were fixed by the isolated built-package

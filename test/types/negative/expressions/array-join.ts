@@ -1,4 +1,4 @@
-import { from, table, col, columnExpr } from '@chql/core';
+import { from, table, col, columnExpr } from '@typedhouse/core';
 const q = from(table('t', { id: col.UInt32, names: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.where(r => r.id.eq(1)).final(); // expect: TS2339 Property 'final' does not exist
 q.map(r => r.id).sample(0.1); // expect: TS2339 Property 'sample' does not exist

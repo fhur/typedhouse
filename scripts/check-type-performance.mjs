@@ -68,7 +68,7 @@ if (initialize) {
   assert.equal(budget.inputHash, inputHash, 'Benchmark inputs changed: review corpus and budget provenance; no automatic rebaseline');
 }
 console.log(JSON.stringify({ policy, inputHash, host: { cpu: cpus()[0]?.model, node: process.version, platform: platform(), arch: arch() } }));
-const selectors = initialize || process.argv.includes('--all') ? [undefined, '5.5.4', 'latest'] : [process.env.CHQL_TYPESCRIPT_VERSION];
+const selectors = initialize || process.argv.includes('--all') ? [undefined, '5.5.4', 'latest'] : [process.env.TYPEDHOUSE_TYPESCRIPT_VERSION];
 const seen = new Set();
 for (const selector of selectors) {
   const cli = selector ? ['--package', `typescript@${selector}`, 'dlx', 'tsc'] : ['exec', 'tsc'];

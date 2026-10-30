@@ -1,4 +1,4 @@
-import { outputLeaves, type OutputLeaf, type ExprNode, type Rel } from '@chql/core';
+import { outputLeaves, type OutputLeaf, type ExprNode, type Rel } from '@typedhouse/core';
 
 /** Physical interfaces only: paths and transport names always come from the full
  * validated schema. No logical node, binding, descriptor or Param is rewritten. */

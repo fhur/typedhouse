@@ -15,8 +15,8 @@ NULL values are skipped. Equal maximal versions have no stable tie breaker: use 
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { argMax, col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { argMax, col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const updates = table(
   'updates',
@@ -47,12 +47,15 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`customer` AS `customer`,
-  argMax(`__chql_input`.`status`, `__chql_input`.`version`) AS `latestStatus`
+  `__typedhouse_input`.`customer` AS `customer`,
+  argMax(
+    `__typedhouse_input`.`status`,
+    `__typedhouse_input`.`version`
+  ) AS `latestStatus`
 FROM
-  `updates` AS `__chql_input`
+  `updates` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`customer`
+  `__typedhouse_input`.`customer`
 ```
 
 Parameters:

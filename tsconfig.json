@@ -14,10 +14,10 @@
     "esModuleInterop": true,
     "types": ["node"],
     "paths": {
-      "@chql/core": ["./packages/core/src/index.ts"],
-      "@chql/compiler": ["./packages/compiler/src/index.ts"],
-      "@chql/client": ["./packages/client/src/index.ts"],
-      "@chql/codegen": ["./packages/codegen/src/index.ts"]
+      "@typedhouse/core": ["./packages/core/src/index.ts"],
+      "@typedhouse/compiler": ["./packages/compiler/src/index.ts"],
+      "@typedhouse/client": ["./packages/client/src/index.ts"],
+      "@typedhouse/codegen": ["./packages/codegen/src/index.ts"]
     }
   },
   "include": ["packages/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "examples/**/*.ts", "vitest.config.ts"],

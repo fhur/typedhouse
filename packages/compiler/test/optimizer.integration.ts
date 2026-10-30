@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { col, from, table, type Rel } from '@chql/core';
+import { col, from, table, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 
 let container: StartedTestContainer;

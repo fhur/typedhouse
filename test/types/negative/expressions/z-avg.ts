@@ -1,4 +1,4 @@
-import { from, table, col, avg, avgIf, val } from '@chql/core';
+import { from, table, col, avg, avgIf, val } from '@typedhouse/core';
 const q = from(table('t', { n: col.UInt32, text: col.String, lc: col.LowCardinality(col.UInt32), date: col.Date, decimal: col.Decimal64(2), array: col.Array(col.UInt32), flag: col.Bool }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.aggregate(() => avg()); // expect: TS2554 Expected 1 arguments, but got 0.
 q.aggregate(g => avg(g.lc)); // expect: TS2345 is not assignable to parameter of type 'never'.

@@ -32,8 +32,8 @@ The report needs event IDs and categories, with purchases first and deterministi
 <summary>Setup: imports and the events descriptor</summary>
 
 ```ts
-import { col, table, from } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, table, from } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -72,8 +72,8 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`eventId`,
-  `__chql_input`.`category`
+  `__typedhouse_input`.`eventId`,
+  `__typedhouse_input`.`category`
 FROM
   (
     SELECT
@@ -83,10 +83,10 @@ FROM
       `events`
     WHERE
       `tenant` = {p0:String}
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ORDER BY
-  `__chql_input`.`category` ASC,
-  `__chql_input`.`eventId` DESC
+  `__typedhouse_input`.`category` ASC,
+  `__typedhouse_input`.`eventId` DESC
 LIMIT
   100
 ```
@@ -126,8 +126,8 @@ Grouping has two stages: choose the keys, then compute aggregates for each group
 <summary>Setup: imports and the same events descriptor</summary>
 
 ```ts
-import { col, table, from, count } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, table, from, count } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -168,14 +168,14 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`category` AS `category`,
+  `__typedhouse_input`.`category` AS `category`,
   count() AS `total`
 FROM
-  `events` AS `__chql_input`
+  `events` AS `__typedhouse_input`
 WHERE
-  `__chql_input`.`tenant` = {p0:String}
+  `__typedhouse_input`.`tenant` = {p0:String}
 GROUP BY
-  `__chql_input`.`category`
+  `__typedhouse_input`.`category`
 HAVING
   `total` > {p1:UInt64}
 ORDER BY
