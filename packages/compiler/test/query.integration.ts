@@ -556,7 +556,7 @@ it('summarizes bounded tenant history with FINAL and composes mean outputs throu
   const summary = source.groupBy(r => r.entityId).aggregate(g => ({ stock: avg(g.stock), leadDays: avg(g.lead), positive: avgIf(g.stock, g.stock.gt(4)), ratio: avg(g.stock).divide(avg(g.stock)) }));
   const base = "FROM mean_history FINAL WHERE tenantId='acme' AND effectiveAt>=toDateTime64('2026-01-02',3) AND effectiveAt<toDateTime64('2026-01-04',3)";
   const baseline = `SELECT entityId,avg(stock) AS stockMean,avg(lead) AS leadDays,avgIf(stock,stock>4) AS positive,avg(stock)/avg(stock) AS ratio ${base} GROUP BY entityId`;
-  const decode = (text: string) => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line, (_k, v) => v === 'nan' ? NaN : v === 'inf' ? Infinity : v === '-inf' ? -Infinity : v));
+  const decode = (text: string) => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line, (_k, v) => v === 'nan' || v === '-nan' ? NaN : v === 'inf' ? Infinity : v === '-inf' ? -Infinity : v));
   const direct = (query: string) => sql(query + ' SETTINGS output_format_json_quote_denormals=1 FORMAT JSONEachRow').then(decode);
   const compare = async <R>(query: { ir: import('@typedhouse/core').Rel; caps: { live: boolean }; _rowType: R }, expected: unknown) => {
     expect(await client.run(query)).toEqual(expected);
@@ -578,7 +578,7 @@ it('summarizes bounded tenant history with FINAL and composes mean outputs throu
 it('matches mean descriptors, empty/NULL/If semantics and precision across all supported widths', async () => {
   const source = from(db.entity_ots_component).limit(1);
   const descriptors: Column<number | bigint>[] = [col.UInt8, col.UInt16, col.UInt32, col.UInt64, col.UInt128, col.UInt256, col.Int8, col.Int16, col.Int32, col.Int64, col.Int128, col.Int256, col.Float32, col.Float64];
-  const decode = (v: unknown) => v === 'nan' ? NaN : v === 'inf' ? Infinity : v === '-inf' ? -Infinity : v;
+  const decode = (v: unknown) => v === 'nan' || v === '-nan' ? NaN : v === 'inf' ? Infinity : v === '-inf' ? -Infinity : v;
   for (const descriptor of descriptors) {
     const type = print(descriptor.type);
     for (const empty of [false, true]) {
@@ -832,7 +832,8 @@ it('adversarial casts preserve server rounding, overflow, non-finite and wide in
     boolText: cast(val(false), col.String),
   }));
   const direct = JSON.parse(await sql(`SELECT CAST(toUInt32(257) AS UInt8) AS overflow,CAST(toInt32(-1) AS UInt8) AS negative,CAST(toFloat64(-2.75) AS Int32) AS fractional,CAST(toFloat64(16777217) AS Float32) AS rounded,CAST('115792089237316195423570985008687907853269984665640564039457584007913129639935' AS UInt256) AS huge,CAST('-170141183460469231731687303715884105728' AS Int128) AS signed,CAST('nan' AS Float64) AS nan,CAST('-inf' AS Float32) AS infinity,CAST(toFloat64(-2) AS Bool) AS bool,CAST(false AS String) AS boolText SETTINGS output_format_json_quote_denormals=1,output_format_json_quote_64bit_integers=1 FORMAT JSONEachRow`));
-  expect(direct.nan).toBe('nan'); expect(direct.infinity).toBe('-inf');
+  // The NaN sign bit is platform-dependent: arm64 prints 'nan', x86_64 prints '-nan'.
+  expect(['nan', '-nan']).toContain(direct.nan); expect(direct.infinity).toBe('-inf');
   const expected = [{ ...direct, huge: BigInt(direct.huge), signed: BigInt(direct.signed), nan: NaN, infinity: -Infinity }];
   expect(await client.run(query)).toEqual(expected);
   const rows = []; for await (const row of client.stream(query)) rows.push(row);
@@ -1036,7 +1037,7 @@ it('keeps scalar nullable max nulls and zero-denominator nonfinite arithmetic ho
   const total = scalar(empty.aggregate(() => count()));
   const result = source.limit(1).map(() => ({ n: scalar(empty.aggregate(g => max(g.category))), nan: total.divide(total), inf: val(1n).divide(total) }));
   const direct = JSON.parse((await sql("SELECT (SELECT max(category) FROM entity_ots_component WHERE tenantId='absent') AS n, 0/0 AS nan, 1/0 AS inf SETTINGS output_format_json_quote_denormals=1 FORMAT JSONEachRow")).trim()) as unknown;
-  expect(direct).toEqual({ n: null, nan: 'nan', inf: 'inf' });
+  expect(direct).toEqual({ n: null, nan: expect.stringMatching(/^-?nan$/), inf: 'inf' });
   expect(await client.run(result)).toEqual([{ n: null, nan: NaN, inf: Infinity }]);
   expect(print(emitNaive(result.ir).columns.n!)).toBe('Nullable(String)');
 });

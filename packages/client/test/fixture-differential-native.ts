@@ -57,7 +57,7 @@ export function descriptors(end: Recipe['end']): Record<string, CHType> {
 function text(v: unknown): string { if (typeof v !== 'string') throw new Error('native expected string'); return v; }
 function number(v: unknown): number {
   if (typeof v === 'number') return v;
-  if (v === 'nan') return NaN;
+  if (v === 'nan' || v === '-nan') return NaN;
   if (v === 'inf') return Infinity;
   if (v === '-inf') return -Infinity;
   throw new Error(`native expected float: ${String(v)}`);

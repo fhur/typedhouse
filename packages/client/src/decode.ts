@@ -36,7 +36,8 @@ export function decoder(type: CHType): (value: unknown) => unknown {
   }
   if (type.kind === 'scalar' && (type.name === 'Float32' || type.name === 'Float64')) return v => {
     if (typeof v === 'number' && Number.isFinite(v)) return v;
-    if (v === 'nan') return NaN;
+    // x86 builds print the sign bit of 0/0: ClickHouse emits '-nan' there and 'nan' on arm64.
+    if (v === 'nan' || v === '-nan') return NaN;
     if (v === 'inf') return Infinity;
     if (v === '-inf') return -Infinity;
     return invalid(v);
