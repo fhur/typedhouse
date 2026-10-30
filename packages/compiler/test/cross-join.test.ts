@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { expectTypeOf } from 'expect-type';
-import { col, from, crossJoin, join, table, val, relNode, type Infer } from '@chql/core';
+import { col, from, crossJoin, join, table, val, relNode, type Infer } from '@typedhouse/core';
 import { emitNaive } from '../src/index.js';
 
 const source = from(table('t', { id: col.UInt64, xs: col.Array(col.Nullable(col.String)), pair: col.Tuple({ n: col.UInt32 }) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));

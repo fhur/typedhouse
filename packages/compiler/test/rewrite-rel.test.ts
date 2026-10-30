@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, max, sum, crossJoin, exprNode, from, join, scalar, table, unionAll, val, type Rel } from '@chql/core';
+import { cast, col, count, max, sum, crossJoin, exprNode, from, join, scalar, table, unionAll, val, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { validateRel } from '../src/emit-naive.js';
 import { rewriteRel } from '../src/rewrite-rel.js';
@@ -153,8 +153,8 @@ it('requires resolved scalar families, not deterministic metadata alone', () => 
 it('keeps diagnostic paths on original objects and equal-valued Params distinct after movement', () => {
   const first = val(1, col.UInt32), second = val(1, col.UInt32);
   const shared = q.map(r => ({ renamed: r.id }));
-  const query = crossJoin({ t0: shared, '__chql_input': shared })
-    .where(r => r.t0.renamed.gt(first).and(r.__chql_input.renamed.lt(second)))
+  const query = crossJoin({ t0: shared, '__typedhouse_input': shared })
+    .where(r => r.t0.renamed.gt(first).and(r.__typedhouse_input.renamed.lt(second)))
     .where(r => r.t0.renamed.ne(first));
   const before = emitNaive(query.ir);
   const compiled = compile(query.ir);

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { col, table, from, registerCompiler, Expr, val, count, type Ordering } from '../src/index.js';
-import { emitNaive } from '@chql/compiler';
+import { emitNaive } from '@typedhouse/compiler';
 const t = table('t', { id: col.UInt64, tuple: col.Tuple({ name: col.String }) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 it('binds immutable rows to each immediate input and preserves descriptors', () => {
   const q = from(t); const filtered = q.where(r => r.id.eq(1n));

@@ -1,4 +1,4 @@
-import { print, type CHType, type FlatColumns } from '@chql/core';
+import { print, type CHType, type FlatColumns } from '@typedhouse/core';
 export function decoder(type: CHType): (value: unknown) => unknown {
   const invalid = (value: unknown): never => { throw new Error(`decode_invalid: ${print(type)}: ${String(value)}`); };
   if (type.kind === 'Nullable') { const inner = decoder(type.inner); return v => v === null ? null : inner(v); }
@@ -36,7 +36,8 @@ export function decoder(type: CHType): (value: unknown) => unknown {
   }
   if (type.kind === 'scalar' && (type.name === 'Float32' || type.name === 'Float64')) return v => {
     if (typeof v === 'number' && Number.isFinite(v)) return v;
-    if (v === 'nan') return NaN;
+    // x86 builds print the sign bit of 0/0: ClickHouse emits '-nan' there and 'nan' on arm64.
+    if (v === 'nan' || v === '-nan') return NaN;
     if (v === 'inf') return Infinity;
     if (v === '-inf') return -Infinity;
     return invalid(v);

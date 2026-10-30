@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col } from '@chql/core';
+import { col } from '@typedhouse/core';
 import { decoder, rowDecoder } from '../src/index.js';
 it('decodes Date as strict UTC calendar days within the UInt16 day range', () => {
   for (const day of ['1970-01-01', '2000-02-29', '2024-02-29', '2149-06-06']) {
@@ -22,6 +22,11 @@ it('decodes structural fields, booleans and numerical boundaries strictly', () =
   expect(() => decoder(col.Int64.type)('9223372036854775808')).toThrow(/decode_invalid/);
   expect(decoder(col.Float32.type)('inf')).toBe(Infinity);
   expect(decoder(col.Float64.type)('-inf')).toBe(-Infinity);
+  expect(decoder(col.Float64.type)('nan')).toBeNaN();
+  expect(decoder(col.Float64.type)('-nan')).toBeNaN(); // x86_64 ClickHouse spelling of 0/0
+  expect(decoder(col.Float32.type)('-nan')).toBeNaN();
+  expect(() => decoder(col.Float64.type)('+nan')).toThrow('decode_invalid');
+  expect(() => decoder(col.Float64.type)('NaN')).toThrow('decode_invalid');
   for (const v of [null, '3.2', {}, Infinity]) expect(() => decoder(col.Float64.type)(v)).toThrow(/decode_invalid/);
   for (const v of [{}, [null], [{ ['__proto__']: '1', 'a.b': [], '0': 0, extra: 1 }]]) expect(() => decoder(type)(v)).toThrow(/decode_invalid/);
 });

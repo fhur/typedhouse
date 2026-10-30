@@ -1,4 +1,4 @@
-import { col, table, from, val, type Row } from '@chql/core';
+import { col, table, from, val, type Row } from '@typedhouse/core';
 const q = from(table('dates', { day: col.Date, maybe: col.Nullable(col.Date), extended: col.Date32, seconds: col.DateTime(), instant: col.DateTime64(3), precise: col.DateTime64(9), wrapped: col.LowCardinality(col.Date) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.row.day.in(q.map(r => r.extended)); // expect: TS2769 No overload matches this call
 q.row.day.notIn(q.map(r => r.seconds)); // expect: TS2769 No overload matches this call

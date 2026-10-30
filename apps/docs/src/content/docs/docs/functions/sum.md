@@ -15,8 +15,8 @@ Decimal input is supported: the result preserves scale and uses precision 38, or
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, sum, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, sum, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const orders = table(
   'orders',
@@ -46,12 +46,12 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`customer` AS `customer`,
-  sum(`__chql_input`.`amount`) AS `totalAmount`
+  `__typedhouse_input`.`customer` AS `customer`,
+  sum(`__typedhouse_input`.`amount`) AS `totalAmount`
 FROM
-  `orders` AS `__chql_input`
+  `orders` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`customer`
+  `__typedhouse_input`.`customer`
 ```
 
 Parameters:

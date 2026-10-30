@@ -1,17 +1,17 @@
-# chql documentation site specification
+# typedhouse documentation site specification
 
 Status: Proposed
 
 ## 1. Goal
 
 Build a modern, fast documentation site whose primary audience is LLMs and coding
-agents using chql to generate and modify application queries. Optimize documentation
+agents using typedhouse to generate and modify application queries. Optimize documentation
 for agents to discover the right API, understand its constraints, produce valid
 code, and verify the resulting SQL.
 
-Human developers are the secondary audience: they evaluate chql, guide agents,
+Human developers are the secondary audience: they evaluate typedhouse, guide agents,
 review generated code, and explore examples. The human-facing site's defining
-interaction is editing typed chql code and seeing generated ClickHouse SQL
+interaction is editing typed typedhouse code and seeing generated ClickHouse SQL
 alongside it. Agent-readable documentation is a core product surface, not an
 optional export.
 
@@ -19,7 +19,7 @@ The site must be deployable on free static hosting without a database, paid sear
 service, or application server. Free-tier limits remain subject to the hosting
 provider's terms.
 
-This document specifies the documentation experience, not new chql language
+This document specifies the documentation experience, not new typedhouse language
 features. `spec.md` remains the language implementation contract. Published examples
 must reflect implemented behavior, including limitations, rather than presenting
 planned features as available.
@@ -36,7 +36,7 @@ planned features as available.
 | Interactive UI | React islands |
 | Editor | CodeMirror 6 |
 | Editor languages | `@codemirror/lang-javascript` with TypeScript enabled; SQL language support where needed |
-| Compilation | Browser-compatible chql core/compiler adapter in a Web Worker |
+| Compilation | Browser-compatible typedhouse core/compiler adapter in a Web Worker |
 | TypeScript transpilation | Lazy-loaded TypeScript transpiler in the execution environment |
 | Hosting | Cloudflare Pages static hosting |
 | Agent access | Generated Markdown endpoints, `llms.txt`, and optional `llms-full.txt` |
@@ -61,7 +61,7 @@ dynamic filters, dashboards, reports, and shared query logic.
 When documentation design involves a trade-off, prioritize machine-discoverable,
 explicit, verifiable API guidance over marketing brevity or visual presentation.
 Preserve a polished human experience without making it the only way to understand
-or use chql.
+or use typedhouse.
 
 **Homepage headline:**
 
@@ -76,7 +76,7 @@ or use chql.
 **Overall story:**
 
 > SQL is great at describing queries. Application code needs a safe way to compose
-> them. chql brings typed composition to ClickHouse—without hiding the SQL.
+> them. typedhouse brings typed composition to ClickHouse—without hiding the SQL.
 
 Describe the category as a **typed, composable query builder for ClickHouse**.
 Reserve “typed ClickHouse query algebra” for deeper technical explanations. The
@@ -128,12 +128,12 @@ promise is **Explicit APIs. Typed constraints. Inspectable SQL.** Supporting cop
 > and generated SQL you can review.
 
 Composition remains the core capability; agents are the primary documentation
-consumers. Do not claim that LLMs inherently understand chql better or automatically
+consumers. Do not claim that LLMs inherently understand typedhouse better or automatically
 produce correct queries without evaluation evidence.
 
 ### Messaging guardrails
 
-- Do not position chql as an ORM or promise to replace all handwritten SQL.
+- Do not position typedhouse as an ORM or promise to replace all handwritten SQL.
 - Do not claim faster queries without benchmarks or complete ClickHouse coverage.
 - Do not equate parameterization with general security or agent correctness.
 - Do not imply automatic protection from schema drift without regeneration and
@@ -158,7 +158,7 @@ in tutorials. Precision takes precedence over personality in instructional conte
 - Avoid hype such as “revolutionary,” “seamless,” “bulletproof,” and unsupported
   “blazing-fast” claims.
 - Keep wit out of errors, security guidance, and normative API rules.
-- Use “you” for guidance, “chql” for behavior, and “we” primarily in blog posts.
+- Use “you” for guidance, “typedhouse” for behavior, and “we” primarily in blog posts.
 - Use “must,” “must not,” and “only” for actual constraints. Explain conditions rather
   than relying on ambiguous qualifiers such as “usually works.”
 
@@ -170,7 +170,7 @@ Human-facing headlines can be memorable:
 
 The explanation underneath must be concrete:
 
-> Build queries using chql expressions and relational operators. Pass input values
+> Build queries using typedhouse expressions and relational operators. Pass input values
 > through the parameter API rather than interpolating them into SQL strings.
 > Compilation produces SQL and separate parameters.
 
@@ -232,7 +232,7 @@ Suggested initial tutorials:
 5. Use parameters and understand generated SQL.
 
 Only publish a tutorial when its APIs and examples pass validation against the
-bundled chql version.
+bundled typedhouse version.
 
 ## 4. Visual and interaction design
 
@@ -280,7 +280,7 @@ Use a cohesive theme across custom pages, Starlight documentation, and the edito
 Offer system, light, and dark preferences without a light-theme flash when practical.
 Keep keyboard focus, selectable code, error messages, and limitations visible.
 Agent-first does not mean terminal-looking: humans use the interface to evaluate
-chql and inspect agent-generated work.
+typedhouse and inspect agent-generated work.
 
 Requirements:
 
@@ -340,7 +340,7 @@ Desktop layout:
 ┌──────────────────────────────────────────────────────────┐
 │ Example selector                 Reset · Share · Compile  │
 ├──────────────────────────────┬───────────────────────────┤
-│ chql / TypeScript            │ Generated ClickHouse SQL  │
+│ typedhouse / TypeScript            │ Generated ClickHouse SQL  │
 │                              │                           │
 ├──────────────────────────────┴───────────────────────────┤
 │ Diagnostics · Parameters · Output descriptors             │
@@ -354,7 +354,7 @@ editable second source of truth. Label the action **Compile**, not **Run query**
 
 - Editable TypeScript input with highlighting, indentation, undo/redo, and bracket
   matching.
-- Lightweight completions for supported chql APIs and example table names.
+- Lightweight completions for supported typedhouse APIs and example table names.
 - Read-only, copyable generated SQL.
 - Automatic compilation after a short debounce, with manual compilation available.
 - Example selector with documented fixture tables.
@@ -375,7 +375,7 @@ detection. Validate maintained examples with TypeScript in CI.
 
 Define and document a small virtual-module contract before implementation:
 
-- Source may import allowlisted chql exports and bundled fixture definitions.
+- Source may import allowlisted typedhouse exports and bundled fixture definitions.
 - Source must expose one query through a documented export, such as
   `export default query`.
 - Reject unsupported imports, dynamic imports, and external module resolution with
@@ -384,7 +384,7 @@ Define and document a small virtual-module contract before implementation:
   credentials are supported.
 
 Implement this contract with syntax-aware tooling rather than regular-expression
-rewrites. Keep the adapter separate from public chql APIs.
+rewrites. Keep the adapter separate from public typedhouse APIs.
 
 ### Compilation pipeline
 
@@ -392,12 +392,12 @@ rewrites. Keep the adapter separate from public chql APIs.
 2. Send source and selected fixture metadata to the isolated execution environment.
 3. Transpile TypeScript and resolve only allowlisted virtual modules.
 4. Evaluate the resulting program to obtain a query.
-5. Invoke the actual chql compiler; do not duplicate SQL generation in the site.
+5. Invoke the actual typedhouse compiler; do not duplicate SQL generation in the site.
 6. Return a serializable result containing SQL, parameters, available descriptors,
    diagnostics, and the input revision.
 7. Render only the newest revision's result.
 
-Audit `@chql/core` and `@chql/compiler` for browser compatibility before integrating.
+Audit `@typedhouse/core` and `@typedhouse/compiler` for browser compatibility before integrating.
 Keep Node-only code and client execution dependencies out of the browser bundle.
 Format diagnostic and parameter values safely, including bigint and other values
 that cannot be passed through ordinary JSON serialization unchanged.
@@ -511,7 +511,7 @@ apps/docs/
 ```
 
 The precise generated-route and isolation assets layout depends on the technical
-spikes. Use workspace dependencies for chql packages and avoid copying compiler
+spikes. Use workspace dependencies for typedhouse packages and avoid copying compiler
 source into the documentation app.
 
 ## 10. Hosting and delivery
@@ -548,7 +548,7 @@ The initial release is ready when:
 - [ ] Documentation, tutorials, reference, and blog routes are usable on mobile.
 - [ ] Search returns relevant API, tutorial, and blog results.
 - [ ] The homepage and at least three tutorials use the shared interactive component.
-- [ ] The playground compiles real chql into SQL, without contacting ClickHouse.
+- [ ] The playground compiles real typedhouse into SQL, without contacting ClickHouse.
 - [ ] Maintained examples typecheck and their generated SQL is regression-tested.
 - [ ] Invalid input, infinite loops, rapid edits, and stale responses are handled.
 - [ ] Sandbox tests verify trusted-origin storage is inaccessible and disallowed

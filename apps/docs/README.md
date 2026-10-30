@@ -4,20 +4,20 @@ Static Astro 5 + Starlight app. This is a modest foundation / vertical slice, **
 
 ## Brand and compatibility
 
-Use TypedHouse in public prose. The project was formerly chql; retain `@chql/*` package names and imports, the `chql` codegen command, and SQL identifiers for compatibility. The repository is now `fhur/typedhouse`; GitHub redirects old repository links, but the Pages site has moved to `/typedhouse/`. TypedHouse is an independent project, not affiliated with ClickHouse.
+Use TypedHouse in public prose. The project was formerly typedhouse; retain `@typedhouse/*` package names and imports, the `typedhouse` codegen command, and SQL identifiers for compatibility. The repository is now `fhur/typedhouse`; GitHub redirects old repository links, but the Pages site has moved to `/typedhouse/`. TypedHouse is an independent project, not affiliated with ClickHouse.
 
 ## Develop and validate
 
 Run from the repository root after the workspace install:
 
 ```sh
-pnpm --filter @chql/docs dev
-pnpm --filter @chql/docs check
-pnpm --filter @chql/docs build
-pnpm --filter @chql/docs preview
-pnpm --filter @chql/docs test:playground
-pnpm --filter @chql/docs exec playwright install chromium
-pnpm --filter @chql/docs test:browser
+pnpm --filter @typedhouse/docs dev
+pnpm --filter @typedhouse/docs check
+pnpm --filter @typedhouse/docs build
+pnpm --filter @typedhouse/docs preview
+pnpm --filter @typedhouse/docs test:playground
+pnpm --filter @typedhouse/docs exec playwright install chromium
+pnpm --filter @typedhouse/docs test:browser
 # All docs checks, including built-site link validation:
 pnpm docs:verify
 ```
@@ -39,15 +39,15 @@ Dev and build regenerate the sandbox worker first. Its bundler aliases workspace
 
 All TypeScript fences in `src/content/**/*.md` use a 60-column formatting target. This does not reformat SQL, JSON, prose, or shell examples. Prose comments are wrapped too; indivisible literals and tooling directives remain intact.
 
-- `pnpm --filter @chql/docs format:examples` formats the TypeScript examples.
-- `pnpm --filter @chql/docs test:example-format` checks formatter behavior and prevents formatting drift; it is included in `pnpm docs:verify`.
+- `pnpm --filter @typedhouse/docs format:examples` formats the TypeScript examples.
+- `pnpm --filter @typedhouse/docs test:example-format` checks formatter behavior and prevents formatting drift; it is included in `pnpm docs:verify`.
 
 ## Function examples
 
 The Functions section lives in `src/content/docs/docs/functions/`, with one page per supported scalar or aggregate call form and an expression-helper guide. Code examples use the same execution and typechecking harness as the query builder and compiler pages.
 
-- `pnpm --filter @chql/docs examples:functions` refreshes final SQL and parameters and typechecks examples.
-- `pnpm --filter @chql/docs test:function-examples` checks for stale SQL and typechecks examples.
+- `pnpm --filter @typedhouse/docs examples:functions` refreshes final SQL and parameters and typechecks examples.
+- `pnpm --filter @typedhouse/docs test:function-examples` checks for stale SQL and typechecks examples.
 
 `pnpm docs:verify` includes guide, compiler, query-builder, and function example checks. Each generated-SQL marker closes an independent executable example: its preceding TypeScript blocks (including collapsed setup) are compiled together. Pages can include multiple examples, each with its own imports, default export, and SQL marker.
 
@@ -55,15 +55,15 @@ The Functions section lives in `src/content/docs/docs/functions/`, with one page
 
 The top-level Query Builder section lives in `src/content/docs/docs/query-builder/`, with one concept per page and standalone examples followed by generated final SQL and parameters. It uses the same Markdown-based execution and typechecking harness as the compiler pages.
 
-- `pnpm --filter @chql/docs examples:query-builder` refreshes SQL and typechecks the examples.
-- `pnpm --filter @chql/docs test:query-builder-examples` checks for stale SQL and typechecks the examples.
+- `pnpm --filter @typedhouse/docs examples:query-builder` refreshes SQL and typechecks the examples.
+- `pnpm --filter @typedhouse/docs test:query-builder-examples` checks for stale SQL and typechecks the examples.
 
 ## Compiler examples
 
 The top-level Simplifying Compiler section lives in `src/content/docs/docs/compiler/`. Each optimization page contains one standalone TypeScript example exporting `compile(query.ir)`, followed by generated final SQL and parameters. Markdown remains the source of truth; edit the example, not its generated SQL block.
 
-- `pnpm --filter @chql/docs examples:compiler` executes the examples against workspace source, refreshes their SQL blocks, and typechecks the snippets.
-- `pnpm --filter @chql/docs test:compiler-examples` verifies the committed output still matches the compiler and typechecks the snippets.
+- `pnpm --filter @typedhouse/docs examples:compiler` executes the examples against workspace source, refreshes their SQL blocks, and typechecks the snippets.
+- `pnpm --filter @typedhouse/docs test:compiler-examples` verifies the committed output still matches the compiler and typechecks the snippets.
 
 SQL is formatted with the ClickHouse dialect; aliases and parameter values come from the compiler, not handwritten approximations.
 
@@ -71,8 +71,8 @@ SQL is formatted with the ClickHouse dialect; aliases and parameter values come 
 
 The sidebar teaches three progressively richer workflows: Getting started, Simple example, and Advanced example. Existing getting-started and composition URLs remain stable. Each runnable checkpoint has independent setup and generated SQL.
 
-- `pnpm --filter @chql/docs examples:guides` regenerates all five checkpoints and typechecks their code.
-- `pnpm --filter @chql/docs test:guide-examples` rejects stale SQL or type errors; Pages deployment runs this check too.
+- `pnpm --filter @typedhouse/docs examples:guides` regenerates all five checkpoints and typechecks their code.
+- `pnpm --filter @typedhouse/docs test:guide-examples` rejects stale SQL or type errors; Pages deployment runs this check too.
 - A `ts typecheck-only` fence extends the page's first complete example for typechecking without executing it. This lets the server-client example stay checked without making database calls during builds.
 
 ## GitHub Pages
@@ -83,14 +83,14 @@ To validate the project-site build locally:
 
 ```sh
 SITE_URL=https://fhur.github.io BASE_PATH=/typedhouse pnpm docs:build
-BASE_PATH=/typedhouse pnpm --filter @chql/docs test:site
+BASE_PATH=/typedhouse pnpm --filter @typedhouse/docs test:site
 ```
 
 `BASE_PATH` defaults to `/` for local development and root-domain hosts. Navigation, Markdown links, agent indexes, RSS, search, and playground worker URLs honor it. GitHub Pages does not process `public/_headers`; its security headers, cache rules, and Markdown MIME overrides apply only on compatible hosts.
 
 ## Cloudflare Pages
 
-Set root to the repository root, install with the workspace lockfile, and use `pnpm --filter @chql/docs build`. Output directory: `apps/docs/dist`. Set `SITE_URL` to the deployment's canonical HTTPS origin (default `https://chql.pages.dev` is a replaceable deployment placeholder). Starlight's sitemap, Pagefind search, RSS, Markdown and agent indexes are generated during the static build. No database or runtime secrets are needed. Branch previews can set their own SITE_URL.
+Set root to the repository root, install with the workspace lockfile, and use `pnpm --filter @typedhouse/docs build`. Output directory: `apps/docs/dist`. Set `SITE_URL` to the deployment's canonical HTTPS origin (the default is `https://fhur.github.io`, the GitHub Pages origin; that deployment also sets `BASE_PATH=/typedhouse`). Starlight's sitemap, Pagefind search, RSS, Markdown and agent indexes are generated during the static build. No database or runtime secrets are needed. Branch previews can set their own SITE_URL.
 
 `public/_headers` sets conservative security headers and immutable caching only for hashed Astro assets. It intentionally does **not** set a global CSP: the opaque-origin srcdoc playground has a separate restrictive policy and inline bootstrap. Do not add a blanket CSP that breaks this isolation. Sandbox assets are not assumed to have content-hashed names: `/sandbox/worker.js` explicitly uses `Cache-Control: no-cache` to revalidate the compiler after deployments.
 

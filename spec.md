@@ -6,16 +6,16 @@ This is the build spec for the library described in Doc. That document is backgr
 
 ## Scope
 
-Build one TypeScript monorepo, `chql` (placeholder name), with four packages. ClickHouse 24.3 or newer is required, because the compiler relies on the new analyzer being the default (multiple joins per SELECT, correct alias scoping, `{name:Type}` query parameters everywhere).
+Build one TypeScript monorepo, `typedhouse`, with four packages. ClickHouse 24.3 or newer is required, because the compiler relies on the new analyzer being the default (multiple joins per SELECT, correct alias scoping, `{name:Type}` query parameters everywhere).
 
 | Package | Delivers | Depends on |
 | --- | --- | --- |
-| `@chql/codegen` | CLI that reads a ClickHouse database and writes `schema.ts` and `functions.ts` | `@clickhouse/client` |
-| `@chql/core` | `Query`, `Expr`, `sql`, the IR node types, the function catalog | nothing at runtime |
-| `@chql/compiler` | IR validation, rewrite passes, ClickHouse SQL emission, `toSQL()` | `@chql/core` |
-| `@chql/client` | `client.run(q)`, `client.stream(q)`, result decoding | `@chql/compiler`, `@clickhouse/client` |
+| `@typedhouse/codegen` | CLI that reads a ClickHouse database and writes `schema.ts` and `functions.ts` | `@clickhouse/client` |
+| `@typedhouse/core` | `Query`, `Expr`, `sql`, the IR node types, the function catalog | nothing at runtime |
+| `@typedhouse/compiler` | IR validation, rewrite passes, ClickHouse SQL emission, `toSQL()` | `@typedhouse/core` |
+| `@typedhouse/client` | `client.run(q)`, `client.stream(q)`, result decoding | `@typedhouse/compiler`, `@clickhouse/client` |
 
-`@chql/core` is dependency-free on purpose: a query built in a browser or a worker must not drag the compiler along.
+`@typedhouse/core` is dependency-free on purpose: a query built in a browser or a worker must not drag the compiler along.
 
 Not in scope for this build: inserts, updates, deletes and DDL; dictionaries (`dictGet` goes through `sql`); window functions as an operator (through `sql` only); any dialect other than ClickHouse; join reordering; cost-based decisions of any kind. Each of these is a later milestone, and nothing in this spec should make them harder.
 
@@ -28,7 +28,7 @@ Work in this order. Each milestone ends with its acceptance test green in CI; do
 | # | Milestone | Acceptance test |
 | --- | --- | --- |
 | 1 | ClickHouse type parser + TS type mapping | Every type string in the fixture corpus (200+ real `system.columns` values) parses, round-trips through `print()`, and maps to the TS type in the mapping table |
-| 2 | Codegen CLI | Against the testcontainers DDL fixture, `chql generate` writes `schema.ts` and `functions.ts` that match the checked-in snapshots; `chql check` exits non-zero when a snapshot is stale |
+| 2 | Codegen CLI | Against the testcontainers DDL fixture, `typedhouse generate` writes `schema.ts` and `functions.ts` that match the checked-in snapshots; `typedhouse check` exits non-zero when a snapshot is stale |
 | 3 | Builder, IR, naive emitter | The six type checks under Testing are green: every API example type-checks with `toEqualTypeOf`, every What-fails-to-compile case fails with the expected diagnostic, the type/runtime snapshots agree, and the compile-performance bench is under its budget. Each query runs on ClickHouse through a one-subquery-per-node emitter and returns correctly decoded rows. The eight constraints in Part 4 are in place |
 | 4 | Rewrite passes + flat emitter | Differential test: 500 generated queries give identical results under naive and optimized emission; `lowStockCategories('acme')` emits exactly the SQL shown in API examples; EXPLAIN snapshots show no `Subquery` node that is not under a fence |
 | 5 | Client: run, stream, errors | Streaming 10M rows holds under 200 MB heap; a ClickHouse error surfaces with the emitted SQL and the IR path of the offending node |
@@ -44,11 +44,11 @@ This section is the user-facing contract. Every snippet type-checks and runs aga
 
 ### Fixture schema
 
-What `chql generate` writes for the test database. Shown factored for brevity; the generator writes every table in full. Representative metric columns only; every metric has a `<metric>_warnings Array(String)` beside it.
+What `typedhouse generate` writes for the test database. Shown factored for brevity; the generator writes every table in full. Representative metric columns only; every metric has a `<metric>_warnings Array(String)` beside it.
 
 ```ts
 // src/generated/schema.ts
-import { table, col, type Infer } from '@chql/core'
+import { table, col, type Infer } from '@typedhouse/core'
 
 const partSpecification = col.Tuple({
   id:           col.String,
@@ -525,7 +525,7 @@ Include tables, views and materialized views (`t.engine` tells them apart; all t
 
 ### Type grammar
 
-ClickHouse type strings are a small recursive language. Write a real parser (recursive descent, \~150 lines), not regexes, producing this AST, and a `print()` that round-trips it exactly. The AST ships in `@chql/core` because the compiler needs it at runtime for query parameters.
+ClickHouse type strings are a small recursive language. Write a real parser (recursive descent, \~150 lines), not regexes, producing this AST, and a `print()` that round-trips it exactly. The AST ships in `@typedhouse/core` because the compiler needs it at runtime for query parameters.
 
 ```ts
 type CHType =
@@ -580,8 +580,8 @@ Parsing details that bite: string literals inside `Enum8('a b' = 1)` and `DateTi
 Two files, deterministic, with a header comment carrying the generator version and a content hash. `schema.ts` is sorted by table then column position. No name conversion: a column `order_id` is `order_id` in TypeScript; a column that is not a valid identifier becomes a quoted property key. Table metadata is kept because the compiler and the reader both want it. The fixture schema in API examples is what this output looks like for the test database; the shape of one entry:
 
 ```ts
-// generated by @chql/codegen 0.1.0 — do not edit — hash: 3f9a…
-import { table, col, type Infer } from '@chql/core'
+// generated by @typedhouse/codegen 0.1.0 — do not edit — hash: 3f9a…
+import { table, col, type Infer } from '@typedhouse/core'
 
 export const db = {
   entity_ots_component: table('entity_ots_component', {
@@ -603,7 +603,7 @@ export type ComponentRow = Infer<typeof db.entity_ots_component>
 
 The same run reads `system.functions` (`SELECT name, is_aggregate, deterministic, alias_to FROM system.functions ORDER BY name`) and writes `functions.ts` beside `schema.ts`: the known-function tier described in Part 2, one untyped entry per ClickHouse function with its `deterministic` flag.
 
-CLI: `chql generate --url http://… --database analytics --out-dir src/generated` writes `schema.ts` and `functions.ts`; `chql check` with the same flags regenerates to memory and diffs against both. Credentials come from `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` when flags are absent.
+CLI: `typedhouse generate --url http://… --database analytics --out-dir src/generated` writes `schema.ts` and `functions.ts`; `typedhouse check` with the same flags regenerates to memory and diffs against both. Credentials come from `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` when flags are absent.
 
 ## Part 2: builder and IR
 
@@ -715,7 +715,7 @@ The v1 typed set:
 | Hash | `cityHash64`, `sipHash64` |
 | Aggregates | `count`, `countIf`, `sum`, `sumIf`, `avg`, `avgIf`, `min`, `max`, `argMin`, `argMax`, `any`, `anyLast`, `uniq`, `uniqExact`, `groupArray`, `groupUniqArray`, `quantile(level)`; plus `<name>If`, `<name>State`, `<name>Merge` for each |
 
-**Tier 2, known.** `chql generate` also reads `system.functions` and writes `functions.ts`: `fn.<name>(...args: Expr<any>[]): Expr<unknown>` for every non-aggregate function and `agg.<name>(...)` returning `AggExpr<unknown>` for every aggregate, each entry carrying `deterministic` and `alias_to` from the table. The `deterministic` column is newer than the 24.3 minimum, so the generator first checks `system.columns` for it and, when it is absent, writes `deterministic: null`, which the live-capability computation treats as non-deterministic. The validator uses this file to reject names ClickHouse does not have and to compute the live capability. `.as(col.X)` declares the result type for inference and decoding and emits no CAST; `cast(x, col.X)` emits one. Nothing in this tier is hand-written, and it regenerates with the schema.
+**Tier 2, known.** `typedhouse generate` also reads `system.functions` and writes `functions.ts`: `fn.<name>(...args: Expr<any>[]): Expr<unknown>` for every non-aggregate function and `agg.<name>(...)` returning `AggExpr<unknown>` for every aggregate, each entry carrying `deterministic` and `alias_to` from the table. The `deterministic` column is newer than the 24.3 minimum, so the generator first checks `system.columns` for it and, when it is absent, writes `deterministic: null`, which the live-capability computation treats as non-deterministic. The validator uses this file to reject names ClickHouse does not have and to compute the live capability. `.as(col.X)` declares the result type for inference and decoding and emits no CAST; `cast(x, col.X)` emits one. Nothing in this tier is hand-written, and it regenerates with the schema.
 
 **Tier 3, raw.** `sql` at expression, predicate and relation level, as in the examples.
 
@@ -723,7 +723,7 @@ The v1 typed set:
 
 ```ts
 // src/db/functions.ts
-import { defineFunction, defineAggregate, col, stringLike } from '@chql/core'
+import { defineFunction, defineAggregate, col, stringLike } from '@typedhouse/core'
 
 export const editDistance = defineFunction({
   name: 'editDistance', args: [stringLike, stringLike], returns: col.UInt64, deterministic: true,
@@ -739,7 +739,7 @@ parts.groupBy(p => p.partCategoryName).aggregate(g => ({ topManufacturers: topK(
 Method syntax for a user function is opt-in and is declaration merging plus one call, which is also how the generated methods are attached, so there is one mechanism:
 
 ```ts
-declare module '@chql/core' {
+declare module '@typedhouse/core' {
   interface ExprMethods<T> {
     distanceTo(this: Expr<string>, other: Expr<string> | string): Expr<bigint>
   }
@@ -808,8 +808,8 @@ A DBSP-style incremental engine (Z-sets with integer weights; every operator kee
 | `Raw` nodes carry `opaque: true` and the validator records which nodes contain one | A `sql` escape hatch cannot be evaluated outside ClickHouse, so it removes the live capability |
 | `Query<R, C extends Caps = Caps>` with `Caps = { live: boolean }`, computed from day one: `from(t)` is live iff `t.source` is set (never, in v1); `join` and `union` AND their inputs; `Raw` and non-deterministic calls make it false. `type IsLive<Q>` is exported. No method reads it yet; the names `live()` and `changes()` are reserved and not declared | `.live()` on a query that cannot be live becomes a compile error the day the method exists, with no migration |
 | `table()` takes an optional `source?: ChangeSource`; `ChangeSource` is `{ readonly kind: string }` and codegen never sets it | Binding a Postgres slot, Kafka topic or WebSocket feed to a table later is a field, not a schema redesign |
-| One value model. The decoded ClickHouse row (`bigint`, `Date`, `Decimal` as branded string, `null`) is the only row representation in the codebase. `canonicalKey(row, columns): string` lives in `@chql/core` and the differential test uses it to compare row sets | The same key function is the Z-set key; the engine never needs a second encoding |
-| `Backend` interface in `@chql/client`: `{ name: string; compile(rel: Rel): Plan; run(plan: Plan): AsyncIterable<unknown[]> }`. V1 ships two implementations, `clickhouse` and `clickhouse-naive`, and the test harness takes backends as plugins | The incremental engine is a third plugin in the same harness, and its acceptance test is the differential test that already exists |
+| One value model. The decoded ClickHouse row (`bigint`, `Date`, `Decimal` as branded string, `null`) is the only row representation in the codebase. `canonicalKey(row, columns): string` lives in `@typedhouse/core` and the differential test uses it to compare row sets | The same key function is the Z-set key; the engine never needs a second encoding |
+| `Backend` interface in `@typedhouse/client`: `{ name: string; compile(rel: Rel): Plan; run(plan: Plan): AsyncIterable<unknown[]> }`. V1 ships two implementations, `clickhouse` and `clickhouse-naive`, and the test harness takes backends as plugins | The incremental engine is a third plugin in the same harness, and its acceptance test is the differential test that already exists |
 | `Param` stays its own node through compilation; it is never folded into `Literal` at build time | A parameter becomes a declared input stream under IVM (the paper's changing scalar); a literal cannot |
 
 What that later milestone then contains, so its size is visible now: the Z-set engine (`filter`, `map`, `arrayJoin` as a flat map, `unionAll`, `join`, `groupBy`+`aggregate` with linear and non-linear aggregates, `distinct`, `sort`+`limit` as top-k), JS implementations for the catalog, source bindings and a transport, and `changes()` yielding per-step deltas plus `live()` as its integral. Estimated at two to three thousand lines of core code. Nothing in milestones 1 to 6 is reopened.

@@ -1,5 +1,5 @@
 import type { CHType } from './ch-type.js';
-/** Output requires type imports Decimal, UUID, IPv4, IPv6, AggregateState from @chql/core. */
+/** Output requires type imports Decimal, UUID, IPv4, IPv6, AggregateState from @typedhouse/core. */
 export function toTypeScript(t: CHType): string {
   switch (t.kind) {
     case 'scalar': {

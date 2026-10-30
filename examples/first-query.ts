@@ -1,6 +1,6 @@
-import { uniqExact, uniqExactIf, table, quantile, avg, avgIf, argMax, argMaxIf, cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@chql/core";
-import { emitNaive } from "@chql/compiler";
-import { createClient } from "@chql/client";
+import { uniqExact, uniqExactIf, table, quantile, avg, avgIf, argMax, argMaxIf, cast, col, val, count, max, sum, scalar, from, registerCompiler, join, unionAll } from "@typedhouse/core";
+import { emitNaive } from "@typedhouse/compiler";
+import { createClient } from "@typedhouse/client";
 // Checked-in output of the real codegen integration fixture. For your database,
 // generate examples/generated and change this import to './generated/schema.js'.
 import { db } from "../packages/codegen/test/snapshots/schema.js";

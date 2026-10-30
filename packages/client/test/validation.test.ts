@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { ValidationError } from '@chql/compiler';
+import { ValidationError } from '@typedhouse/compiler';
 import { createClickHouseBackend, createClientFromBackend, QueryError } from '../src/index.js';
 import { categories, mutation } from '../../compiler/test/validation-arbitrary.js';
 const driver = vi.hoisted(() => ({ query: vi.fn(), close: vi.fn(async () => {}) }));

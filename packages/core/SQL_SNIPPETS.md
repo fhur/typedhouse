@@ -1,7 +1,7 @@
 # Trusted scalar SQL snippets
 
 ```ts
-import { col, sql } from '@chql/core';
+import { col, sql } from '@typedhouse/core';
 
 parts.map(p => ({
   mpn: p.mpn,

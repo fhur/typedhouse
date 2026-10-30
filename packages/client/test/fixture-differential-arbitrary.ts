@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { from, join, unionAll, sum, count, uniq, scalar } from '@chql/core';
+import { from, join, unionAll, sum, count, uniq, scalar } from '@typedhouse/core';
 import { db, latest, forTenant } from '../../compiler/test/fixtures/corpus/low-stock.js';
 
 export const seed = 20261201;

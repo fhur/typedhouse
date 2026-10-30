@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { count, crossJoin, join, sum } from '@chql/core';
+import { count, crossJoin, join, sum } from '@typedhouse/core';
 import { buildTree, nativeTree, source, recipeArbitrary as trees, topology, type Tree } from './pruning-arbitrary.js';
 export const seed = 20261123;
 export interface Recipe { tree: Tree; shared: boolean; fence: boolean; projection: boolean; aggregate: boolean }

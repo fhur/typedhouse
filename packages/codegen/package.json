@@ -1,8 +1,8 @@
 {
-  "name": "@chql/codegen",
+  "name": "@typedhouse/codegen",
   "version": "0.1.0",
   "type": "module",
-  "bin": { "chql": "./dist/cli.js" },
+  "bin": { "typedhouse": "./dist/cli.js" },
   "files": [
     "dist"
   ],
@@ -16,7 +16,7 @@
     "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean"
   },
   "dependencies": {
-    "@chql/core": "workspace:*",
+    "@typedhouse/core": "workspace:*",
     "@clickhouse/client": "^1.11.0"
   }
 }

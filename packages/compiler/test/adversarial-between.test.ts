@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, from, table, val } from '@chql/core';
+import { col, from, table, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { safePredicate } from '../src/rewrite-expressions.js';
 

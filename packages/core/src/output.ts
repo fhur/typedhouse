@@ -29,13 +29,13 @@ export function outputLeaves(output: OutputSchema): readonly OutputLeaf[] {
       }
     } else {
       if (!schema.order.length || new Set(schema.order).size !== schema.order.length || schema.order.length !== Object.keys(schema.columns).length || schema.order.some(k => !Object.hasOwn(schema.columns, k))) throw new Error('invalid_output');
-      for (const name of schema.order) leaves.push({ path: [...prefix, name], name: output.shape === 'flat' ? name : `__chql_leaf_${leaves.length}`, type: schema.columns[name]! });
+      for (const name of schema.order) leaves.push({ path: [...prefix, name], name: output.shape === 'flat' ? name : `__typedhouse_leaf_${leaves.length}`, type: schema.columns[name]! });
     }
   }
   visit(output, []);
   if (output.shape === 'flat') return leaves;
   const reserved = new Set(leaves.flatMap(l => l.path));
-  let prefix = '__chql_leaf_';
+  let prefix = '__typedhouse_leaf_';
   while (leaves.some((_, i) => reserved.has(`${prefix}${i}`))) prefix += '_';
   return leaves.map((leaf, i) => ({ ...leaf, name: `${prefix}${i}` }));
 }

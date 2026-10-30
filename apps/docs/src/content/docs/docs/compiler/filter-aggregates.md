@@ -15,8 +15,8 @@ The category condition moves into `WHERE`. The count condition becomes `HAVING` 
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, count, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, count, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -49,14 +49,14 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`category` AS `category`,
+  `__typedhouse_input`.`category` AS `category`,
   count() AS `total`
 FROM
-  `events` AS `__chql_input`
+  `events` AS `__typedhouse_input`
 WHERE
-  `__chql_input`.`category` = {p0:String}
+  `__typedhouse_input`.`category` = {p0:String}
 GROUP BY
-  `__chql_input`.`category`
+  `__typedhouse_input`.`category`
 HAVING
   `total` > {p1:UInt64}
 ```

@@ -15,8 +15,13 @@ Unlike filtering the query before grouping, the condition applies only to this a
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, countIf, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  countIf,
+  from,
+  table,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const orders = table(
   'orders',
@@ -46,12 +51,12 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`customer` AS `customer`,
-  countIf (`__chql_input`.`paid`) AS `paidOrders`
+  `__typedhouse_input`.`customer` AS `customer`,
+  countIf (`__typedhouse_input`.`paid`) AS `paidOrders`
 FROM
-  `orders` AS `__chql_input`
+  `orders` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`customer`
+  `__typedhouse_input`.`customer`
 ```
 
 Parameters:

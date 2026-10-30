@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, from, table, unionAll, crossJoin, val, relNode, flatOutput, Query, type Rel } from '@chql/core';
+import { col, from, table, unionAll, crossJoin, val, relNode, flatOutput, Query, type Rel } from '@typedhouse/core';
 import { emitNaive } from '../src/index.js';
 const meta = { engine: 'Memory', sortingKey: [], partitionKey: [] };
 const source = from(table('t', { id: col.UInt32, s: col.String }, meta));
@@ -29,7 +29,7 @@ it('aligns by path, retains identity and freezes wrappers, without scan/order st
   expect(union.ir.inputs[2]).toBe(first.ir);
   const before = JSON.stringify(union.ir);
   const plan = emitNaive(union.ir);
-  for (const branch of plan.sql.split(' UNION ALL ')) expect(branch).toMatch(/^SELECT `__chql_input`.`id` AS `id`, `__chql_input`.`s` AS `s` FROM/);
+  for (const branch of plan.sql.split(' UNION ALL ')) expect(branch).toMatch(/^SELECT `__typedhouse_input`.`id` AS `id`, `__typedhouse_input`.`s` AS `s` FROM/);
   expect(plan.sql.match(/UNION ALL/g)).toHaveLength(2);
   expect(JSON.stringify(union.ir)).toBe(before);
   expect(union.row.id.ir.type).toEqual(col.UInt32.type);
@@ -46,14 +46,14 @@ it('keeps branch boundaries and Param identity in first SQL appearance order', (
   expect(plan.sql.match(/\{p0:String\}/g)).toHaveLength(2);
   expect(plan.sql.match(/LIMIT 1/g)).toHaveLength(2);
   expect(plan.sql.match(/SELECT DISTINCT/g)).toHaveLength(2);
-  expect(plan.sql).toMatch(/UNION ALL.*\) AS `__chql_input` WHERE/);
+  expect(plan.sql).toMatch(/UNION ALL.*\) AS `__typedhouse_input` WHERE/);
 });
 it('retains nested and expanded hostile paths despite reversed side order', () => {
   const arr = from(table('a', { ['a.b']: col.Array(col.UInt64) }, meta));
-  const a = crossJoin({ ['__proto__']: arr, '42': arr }).leftArrayJoin(r => r.__proto__['a.b'], '__chql_leaf_0');
-  const b = crossJoin({ '42': arr, ['__proto__']: arr }).leftArrayJoin(r => r.__proto__['a.b'], '__chql_leaf_0');
+  const a = crossJoin({ ['__proto__']: arr, '42': arr }).leftArrayJoin(r => r.__proto__['a.b'], '__typedhouse_leaf_0');
+  const b = crossJoin({ '42': arr, ['__proto__']: arr }).leftArrayJoin(r => r.__proto__['a.b'], '__typedhouse_leaf_0');
   const plan = emitNaive(unionAll(a, b).ir);
-  expect(Object.values(plan.columnPaths!)).toEqual([['42', 'a.b'], ['__proto__', 'a.b'], ['__chql_leaf_0']]);
+  expect(Object.values(plan.columnPaths!)).toEqual([['42', 'a.b'], ['__proto__', 'a.b'], ['__typedhouse_leaf_0']]);
   expect(unionAll(a, b).row.__proto__['a.b'].ir.type).toEqual(col.Array(col.UInt64).type);
 });
 it('rejects descriptor coercion and forged branch/output/scope/mode/arity with node paths', () => {

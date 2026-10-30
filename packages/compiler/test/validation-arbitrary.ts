@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { col, count, crossJoin, from, scalar, table, unionAll, val, type Rel } from '@chql/core';
+import { col, count, crossJoin, from, scalar, table, unionAll, val, type Rel } from '@typedhouse/core';
 
 export const seed = 20261028;
 export const source = from(table('validation_rows', { id: col.UInt64, tags: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));

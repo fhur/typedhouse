@@ -1,10 +1,10 @@
-export declare const knownHash: import("@chql/core").Query<{
+export declare const knownHash: import("@typedhouse/core").Query<{
     h: bigint;
-}, import("@chql/core").ExpressionCaps<{
+}, import("@typedhouse/core").ExpressionCaps<{
     live: false;
 }>, {
-    readonly h: import("@chql/core").Expr<bigint, "h", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly h: import("@typedhouse/core").Expr<bigint, "h", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "UInt64";
@@ -12,13 +12,13 @@ export declare const knownHash: import("@chql/core").Query<{
         };
     };
 }, false>;
-export declare const knownUnique: import("@chql/core").Query<{
+export declare const knownUnique: import("@typedhouse/core").Query<{
     n: bigint;
-}, import("@chql/core").ExpressionCaps<{
+}, import("@typedhouse/core").ExpressionCaps<{
     live: false;
 }>, {
-    readonly n: import("@chql/core").Expr<bigint, "n", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly n: import("@typedhouse/core").Expr<bigint, "n", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "UInt64";
@@ -26,7 +26,7 @@ export declare const knownUnique: import("@chql/core").Query<{
         };
     };
 }, false> & {
-    readonly ir: Extract<import("@chql/core").Rel, {
+    readonly ir: Extract<import("@typedhouse/core").Rel, {
         kind: "Aggregate";
     }>;
 };

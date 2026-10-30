@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, from, table, sql, val, cast, scalar, count, sum, join, unionAll, type Rel, type ExprNode } from '@chql/core';
+import { col, from, table, sql, val, cast, scalar, count, sum, join, unionAll, type Rel, type ExprNode } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 import { planCtes } from '../src/plan-ctes.js';
 const q = from(table('items', { 'odd`column': col.String, id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));

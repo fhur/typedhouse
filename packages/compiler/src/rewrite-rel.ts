@@ -1,4 +1,4 @@
-import { outputLeaves, print, relNode as constructRel, type ExprNode, type Rel } from '@chql/core';
+import { outputLeaves, print, relNode as constructRel, type ExprNode, type Rel } from '@typedhouse/core';
 import { exprNode, conjunction, conjuncts, mapExpression, rebind, references, safeAggregate, safePredicate } from './rewrite-expressions.js';
 
 function mapRecord(es: Readonly<Record<string, ExprNode>>, visit: (e: ExprNode) => ExprNode): Readonly<Record<string, ExprNode>> {

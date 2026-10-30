@@ -15,8 +15,8 @@ Count events per category and keep groups with more than ten events. The output 
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, count, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, count, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -49,12 +49,12 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`category` AS `category`,
+  `__typedhouse_input`.`category` AS `category`,
   count() AS `total`
 FROM
-  `events` AS `__chql_input`
+  `events` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`category`
+  `__typedhouse_input`.`category`
 HAVING
   `total` > {p0:UInt64}
 ```

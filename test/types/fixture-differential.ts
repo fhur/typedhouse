@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { from, sum, type Infer, type Query } from '@chql/core';
+import { from, sum, type Infer, type Query } from '@typedhouse/core';
 import { metricSource, rollup, share, limited, componentPayload, partPayload, metricDetails, nonfinite, availability, componentIndices, partIndices, price, latestAvailabilityTotals, latestComponentTotals, latestPartTotals, latestPriceTotals } from '../../packages/client/test/fixture-differential-arbitrary.js';
 import { db, latest, type Versioned } from '../../packages/compiler/test/fixtures/corpus/low-stock.js';
 const q = metricSource('availability', { tenant: 'acme', start: 0, week: 0 }, false);

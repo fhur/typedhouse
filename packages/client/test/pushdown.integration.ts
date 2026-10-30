@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { canonicalKey, crossJoin, join, unionAll, val, col } from '@chql/core';
+import { canonicalKey, crossJoin, join, unionAll, val, col } from '@typedhouse/core';
 import { components, parts } from './differential-arbitrary.js';
 import { createClickHouseBackend, type Backend } from '../src/index.js';
 import { differential, multiplicityDiff, decodedRecord } from './backend-harness.js';
@@ -52,11 +52,11 @@ it('anchors duplicate, empty-array, NULL, tenant and shared-occurrence cardinali
   expect(await check({ ...anchor, fence: 'limit', take: 3, offset: 1 })).toEqual(Array(3).fill(decoded[0]));
 });
 it('preserves nested occurrence paths, same-side residuals, swapped names and shared consumers', async () => {
-  const nested = join({ t0: components, '__chql_input': parts }).on(r => r.t0.tenant.eq(r.__chql_input.tenant));
-  const query = crossJoin({ t0: nested, '__chql_input': parts })
+  const nested = join({ t0: components, '__typedhouse_input': parts }).on(r => r.t0.tenant.eq(r.__typedhouse_input.tenant));
+  const query = crossJoin({ t0: nested, '__typedhouse_input': parts })
     .where(r => r.t0.t0.tenant.eq('acme')
-      .and(r.t0.t0.id.eq('a').or(r.t0.__chql_input.id.eq('q')))
-      .and(r.__chql_input.tenant.eq('other')))
+      .and(r.t0.t0.id.eq('a').or(r.t0.__typedhouse_input.id.eq('q')))
+      .and(r.__typedhouse_input.tenant.eq('other')))
     .map(r => ({ tenant: r.t0.t0.id, id: r.t0.t0.tenant }))
     .where(r => r.id.eq('acme').and(r.tenant.eq('b')));
   const rewritten = rewriteRel(query.ir);
@@ -70,12 +70,12 @@ it('preserves nested occurrence paths, same-side residuals, swapped names and sh
   expect(await differential(backends, branches, true)).toEqual([{ id: 'a', tenant: 'acme' }, { id: 'a', tenant: 'acme' }, { id: 'b', tenant: 'acme' }]);
 });
 it('retains NULL-as-false and element-dependent predicates after left expansion', async () => {
-  const expanded = components.leftArrayJoin(r => r.ids, '__chql_element');
-  const query = expanded.where(r => r.category.eq(val(null, col.Nullable(col.String))).or(r.__chql_element.eq('')))
-    .map(r => ({ id: r.id, part: r.__chql_element }));
+  const expanded = components.leftArrayJoin(r => r.ids, '__typedhouse_element');
+  const query = expanded.where(r => r.category.eq(val(null, col.Nullable(col.String))).or(r.__typedhouse_element.eq('')))
+    .map(r => ({ id: r.id, part: r.__typedhouse_element }));
   expect(rewriteRel(query.ir).hits.PushFilterArrayJoin).toBe(0);
   expect(await differential(backends, query)).toEqual([{ id: 'c', part: '' }]);
-  const independent = expanded.where(r => r.category.isNull()).map(r => ({ id: r.id, part: r.__chql_element }));
+  const independent = expanded.where(r => r.category.isNull()).map(r => ({ id: r.id, part: r.__typedhouse_element }));
   expect(rewriteRel(independent.ir).hits.PushFilterArrayJoin).toBe(1);
   expect(await differential(backends, independent)).toEqual([{ id: 'c', part: '' }]);
 });
@@ -90,7 +90,7 @@ it('executes 500 bounded shrinkable multi-operator recipes with actual rule/topo
       const sqls = backends.map(b => { const p = b.compile(build(recipe).ir).compiled; return { name: b.name, sql: p.sql, params: p.params }; });
       throw new Error(`${String(cause)}\n${JSON.stringify(sqls)}`, { cause });
     }
-  }), { seed: Number(process.env.CHQL_PUSHDOWN_SEED ?? seed), numRuns: 500, ...(process.env.CHQL_PUSHDOWN_PATH ? { path: process.env.CHQL_PUSHDOWN_PATH } : {}) });
+  }), { seed: Number(process.env.TYPEDHOUSE_PUSHDOWN_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_PUSHDOWN_PATH ? { path: process.env.TYPEDHOUSE_PUSHDOWN_PATH } : {}) });
   console.info('pushdown differential', { runs: result.numRuns, seed: result.seed, milliseconds: Math.round(performance.now() - start), rules: [...hits], topologies: shapes.size });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(500);

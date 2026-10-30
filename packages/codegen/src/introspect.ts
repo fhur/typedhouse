@@ -1,5 +1,5 @@
 import type { ClickHouseClient } from '@clickhouse/client';
-import { parseCHType, type CHType } from '@chql/core';
+import { parseCHType, type CHType } from '@typedhouse/core';
 
 export interface SchemaColumn { name: string; type: CHType; position: number; defaultKind: string; comment: string }
 export interface SchemaTable { name: string; columns: SchemaColumn[]; engine: string; sortingKey: string[]; partitionKey: string[]; primaryKey: string[] }

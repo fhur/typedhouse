@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { col, from, table, val } from '@chql/core';
-import { compile, emitNaive } from '@chql/compiler';
+import { col, from, table, val } from '@typedhouse/core';
+import { compile, emitNaive } from '@typedhouse/compiler';
 import { fn, agg } from '../../codegen/test/snapshots/functions.js';
 import { createClickHouseBackend, createClientFromBackend } from '../src/index.js';
 import { collect } from './backend-harness.js';

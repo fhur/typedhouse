@@ -15,8 +15,13 @@ One tenant filter after `unionAll` becomes a filter inside each input. The same 
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table, unionAll } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  table,
+  unionAll,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const current = table(
   'current_events',
@@ -60,8 +65,8 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
-  `__chql_input`.`tenant` AS `tenant`
+  `__typedhouse_input`.`id` AS `id`,
+  `__typedhouse_input`.`tenant` AS `tenant`
 FROM
   (
     SELECT
@@ -71,11 +76,11 @@ FROM
       `current_events`
     WHERE
       `tenant` = {p0:String}
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 UNION ALL
 SELECT
-  `__chql_input`.`id` AS `id`,
-  `__chql_input`.`tenant` AS `tenant`
+  `__typedhouse_input`.`id` AS `id`,
+  `__typedhouse_input`.`tenant` AS `tenant`
 FROM
   (
     SELECT
@@ -85,7 +90,7 @@ FROM
       `archived_events`
     WHERE
       `tenant` = {p0:String}
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

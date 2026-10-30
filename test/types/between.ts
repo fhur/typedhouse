@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, countIf, from, sum, table, val, type Expr, type NodeId } from '@chql/core';
+import { col, columnExpr, countIf, from, sum, table, val, type Expr, type NodeId } from '@typedhouse/core';
 import { stockHistory } from '../../packages/compiler/test/fixtures/corpus/stock-history.js';
 const id = 1 as NodeId;
 const row = columnExpr(col.UInt64, id, ['x'], 'x', 'row');

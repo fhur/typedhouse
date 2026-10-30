@@ -1,4 +1,4 @@
-import { col, columnExpr, sum, val, type NodeId } from '@chql/core';
+import { col, columnExpr, sum, val, type NodeId } from '@typedhouse/core';
 const id = 1 as NodeId;
 const n = columnExpr(col.UInt32, id, ['n'], 'n', 'row');
 const big = columnExpr(col.UInt64, id, ['big'], 'big', 'row');

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { cast, col, count, crossJoin, from, join, max, scalar, scalarDescriptor, sum, table, unionAll, val } from '@chql/core';
+import { cast, col, count, crossJoin, from, join, max, scalar, scalarDescriptor, sum, table, unionAll, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { planCtes } from '../src/plan-ctes.js';
 import { planSelects } from '../src/plan-selects.js';
@@ -55,18 +55,18 @@ describe('identity CTE planning', () => {
     const compiled = compile(q.ir);
     expect(definitions(compiled.sql)).toEqual(['t0', 't1']);
     expect(compiled.sql.match(/LEFT ARRAY JOIN/g)).toHaveLength(1);
-    expect(compiled.sql).toContain('`__chql_leaf_8`');
+    expect(compiled.sql).toContain('`__typedhouse_leaf_8`');
     expect(compiled.columns).toEqual(emitNaive(q.ir).columns);
   });
   it('reserves physical tables, output names and internals and renames logical join aliases only physically', () => {
-    const s = from(table('t0', { id: col.String, __chql_input: col.String, t1: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-    const q = join({ t2: s, __chql_input: s, t0: s }).on(r => [r.t2.id.eq(r.__chql_input.id), r.t2.id.eq(r.t0.id)]);
+    const s = from(table('t0', { id: col.String, __typedhouse_input: col.String, t1: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    const q = join({ t2: s, __typedhouse_input: s, t0: s }).on(r => [r.t2.id.eq(r.__typedhouse_input.id), r.t2.id.eq(r.t0.id)]);
     const p = planCtes(q.ir), before = JSON.stringify(q.ir);
     expect([...p.names.values()]).toEqual(['t2']);
     expect(p.aliases.get(q.ir)?.get('t2')).toBe('t2_');
     expect(p.aliases.get(q.ir)?.get('t0')).toBe('t0_');
     const out = compile(q.ir);
-    expect(out.sql).toContain('`t2_`.`id` = `__chql_input_`.`id`');
+    expect(out.sql).toContain('`t2_`.`id` = `__typedhouse_input_`.`id`');
     expect(out.sql).toContain('FROM `t0`');
     expect(out.sql).toContain('AS `t0_`');
     expect(JSON.stringify(q.ir)).toBe(before);
@@ -145,6 +145,6 @@ describe('identity CTE planning', () => {
     const sql = compile(latest.ir).sql;
     expect(sql).toBe('WITH `t0` AS (SELECT `id`, `version` FROM `items` WHERE `id` = {p0:String})\nSELECT `m`.`id` AS `id`\nFROM `t0` AS `m`\nINNER ALL JOIN (SELECT `id`, max(`version`) AS `version` FROM `t0` GROUP BY `id`) AS `v` ON `m`.`id` = `v`.`id` AND `m`.`version` = `v`.`version`');
     const total = q.aggregate(g => ({ n: sum(g.amount) }));
-    expect(compile(q.map(r => ({ id: r.id, n: scalar(total) })).ir).sql).toBe('WITH `t0` AS (SELECT `id`, `amount` FROM `items` WHERE `id` = {p0:String}) SELECT `__chql_input`.`id` AS `id`, (SELECT sum(`amount`) AS `n` FROM `t0`) AS `n` FROM (SELECT `t0`.`id`, `t0`.`amount` FROM `t0`) AS `__chql_input`');
+    expect(compile(q.map(r => ({ id: r.id, n: scalar(total) })).ir).sql).toBe('WITH `t0` AS (SELECT `id`, `amount` FROM `items` WHERE `id` = {p0:String}) SELECT `__typedhouse_input`.`id` AS `id`, (SELECT sum(`amount`) AS `n` FROM `t0`) AS `n` FROM (SELECT `t0`.`id`, `t0`.`amount` FROM `t0`) AS `__typedhouse_input`');
   });
 });

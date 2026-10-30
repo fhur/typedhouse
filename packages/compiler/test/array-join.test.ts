@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, columnExpr, from, table, relNode, flatOutput, val, type Rel } from '@chql/core';
+import { col, columnExpr, from, table, relNode, flatOutput, val, type Rel } from '@typedhouse/core';
 import { emitNaive } from '../src/index.js';
 const t = table('t`', { id: col.UInt32, a: col.Array(col.Tuple({ label: col.String })) }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [], source: { kind: 'test' } });
 it('retains immutable scan hints, source capabilities and exact descriptors', () => {

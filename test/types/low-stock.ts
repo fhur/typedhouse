@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, exp, from, sum, table, uniq, type Infer, type Query, type IsLive, type Expr } from '@chql/core';
+import { col, exp, from, sum, table, uniq, type Infer, type Query, type IsLive, type Expr } from '@typedhouse/core';
 import { latest, lowStockCategories, cIndices, type ComponentIndicesRow, type Versioned } from '../../packages/compiler/test/fixtures/corpus/low-stock.js';
 const result = lowStockCategories('acme');
 type Result = { category: string; components: bigint; stockIndex: number; leadTimeIndex: number; priceIndex: number; warned: bigint };

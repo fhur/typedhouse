@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, createKnownFunctions, from, table, val, type ExprValue, type Infer, type NodeId } from '@chql/core';
+import { col, columnExpr, createKnownFunctions, from, table, val, type ExprValue, type Infer, type NodeId } from '@typedhouse/core';
 import { fn, agg } from '../../packages/codegen/test/snapshots/functions.js';
 const q = from(table('items', { id: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 const row = columnExpr(col.String, 1 as NodeId, ['id'], 'id', 'row');

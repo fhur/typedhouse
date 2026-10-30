@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { expect, it, vi } from 'vitest';
-import { col, count, crossJoin, join, scalar, unionAll, val, type Rel } from '@chql/core';
+import { col, count, crossJoin, join, scalar, unionAll, val, type Rel } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 import * as structural from '../src/validate-structure.js';
 import { categories, mutation, recipes, seed, source, type Recipe } from './validation-arbitrary.js';

@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, maxMerge, type Expr, type NodeId } from '@chql/core';
+import { col, columnExpr, maxMerge, type Expr, type NodeId } from '@typedhouse/core';
 import type { DescriptorValue } from '../../packages/core/src/catalog/descriptor-types.js';
 
 type Phantoms<E> = E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;

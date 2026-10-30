@@ -10,7 +10,7 @@ import { introspect } from '../src/introspect.js';
 import { renderSchema, renderFunctions } from '../src/render.js';
 import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
-import type { CHType } from '@chql/core';
+import type { CHType } from '@typedhouse/core';
 const exec = promisify(execFile);
 const root = resolve('.');
 const snapshots = resolve('packages/codegen/test/snapshots');
@@ -22,7 +22,7 @@ async function cli(command: string, extra: string[] = [], env: NodeJS.ProcessEnv
   } catch (error) { const e = error as { code: number; stdout: string; stderr: string }; return { status: e.code, output: e.stdout + e.stderr }; }
 }
 beforeAll(async () => {
-  cwd = await mkdtemp(join(tmpdir(), 'chql-codegen-'));
+  cwd = await mkdtemp(join(tmpdir(), 'typedhouse-codegen-'));
   container = await new GenericContainer('clickhouse/clickhouse-server:24.8').withEnvironment({ CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'test-secret', CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1' }).withExposedPorts(8123).withWaitStrategy(Wait.forHttp('/ping', 8123)).start();
   url = `http://${container.getHost()}:${container.getMappedPort(8123)}`;
   client = createClient({ url, username: 'fixture', password: 'test-secret' });
@@ -43,7 +43,7 @@ it('captures live metadata and compares explicit generated snapshots', async () 
   expect(schema.functions.length).toBeGreaterThan(1000);
   expect(schema.functions.find(f => f.name === 'sum')!.isAggregate).toBe(true);
   for (const [name, content] of [['schema.ts', renderSchema(schema)], ['functions.ts', renderFunctions(schema)]]) {
-    if (process.env.CHQL_UPDATE_CODEGEN_SNAPSHOTS === '1') { await mkdir(snapshots, { recursive: true }); await writeFile(join(snapshots, name!), content!); }
+    if (process.env.TYPEDHOUSE_UPDATE_CODEGEN_SNAPSHOTS === '1') { await mkdir(snapshots, { recursive: true }); await writeFile(join(snapshots, name!), content!); }
     expect(content).toBe(await readFile(join(snapshots, name!), 'utf8'));
   }
 });
@@ -102,7 +102,7 @@ it('preserves live numeric named-tuple field order in imported generated descrip
     await client.command({ query: "INSERT INTO adversarial_numeric VALUES (('first', 7, 2))" });
     expect(await (await client.query({ query: 'SELECT tupleElement(v, 1) AS first, toTypeName(tupleElement(v, 1)) AS type FROM adversarial_numeric', format: 'JSONEachRow' })).json()).toEqual([{ first: 'first', type: 'String' }]);
     expect((await cli('generate')).status).toBe(0);
-    const source = (await readFile(join(cwd, 'generated/schema.ts'), 'utf8')).replace("'@chql/core'", JSON.stringify(pathToFileURL(join(root, 'packages/core/dist/index.js')).href));
+    const source = (await readFile(join(cwd, 'generated/schema.ts'), 'utf8')).replace("'@typedhouse/core'", JSON.stringify(pathToFileURL(join(root, 'packages/core/dist/index.js')).href));
     const javascript = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
     const generated = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`) as { db: { adversarial_numeric: { columns: { v: CHType } } } };
     expect(generated.db.adversarial_numeric.columns.v).toEqual(live);
@@ -117,7 +117,7 @@ it('preserves nested positional tuple semantics through the built CLI and built 
     expect(rows).toEqual([{ first: 'inner-first', last: 'safe' }]);
     const live = (await introspect(client, 'fixture')).tables.find(t => t.name === 'adversarial_nested')!.columns[0]!.type;
     expect((await cli('generate')).status).toBe(0);
-    const source = (await readFile(join(cwd, 'generated/schema.ts'), 'utf8')).replace("'@chql/core'", JSON.stringify(pathToFileURL(join(root, 'packages/core/dist/index.js')).href));
+    const source = (await readFile(join(cwd, 'generated/schema.ts'), 'utf8')).replace("'@typedhouse/core'", JSON.stringify(pathToFileURL(join(root, 'packages/core/dist/index.js')).href));
     const javascript = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
     const generated = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`) as { db: { adversarial_nested: { columns: { v: CHType } } } };
     expect(generated.db.adversarial_nested.columns.v).toEqual(live);

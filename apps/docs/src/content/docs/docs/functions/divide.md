@@ -13,8 +13,8 @@ sidebar:
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -47,8 +47,8 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
-  `__chql_input`.`durationMs` / {p0:Float64} AS `durationSeconds`
+  `__typedhouse_input`.`id` AS `id`,
+  `__typedhouse_input`.`durationMs` / {p0:Float64} AS `durationSeconds`
 FROM
   (
     SELECT
@@ -56,7 +56,7 @@ FROM
       `durationMs`
     FROM
       `events`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

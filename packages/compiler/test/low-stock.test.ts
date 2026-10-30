@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
-import { col, from, print, sum, table } from '@chql/core';
+import { col, from, print, sum, table } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { expectedParams, expectedSql, latest, query } from './fixtures/corpus/low-stock.js';
 it('emits the literal unchanged spec SQL and Params', () => {

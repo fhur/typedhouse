@@ -1,4 +1,4 @@
-import type { CHType, ExprNode } from '@chql/core';
+import type { CHType, ExprNode } from '@typedhouse/core';
 import { supportedResultDescriptor } from './resolve-known.js';
 
 /** Shape safety precedes this semantic guard. Text remains an author assertion. */

@@ -12,7 +12,7 @@ for (const entry of await readdir(dist, { recursive: true })) {
   if (!entry.endsWith('.html')) continue;
   const html = await readFile(join(dist, entry), 'utf8');
   assert.match(html, /<title>[^<]*TypedHouse[^<]*<\/title>/, `${entry}: missing TypedHouse page title`);
-  assert.ok(!/<strong>chql<\/strong>|>chql<\/a>|chql TypeScript source|Interactive chql playground/.test(html), `${entry}: stale public branding`);
+  assert.ok(!/<strong>typedhouse<\/strong>|>typedhouse<\/a>|typedhouse TypeScript source|Interactive typedhouse playground/.test(html), `${entry}: stale public branding`);
   assert.equal(html.split('https://www.googletagmanager.com/gtag/js?id=G-DNEY4MRCR4').length - 1, 1, `${entry}: expected one Google tag loader`);
   assert.equal(html.split("gtag('config', 'G-DNEY4MRCR4')").length - 1, 1, `${entry}: expected one GA configuration`);
   for (const match of html.matchAll(/href="(\/[^"?#]*)(?:[?#][^"]*)?"/g)) {
@@ -39,7 +39,7 @@ assert.match(home, /property="og:site_name" content="TypedHouse"/);
 assert.match(home, /https:\/\/github\.com\/fhur\/typedhouse/);
 assert.match(await readFile(join(dist, 'llms.txt'), 'utf8'), /^# TypedHouse\n/);
 assert.match(await readFile(join(dist, 'blog/rss.xml'), 'utf8'), /<title>TypedHouse engineering notes<\/title>/);
-assert.match(await readFile(join(dist, 'docs/getting-started.md'), 'utf8'), /@chql\/core/);
+assert.match(await readFile(join(dist, 'docs/getting-started.md'), 'utf8'), /@typedhouse\/core/);
 const share = home.match(/#v1=([A-Za-z0-9_-]+)/);
 assert.ok(share, 'Homepage example needs an editable playground link');
 const sharedSource = gunzipSync(Buffer.from(share[1], 'base64url')).toString('utf8');

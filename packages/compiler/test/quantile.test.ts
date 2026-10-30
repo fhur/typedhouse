@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { quantile, quantileIf, from, table, col, val, exprNode, relNode, flatOutput, columnExpr, unionAll, scalar } from '@chql/core';
+import { quantile, quantileIf, from, table, col, val, exprNode, relNode, flatOutput, columnExpr, unionAll, scalar } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 const q = from(table('q', { n: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 it('numbers level Params before operands and filters, sharing only graph identity', () => {

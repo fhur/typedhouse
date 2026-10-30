@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, type CHType } from '@chql/core';
+import { col, type CHType } from '@typedhouse/core';
 import { decoder } from '../src/decode.js';
 it('decodes scalar and structured DateTime ISO UTC/offset values recursively', () => {
   for (const type of [{ kind: 'scalar', name: 'DateTime' }, col.DateTime().type, col.DateTime('Europe/Amsterdam').type] satisfies CHType[]) {

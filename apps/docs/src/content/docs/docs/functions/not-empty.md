@@ -13,8 +13,8 @@ sidebar:
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const articles = table(
   'articles',
@@ -49,9 +49,9 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
-  notEmpty(`__chql_input`.`title`) AS `hasTitle`,
-  notEmpty(`__chql_input`.`tags`) AS `hasTags`
+  `__typedhouse_input`.`id` AS `id`,
+  notEmpty(`__typedhouse_input`.`title`) AS `hasTitle`,
+  notEmpty(`__typedhouse_input`.`tags`) AS `hasTags`
 FROM
   (
     SELECT
@@ -60,7 +60,7 @@ FROM
       `tags`
     FROM
       `articles`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

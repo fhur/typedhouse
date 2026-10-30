@@ -1,6 +1,6 @@
 // Bounded supported API corpus. Coverage and remaining contracts: test/types/corpus-coverage.json.
 // No query result annotations: declaration snapshots must observe actual inference.
-import { from, join, unionAll, val, col, max, argMax, avg, quantile, sum, scalar, count, countIf, uniqExact } from '@chql/core';
+import { from, join, unionAll, val, col, max, argMax, avg, quantile, sum, scalar, count, countIf, uniqExact } from '@typedhouse/core';
 import { db, components, cIndices, forTenant, isActive, latest, categoryRollup, lowStockCategories } from './low-stock.js';
 import { stockHistory } from './stock-history.js';
 const parts = from(db.entity_off_the_shelf_part);

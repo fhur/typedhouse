@@ -1,4 +1,4 @@
-export declare const projectionEnrichment: import("@chql/core").Query<{
+export declare const projectionEnrichment: import("@typedhouse/core").Query<{
     category: string;
     matched: bigint;
     mpns: (string | null)[];
@@ -20,27 +20,27 @@ export declare const projectionEnrichment: import("@chql/core").Query<{
     matched_part_ids: string[];
     countOfParts: bigint;
     updatedAt: Date;
-}, import("@chql/core").ExpressionCaps<{
+}, import("@typedhouse/core").ExpressionCaps<{
     live: false;
 }>, {
-    readonly category: import("@chql/core").Expr<string, "category", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly category: import("@typedhouse/core").Expr<string, "category", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "String";
             };
         };
     };
-    readonly matched: import("@chql/core").Expr<bigint, "matched", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly matched: import("@typedhouse/core").Expr<bigint, "matched", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "UInt64";
             };
         };
     };
-    readonly mpns: import("@chql/core").Expr<(string | null)[], "mpns", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly mpns: import("@typedhouse/core").Expr<(string | null)[], "mpns", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "Array";
                 inner: {
@@ -53,8 +53,8 @@ export declare const projectionEnrichment: import("@chql/core").Query<{
             };
         };
     };
-    readonly firstDesc: import("@chql/core").Expr<string | null, "firstDesc", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly firstDesc: import("@typedhouse/core").Expr<string | null, "firstDesc", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "Nullable";
                 inner: {
@@ -64,52 +64,52 @@ export declare const projectionEnrichment: import("@chql/core").Query<{
             };
         };
     };
-    readonly age: import("@chql/core").Expr<bigint, "age", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly age: import("@typedhouse/core").Expr<bigint, "age", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "Int64";
             };
         };
     };
-    readonly tier: import("@chql/core").Expr<string, "tier", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly tier: import("@typedhouse/core").Expr<string, "tier", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "String";
             };
         };
     };
-    readonly source: import("@chql/core").Expr<string, "source", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
-            readonly type: NonNullable<import("@chql/core").CHType | null>;
+    readonly source: import("@typedhouse/core").Expr<string, "source", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
+            readonly type: NonNullable<import("@typedhouse/core").CHType | null>;
         };
     };
-    readonly tenantId: import("@chql/core").Expr<string, "tenantId", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly tenantId: import("@typedhouse/core").Expr<string, "tenantId", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "String";
             };
         };
     };
-    readonly entityId: import("@chql/core").Expr<string, "entityId", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly entityId: import("@typedhouse/core").Expr<string, "entityId", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "String";
             };
         };
     };
-    readonly state: import("@chql/core").Expr<string, "state", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly state: import("@typedhouse/core").Expr<string, "state", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "String";
             };
         };
     };
-    readonly part_specifications: import("@chql/core").Expr<{
+    readonly part_specifications: import("@typedhouse/core").Expr<{
         id: string;
         mpn: string | null;
         manufacturer: string | null;
@@ -117,14 +117,14 @@ export declare const projectionEnrichment: import("@chql/core").Query<{
         package: string | null;
         part_type: string | null;
     }[], "part_specifications", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "Array";
                 inner: {
                     kind: "Tuple";
                     items: {
                         name?: string;
-                        type: import("@chql/core").CHType;
+                        type: import("@typedhouse/core").CHType;
                     }[] & ({
                         readonly name: "id";
                         readonly type: {
@@ -181,8 +181,8 @@ export declare const projectionEnrichment: import("@chql/core").Query<{
             };
         };
     };
-    readonly matched_part_ids: import("@chql/core").Expr<string[], "matched_part_ids", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly matched_part_ids: import("@typedhouse/core").Expr<string[], "matched_part_ids", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "Array";
                 inner: {
@@ -192,16 +192,16 @@ export declare const projectionEnrichment: import("@chql/core").Query<{
             };
         };
     };
-    readonly countOfParts: import("@chql/core").Expr<bigint, "countOfParts", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly countOfParts: import("@typedhouse/core").Expr<bigint, "countOfParts", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "UInt64";
             };
         };
     };
-    readonly updatedAt: import("@chql/core").Expr<Date, "updatedAt", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly updatedAt: import("@typedhouse/core").Expr<Date, "updatedAt", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "DateTime64";
                 precision: 3;

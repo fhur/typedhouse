@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { col, table, from, join, unionAll, count, uniqExact } from '@chql/core';
+import { col, table, from, join, unionAll, count, uniqExact } from '@typedhouse/core';
 
 export const seed = 20261027;
 const meta = { engine: 'Memory', sortingKey: [], partitionKey: [] };

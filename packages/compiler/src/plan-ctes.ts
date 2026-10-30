@@ -1,4 +1,4 @@
-import { outputLeaves, type ExprNode, type Rel } from '@chql/core';
+import { outputLeaves, type ExprNode, type Rel } from '@typedhouse/core';
 
 export interface CtePlan {
   /** Global WITH scope: every definition sees only earlier dependencies. */
@@ -30,7 +30,7 @@ export function planCtes(root: Rel): CtePlan {
   const visited = new Set<Rel>();
   const ordered: Rel[] = [];
   const safe = new Map<Rel, boolean>();
-  const reserved = new Set<string>(['__chql_input', '__chql_element']);
+  const reserved = new Set<string>(['__typedhouse_input', '__typedhouse_element']);
   function visit(rel: Rel): void {
     if (visited.has(rel)) return;
     visited.add(rel);
@@ -87,11 +87,11 @@ export function planCtes(root: Rel): CtePlan {
   for (const rel of ordered) if (rel.kind === 'Join') for (const name of aliases.get(rel)!.values()) reserved.add(name);
   const fresh = (base: string) => { let name = base; while (reserved.has(name)) name += '_'; reserved.add(name); return name; };
   // Preserve established internal spelling when it does not capture user data.
-  reserved.delete('__chql_input'); reserved.delete('__chql_element');
+  reserved.delete('__typedhouse_input'); reserved.delete('__typedhouse_element');
   for (const rel of ordered) {
     for (const l of outputLeaves(rel.output)) reserved.add(l.name);
     if (rel.kind === 'Scan') reserved.add(rel.table.name);
     if (rel.kind === 'Join') for (const a of aliases.get(rel)!.values()) reserved.add(a);
   }
-  return Object.freeze({ definitions: Object.freeze(definitions), names, uses, aliases, inputAlias: fresh('__chql_input'), elementAlias: fresh('__chql_element') });
+  return Object.freeze({ definitions: Object.freeze(definitions), names, uses, aliases, inputAlias: fresh('__typedhouse_input'), elementAlias: fresh('__typedhouse_element') });
 }

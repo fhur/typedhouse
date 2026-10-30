@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { crossJoin, join, max, scalar, sum, unionAll } from '@chql/core';
+import { crossJoin, join, max, scalar, sum, unionAll } from '@typedhouse/core';
 import { buildTree, nativeTree, recipeArbitrary as pruningRecipes, source, topology, type Tree } from './pruning-arbitrary.js';
 export const seed = 20261112;
 export interface Recipe {
@@ -38,9 +38,9 @@ export function build(r: Recipe) {
   } else {
     const a = shared.where(x => x.id.eq('a')).map(x => ({ id: x.id }));
     const b = shared.where(x => x.id.ne('b')).map(x => ({ amount: x.amount }));
-    const pair = crossJoin({ t0: a, __chql_input: b });
+    const pair = crossJoin({ t0: a, __typedhouse_input: b });
     if (r.nested) return pair;
-    q = pair.map(x => ({ id: x.t0.id, amount: x.__chql_input.amount }));
+    q = pair.map(x => ({ id: x.t0.id, amount: x.__typedhouse_input.amount }));
   }
   return q;
 }
@@ -59,6 +59,6 @@ export function native(r: Recipe): string {
 }
 export function decodeNative(r: Recipe, row: { id: string; amount: string; first?: string; second?: string }) {
   if (r.mode === 'scalar') return { id: row.id, amount: BigInt(row.amount), first: BigInt(row.first!), second: BigInt(row.second!) };
-  if (r.mode === 'diamond' && r.nested) return { t0: { id: row.id }, __chql_input: { amount: BigInt(row.amount) } };
+  if (r.mode === 'diamond' && r.nested) return { t0: { id: row.id }, __typedhouse_input: { amount: BigInt(row.amount) } };
   return { id: row.id, amount: BigInt(row.amount) };
 }

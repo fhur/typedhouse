@@ -1,4 +1,4 @@
-import { col, from, table } from '@chql/core';
+import { col, from, table } from '@typedhouse/core';
 
 const events = table(
   'events',

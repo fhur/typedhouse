@@ -1,4 +1,4 @@
-import { col, columnExpr, dateDiff, multiIf, now, val, type Expr, type Mode, type NodeId } from '@chql/core';
+import { col, columnExpr, dateDiff, multiIf, now, val, type Expr, type Mode, type NodeId } from '@typedhouse/core';
 const id = 1 as NodeId;
 const day = columnExpr(col.DateTime64(3), id, ['d'], 'd', 'row');
 const ok = columnExpr(col.Bool, id, ['ok'], 'ok', 'row');

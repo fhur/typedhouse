@@ -15,8 +15,13 @@ The current typed surface supports only `String` and `Nullable(String)`, not arb
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table, uniqExact } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  table,
+  uniqExact,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const visits = table(
   'visits',
@@ -46,12 +51,12 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`campaign` AS `campaign`,
-  uniqExact(`__chql_input`.`visitor`) AS `uniqueVisitors`
+  `__typedhouse_input`.`campaign` AS `campaign`,
+  uniqExact(`__typedhouse_input`.`visitor`) AS `uniqueVisitors`
 FROM
-  `visits` AS `__chql_input`
+  `visits` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`campaign`
+  `__typedhouse_input`.`campaign`
 ```
 
 Parameters:

@@ -15,8 +15,13 @@ The current typed surface accepts only `String` or `Nullable(String)` values and
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table, uniqExactIf } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  table,
+  uniqExactIf,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const visits = table(
   'visits',
@@ -50,15 +55,15 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`campaign` AS `campaign`,
+  `__typedhouse_input`.`campaign` AS `campaign`,
   uniqExactIf (
-    `__chql_input`.`visitor`,
-    `__chql_input`.`converted`
+    `__typedhouse_input`.`visitor`,
+    `__typedhouse_input`.`converted`
   ) AS `convertedVisitors`
 FROM
-  `visits` AS `__chql_input`
+  `visits` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`campaign`
+  `__typedhouse_input`.`campaign`
 ```
 
 Parameters:

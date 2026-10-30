@@ -2,7 +2,7 @@ import { beforeAll, afterAll, it, expect } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { col, table, from, crossJoin, join, unionAll, scalar, count, val } from '@chql/core';
+import { col, table, from, crossJoin, join, unionAll, scalar, count, val } from '@typedhouse/core';
 import { createClient, QueryError } from '../src/index.js';
 let container: StartedTestContainer;
 let client: ReturnType<typeof createClient>;

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { Expr, cast, col, table, from, val, sum, count, scalar, unionAll, exprNode, relNode, flatOutput, type ExprNode, type CHType } from '@chql/core';
+import { Expr, cast, col, table, from, val, sum, count, scalar, unionAll, exprNode, relNode, flatOutput, type ExprNode, type CHType } from '@typedhouse/core';
 import { emitNaive, quoteIdentifier } from '../src/index.js';
 const q = from(table('cast', { ['a.b`']: col.UInt32, text: col.String, n: col.Nullable(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 function project(e: ExprNode) { const output = flatOutput([['result', e.type!]]); return relNode({ kind: 'Project', input: q.ir, exprs: { result: e }, output, columns: output.columns }); }
@@ -20,7 +20,7 @@ it('preserves Params, root scope, aggregate traversal and reordered sort referen
   const plan = emitNaive(result.ir);
   expect(plan.params).toEqual({ p0: '7', p1: '7' });
   expect(plan.sql.match(/\{p0:String\}/g)).toHaveLength(2);
-  expect(plan.sql).toContain(`CAST(\`__chql_input\`.${quoteIdentifier('a.b`')} AS String)`);
+  expect(plan.sql).toContain(`CAST(\`__typedhouse_input\`.${quoteIdentifier('a.b`')} AS String)`);
   expect(JSON.stringify(result.ir)).toBe(before);
   const sorted = q.orderBy(r => r.text).orderBy(r => cast(r['a.b`'], col.String)).thenBy(r => cast(r.text, col.Float64));
   expect(() => emitNaive(sorted.ir)).not.toThrow();

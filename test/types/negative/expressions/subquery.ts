@@ -1,4 +1,4 @@
-import { from, table, col, scalar, count, sum } from '@chql/core';
+import { from, table, col, scalar, count, sum } from '@typedhouse/core';
 const q = from(table('s', { id: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 scalar(q); // expect: TS2345 Types of property 'ir' are incompatible
 scalar(q.groupBy(r => r.id).aggregate(() => count())); // expect: TS2345 Types of property 'ir' are incompatible

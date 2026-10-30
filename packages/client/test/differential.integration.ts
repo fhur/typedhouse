@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { canonicalKey } from '@chql/core';
+import { canonicalKey } from '@typedhouse/core';
 import { createClickHouseBackend, type Backend } from '../src/index.js';
 import { differential, multiplicityDiff, decodedRecord } from './backend-harness.js';
 import { anchors, build, recipeArbitrary, seed, topology, type Tree, type Recipe } from './differential-arbitrary.js';
@@ -105,7 +105,7 @@ it('shrinks and replays duplicate loss injected into real official-driver result
   expect(replay.counterexample).toEqual(result.counterexample);
   expect(String(replay.errorInstance)).toContain('multiplicity diff');
 }, 120000);
-// Replay: CHQL_DIFF_SEED=20261027 CHQL_DIFF_PATH='...' pnpm test:compiler-integration packages/client/test/differential.integration.ts
+// Replay: TYPEDHOUSE_DIFF_SEED=20261027 TYPEDHOUSE_DIFF_PATH='...' pnpm test:compiler-integration packages/client/test/differential.integration.ts
 it('executes 60 shrinkable bounded query topologies through decoded Backend plugins', async () => {
   const shapes = new Set<string>();
   const started = performance.now();
@@ -119,7 +119,7 @@ it('executes 60 shrinkable bounded query topologies through decoded Backend plug
       });
       throw new Error(`${String(cause)}\n${JSON.stringify(diagnostics)}`, { cause });
     }
-  }), { seed: Number(process.env.CHQL_DIFF_SEED ?? seed), numRuns: 60, ...(process.env.CHQL_DIFF_PATH ? { path: process.env.CHQL_DIFF_PATH } : {}) });
+  }), { seed: Number(process.env.TYPEDHOUSE_DIFF_SEED ?? seed), numRuns: 60, ...(process.env.TYPEDHOUSE_DIFF_PATH ? { path: process.env.TYPEDHOUSE_DIFF_PATH } : {}) });
   console.info('bounded differential', { runs: details.numRuns, topologies: shapes.size, milliseconds: Math.round(performance.now() - started), seed: details.seed });
   if (details.failed) throw new Error(`seed=${details.seed} path=${details.counterexamplePath} shrinks=${details.numShrinks}\nminimized recipe=${JSON.stringify(details.counterexample)}\n${details.errorInstance instanceof Error ? details.errorInstance.stack : String(details.errorInstance)}`);
   expect(details.numRuns).toBe(60);

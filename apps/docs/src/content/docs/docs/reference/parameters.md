@@ -36,7 +36,7 @@ The output row remains `{ tenant: string; category: string; id: number }`. The q
 
 ## Compile a query
 
-Core has no implicit compiler dependency. Import `registerCompiler` from `@chql/core` and `compile` from `@chql/compiler`, then call `registerCompiler(compile)` once before `query.toSQL()`.
+Core has no implicit compiler dependency. Import `registerCompiler` from `@typedhouse/core` and `compile` from `@typedhouse/compiler`, then call `registerCompiler(compile)` once before `query.toSQL()`.
 
 Alternatively use `compile(query.ir)` directly. The compiler accepts a relational IR node, not a Query wrapper. `compile` applies simplifying rewrites; `emitNaive(query.ir)` is the separate baseline emitter, useful for comparing SQL structure.
 
@@ -49,7 +49,7 @@ Alternatively use `compile(query.ir)` directly. The compiler accepts a relationa
 - `columnPaths?`: paths for reconstructing nested output rows.
 - `nodes`: relational nodes associated with compilation.
 
-Descriptors are not a complete TypeScript typechecker. `@chql/client` uses the compiled output to decode supported values; use the client rather than assuming every JSON result matches your application type.
+Descriptors are not a complete TypeScript typechecker. `@typedhouse/client` uses the compiled output to decode supported values; use the client rather than assuming every JSON result matches your application type.
 
 ## Errors and corrections
 

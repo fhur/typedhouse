@@ -1,4 +1,4 @@
-import { exprNode as constructExpr, methodCatalog, print, type CHType, type ExprNode, type Rel } from '@chql/core';
+import { exprNode as constructExpr, methodCatalog, print, type CHType, type ExprNode, type Rel } from '@typedhouse/core';
 import { resolveAggregate, resolveCall } from './resolve.js';
 
 type Ref = Extract<ExprNode, { kind: 'ColumnRef' }>;
