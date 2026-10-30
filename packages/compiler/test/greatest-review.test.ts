@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, from, greatest, table, val } from '@chql/core';
+import { col, from, greatest, table, val } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 
 const q = from(table('review', { a: col.DateTime64(0), b: col.DateTime64(3) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));

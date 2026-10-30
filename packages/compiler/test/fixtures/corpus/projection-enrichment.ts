@@ -1,4 +1,4 @@
-import { dateDiff, multiIf, now, val } from '@chql/core';
+import { dateDiff, multiIf, now, val } from '@typedhouse/core';
 import { components } from './low-stock.js';
 
 export const projectionEnrichment = components.map(c => ({

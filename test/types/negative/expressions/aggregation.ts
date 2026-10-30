@@ -1,4 +1,4 @@
-import { from, table, col, val, count, sum } from '@chql/core';
+import { from, table, col, val, count, sum } from '@typedhouse/core';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.groupBy(r => r.id).where; // expect: TS2339 Property 'where' does not exist
 q.groupBy(r => r.id).map; // expect: TS2339 Property 'map' does not exist

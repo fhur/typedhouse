@@ -1,4 +1,4 @@
-import { col, table, from, join, max, sum, uniq, exp, countIf, type Query, type Infer, type Projection, type ProjectionRow, type Row } from '@chql/core';
+import { col, table, from, join, max, sum, uniq, exp, countIf, type Query, type Infer, type Projection, type ProjectionRow, type Row } from '@typedhouse/core';
 
 const partSpecification = col.Tuple({ id: col.String, mpn: col.Nullable(col.String), manufacturer: col.Nullable(col.String), description: col.Nullable(col.String), package: col.Nullable(col.String), part_type: col.Nullable(col.String) });
 const metricMeta = { tenantId: col.String, entityId: col.String, version: col.UInt32, effectiveAt: col.DateTime64(3), insertedAt: col.DateTime64(3) };

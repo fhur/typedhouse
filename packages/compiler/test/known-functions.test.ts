@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, createKnownFunctions, from, table, val, type ExprNode, type Rel } from '@chql/core';
+import { col, createKnownFunctions, from, table, val, type ExprNode, type Rel } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 const catalog = {
   cityHash64: { isAggregate: false, deterministic: true, aliasTo: '' },
@@ -92,6 +92,6 @@ it('rejects unsafe names independently of JavaScript property safety and unsuppo
   for (const emit of [compile, emitNaive]) {
     expect(() => emit(q.map(() => ({ h: hostile.fn['bad); SELECT 1']().as(col.UInt64) })).ir)).toThrow('invalid_function_name');
     // Deliberately bypass the public descriptor gate to exercise compiler validation.
-    expect(() => emit(q.map(r => ({ h: (fn.cityHash64(r.id) as import('@chql/core').Expr<unknown, 'id'>).as(col.JSON) })).ir)).toThrow('unsupported_known_result');
+    expect(() => emit(q.map(r => ({ h: (fn.cityHash64(r.id) as import('@typedhouse/core').Expr<unknown, 'id'>).as(col.JSON) })).ir)).toThrow('unsupported_known_result');
   }
 });

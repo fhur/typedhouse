@@ -13,8 +13,8 @@ sidebar:
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const users = table(
   'users',
@@ -47,8 +47,8 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
-  ifNull(`__chql_input`.`nickname`, {p0:String}) AS `displayName`
+  `__typedhouse_input`.`id` AS `id`,
+  ifNull(`__typedhouse_input`.`nickname`, {p0:String}) AS `displayName`
 FROM
   (
     SELECT
@@ -56,7 +56,7 @@ FROM
       `nickname`
     FROM
       `users`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

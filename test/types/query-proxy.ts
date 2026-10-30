@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, table, from, join, sum, sumState, sumMerge, scalar, unionAll, type Infer, type Query, type TableQuery, type AggregateState, type Decimal, type CHType } from '@chql/core';
+import { col, table, from, join, sum, sumState, sumMerge, scalar, unionAll, type Infer, type Query, type TableQuery, type AggregateState, type Decimal, type CHType } from '@typedhouse/core';
 
 const q = from(table('proxy_regression', {
   id: col.String, countOfParts: col.UInt64, version: col.UInt32, value: col.Float64,

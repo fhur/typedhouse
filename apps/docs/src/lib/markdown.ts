@@ -16,7 +16,7 @@ export function markdown(page: Awaited<ReturnType<typeof publishedPages>>[number
   if (/^\s*(?:import|export)\s|<[A-Z][A-Za-z]*(?:\s|\/?>)/m.test(prose)) {
     throw new Error(`Unsupported MDX in ${page.path}; author plain Markdown instead.`);
   }
-  const base = site ?? new URL('https://chql.pages.dev');
+  const base = site ?? new URL('https://fhur.github.io');
   const canonical = new URL(withBase(`/${page.path}/`), base).href;
   const body = page.body.replace(/\]\((\/(?:docs|blog)\/[^)\s#]+?)(?:\/)?(#[^)\s]*)?\)/g,
     (_, path: string, hash: string = '') => `](${new URL(withBase(`${path.replace(/\/$/, '')}.md${hash}`), base).href})`)

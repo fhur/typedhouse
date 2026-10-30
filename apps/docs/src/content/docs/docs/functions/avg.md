@@ -15,8 +15,8 @@ Decimal operands are not supported by this typed surface, unlike `sum`. Aggregat
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { avg, col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { avg, col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const requests = table(
   'requests',
@@ -46,12 +46,12 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`endpoint` AS `endpoint`,
-  avg(`__chql_input`.`durationMs`) AS `meanDurationMs`
+  `__typedhouse_input`.`endpoint` AS `endpoint`,
+  avg(`__typedhouse_input`.`durationMs`) AS `meanDurationMs`
 FROM
-  `requests` AS `__chql_input`
+  `requests` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`endpoint`
+  `__typedhouse_input`.`endpoint`
 ```
 
 Parameters:

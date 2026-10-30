@@ -2,10 +2,10 @@ import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { createClient } from '@chql/client';
-import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@chql/core';
+import { createClient } from '@typedhouse/client';
+import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@typedhouse/core';
 import { compile, emitNaive, quoteIdentifier } from '../src/index.js';
-import { QueryError } from '@chql/client';
+import { QueryError } from '@typedhouse/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
 let container: StartedTestContainer;
 let client: ReturnType<typeof createClient>;
@@ -452,8 +452,8 @@ it('adversarial weekly Date: exhausts every supported day against independent ca
   const streamed = []; for await (const row of client.stream(q)) streamed.push(row); expect(streamed).toEqual(expected);
   for (const day of ['1970-01-01', '1970-01-02', '1970-01-03']) {
     const invalid = source.where(r => r.day.eq(new Date(day))).map(r => r.day.toStartOfWeek());
-    await expect(client.run(invalid)).rejects.toMatchObject({ cause: { message: expect.stringContaining('chql_date_out_of_range') } });
-    await expect((async () => { for await (const _row of client.stream(invalid)) { /* drain */ } })()).rejects.toMatchObject({ cause: { message: expect.stringContaining('chql_date_out_of_range') } });
+    await expect(client.run(invalid)).rejects.toMatchObject({ cause: { message: expect.stringContaining('typedhouse_date_out_of_range') } });
+    await expect((async () => { for await (const _row of client.stream(invalid)) { /* drain */ } })()).rejects.toMatchObject({ cause: { message: expect.stringContaining('typedhouse_date_out_of_range') } });
   }
 }, 30000);
 it('adversarial weekly Date: nullable array transport, repeated union scopes and DST calendar boundaries', async () => {
@@ -487,7 +487,7 @@ it('runs strict weekly Date means against independent SQL with FINAL, nullable g
   const baseline = "SELECT toStartOfWeek(at,0) AS week,avg(stock) AS stock FROM weekly_history FINAL WHERE tenant='acme' AND entity='cmp_7' GROUP BY week";
   const direct = JSON.parse(await sql(`SELECT groupArray(tuple(toString(week),stock)) AS rows FROM (${baseline} ORDER BY week) FORMAT JSONEachRow`)).rows.map(([day, stock]: [string, number | null]) => ({ week: new Date(`${day}T00:00:00Z`), stock }));
   expect(direct).toEqual([{ week: new Date('2024-02-25'), stock: 4 }, { week: new Date('2024-03-03'), stock: 8 }, { week: new Date('2024-03-10'), stock: null }]);
-  const compare = async (query: { ir: import('@chql/core').Rel; caps: { live: boolean }; _rowType: { week: Date; stock: number | null } }, expected: typeof direct) => {
+  const compare = async (query: { ir: import('@typedhouse/core').Rel; caps: { live: boolean }; _rowType: { week: Date; stock: number | null } }, expected: typeof direct) => {
     expect(await client.run(query)).toEqual(expected);
     const rows = []; for await (const row of client.stream(query)) rows.push(row); expect(rows).toEqual(expected);
   };
@@ -523,7 +523,7 @@ it('runs strict weekly Date means against independent SQL with FINAL, nullable g
   }
   for (const day of ['1970-01-01', '1969-12-31', '2150-01-01']) {
     const q = seed.map(() => ({ week: val(new Date(day), col.DateTime64(3)).toStartOfWeek() }));
-    await expect(client.run(q)).rejects.toMatchObject({ cause: { message: expect.stringContaining('chql_date_out_of_range') } });
+    await expect(client.run(q)).rejects.toMatchObject({ cause: { message: expect.stringContaining('typedhouse_date_out_of_range') } });
   }
   const nullWeek = seed.map(() => ({ week: val(null, col.Nullable(col.Date)).toStartOfWeek() }));
   expect(await client.run(nullWeek)).toEqual([{ week: null }]);
@@ -558,7 +558,7 @@ it('summarizes bounded tenant history with FINAL and composes mean outputs throu
   const baseline = `SELECT entityId,avg(stock) AS stockMean,avg(lead) AS leadDays,avgIf(stock,stock>4) AS positive,avg(stock)/avg(stock) AS ratio ${base} GROUP BY entityId`;
   const decode = (text: string) => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line, (_k, v) => v === 'nan' ? NaN : v === 'inf' ? Infinity : v === '-inf' ? -Infinity : v));
   const direct = (query: string) => sql(query + ' SETTINGS output_format_json_quote_denormals=1 FORMAT JSONEachRow').then(decode);
-  const compare = async <R>(query: { ir: import('@chql/core').Rel; caps: { live: boolean }; _rowType: R }, expected: unknown) => {
+  const compare = async <R>(query: { ir: import('@typedhouse/core').Rel; caps: { live: boolean }; _rowType: R }, expected: unknown) => {
     expect(await client.run(query)).toEqual(expected);
     const rows = []; for await (const row of client.stream(query)) rows.push(row);
     expect(rows).toEqual(expected);
@@ -903,24 +903,24 @@ it('adversarial fences keep DISTINCT union boundaries and branch-local offset be
   expect(await client.run(joined)).toEqual([{ id: 'a', category: null }, { id: 'b', category: 'hidden' }]);
 });
 it('executes composable CTE hints, nested arrays, sets and scalar totals against direct SQL', async () => {
-  await sql('CREATE TABLE t0 (`__chql_input` String, `a.b` Nullable(String), `__proto__` Array(String)) ENGINE=Memory');
+  await sql('CREATE TABLE t0 (`__typedhouse_input` String, `a.b` Nullable(String), `__proto__` Array(String)) ENGINE=Memory');
   await sql("INSERT INTO t0 VALUES ('a',NULL,['x','x']),('b','yes',[]),('c','yes',['y'])");
-  const source = from(table('t0', { __chql_input: col.String, 'a.b': col.Nullable(col.String), ['__proto__']: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const source = from(table('t0', { __typedhouse_input: col.String, 'a.b': col.Nullable(col.String), ['__proto__']: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
   const direct = async (text: string) => (await sql(text + ' FORMAT JSONEachRow')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
   const componentParts = source.leftArrayJoin(r => r.__proto__, 'partId');
   const fenced = componentParts.cte();
-  const projected = fenced.cte().where(r => r.partId.notEmpty()).map(r => ({ id: r.__chql_input, partId: r.partId, value: r['a.b'] })).orderBy(r => r.id).thenBy(r => r.partId).limit(3);
-  expect(await client.run(projected)).toEqual(await direct('SELECT __chql_input AS id,partId,`a.b` AS value FROM t0 LEFT ARRAY JOIN `__proto__` AS partId WHERE notEmpty(partId) ORDER BY id,partId LIMIT 3'));
+  const projected = fenced.cte().where(r => r.partId.notEmpty()).map(r => ({ id: r.__typedhouse_input, partId: r.partId, value: r['a.b'] })).orderBy(r => r.id).thenBy(r => r.partId).limit(3);
+  expect(await client.run(projected)).toEqual(await direct('SELECT __typedhouse_input AS id,partId,`a.b` AS value FROM t0 LEFT ARRAY JOIN `__proto__` AS partId WHERE notEmpty(partId) ORDER BY id,partId LIMIT 3'));
   const grouped = fenced.groupBy(r => r.partId).aggregate(() => count()).orderBy(r => r.partId);
   expect(await client.run(grouped)).toEqual((await direct('SELECT partId,count() AS count FROM t0 LEFT ARRAY JOIN `__proto__` AS partId GROUP BY partId ORDER BY partId')).map(r => ({ ...r, count: BigInt(r.count as string) })));
-  const limited = source.orderBy(r => r.__chql_input.desc()).limit(2).cte().map(r => ({ id: r.__chql_input })).orderBy(r => r.id);
-  expect(await client.run(limited)).toEqual(await direct('SELECT __chql_input AS id FROM (SELECT * FROM t0 ORDER BY __chql_input DESC LIMIT 2) ORDER BY id'));
-  const ids = unionAll(source.map(r => r.__chql_input).cte(), source.limit(0).map(r => r.__chql_input)).cte();
-  const query = source.cte().where(r => r.__chql_input.in(ids)).map(r => ({ id: r.__chql_input, total: scalar(fenced.aggregate(() => count())) })).orderBy(r => r.id);
-  expect(await client.run(query)).toEqual((await direct('SELECT __chql_input AS id,(SELECT count() FROM t0 LEFT ARRAY JOIN `__proto__`) AS total FROM t0 WHERE __chql_input IN (SELECT __chql_input FROM t0) ORDER BY id')).map(r => ({ ...r, total: BigInt(r.total as string) })));
-  const nested = crossJoin({ t0: source.limit(1), __chql_input: source.where(r => r.__chql_input.eq('c')) }).cte().leftArrayJoin(r => r.t0.__proto__, 'item').cte();
-  const nestedDirect = await direct("SELECT a.__chql_input AS aid,a.`a.b` AS av,a.`__proto__` AS aa,b.__chql_input AS bid,b.`a.b` AS bv,b.`__proto__` AS ba,item FROM (SELECT * FROM t0 LIMIT 1) a CROSS JOIN (SELECT * FROM t0 WHERE __chql_input='c') b LEFT ARRAY JOIN a.`__proto__` AS item");
-  expect(await client.run(nested)).toEqual(nestedDirect.map(r => ({ t0: { __chql_input: r.aid, 'a.b': r.av, ['__proto__']: r.aa }, __chql_input: { __chql_input: r.bid, 'a.b': r.bv, ['__proto__']: r.ba }, item: r.item })));
+  const limited = source.orderBy(r => r.__typedhouse_input.desc()).limit(2).cte().map(r => ({ id: r.__typedhouse_input })).orderBy(r => r.id);
+  expect(await client.run(limited)).toEqual(await direct('SELECT __typedhouse_input AS id FROM (SELECT * FROM t0 ORDER BY __typedhouse_input DESC LIMIT 2) ORDER BY id'));
+  const ids = unionAll(source.map(r => r.__typedhouse_input).cte(), source.limit(0).map(r => r.__typedhouse_input)).cte();
+  const query = source.cte().where(r => r.__typedhouse_input.in(ids)).map(r => ({ id: r.__typedhouse_input, total: scalar(fenced.aggregate(() => count())) })).orderBy(r => r.id);
+  expect(await client.run(query)).toEqual((await direct('SELECT __typedhouse_input AS id,(SELECT count() FROM t0 LEFT ARRAY JOIN `__proto__`) AS total FROM t0 WHERE __typedhouse_input IN (SELECT __typedhouse_input FROM t0) ORDER BY id')).map(r => ({ ...r, total: BigInt(r.total as string) })));
+  const nested = crossJoin({ t0: source.limit(1), __typedhouse_input: source.where(r => r.__typedhouse_input.eq('c')) }).cte().leftArrayJoin(r => r.t0.__proto__, 'item').cte();
+  const nestedDirect = await direct("SELECT a.__typedhouse_input AS aid,a.`a.b` AS av,a.`__proto__` AS aa,b.__typedhouse_input AS bid,b.`a.b` AS bv,b.`__proto__` AS ba,item FROM (SELECT * FROM t0 LIMIT 1) a CROSS JOIN (SELECT * FROM t0 WHERE __typedhouse_input='c') b LEFT ARRAY JOIN a.`__proto__` AS item");
+  expect(await client.run(nested)).toEqual(nestedDirect.map(r => ({ t0: { __typedhouse_input: r.aid, 'a.b': r.av, ['__proto__']: r.aa }, __typedhouse_input: { __typedhouse_input: r.bid, 'a.b': r.bv, ['__proto__']: r.ba }, item: r.item })));
   expect(await client.run(source.limit(0).cte())).toEqual([]);
   expect(await client.run(fenced.map(r => r.partId).distinct().cte().orderBy(r => r.partId))).toEqual(await direct('SELECT DISTINCT partId FROM t0 LEFT ARRAY JOIN `__proto__` AS partId ORDER BY partId'));
 });
@@ -1172,11 +1172,11 @@ it('aligns reversed fields and decodes nullable bigint timestamps arrays and tup
   expect(rows).toEqual(direct);
   expect(rows).toHaveLength(4);
   expect(rows[0]?.pair.n).toBe(18446744073709551615n);
-  const nestedA = crossJoin({ ['__proto__']: side, 'b.dot': side }).leftArrayJoin(r => r.__proto__.xs, '__chql_leaf_0');
-  const nestedB = crossJoin({ 'b.dot': side, ['__proto__']: side }).leftArrayJoin(r => r.__proto__.xs, '__chql_leaf_0');
-  const nested = unionAll(nestedA, nestedB).where(r => r.__proto__.id.eq(1).and(r['b.dot'].id.eq(2))).orderBy(r => r.__chql_leaf_0.asc().nullsFirst());
+  const nestedA = crossJoin({ ['__proto__']: side, 'b.dot': side }).leftArrayJoin(r => r.__proto__.xs, '__typedhouse_leaf_0');
+  const nestedB = crossJoin({ 'b.dot': side, ['__proto__']: side }).leftArrayJoin(r => r.__proto__.xs, '__typedhouse_leaf_0');
+  const nested = unionAll(nestedA, nestedB).where(r => r.__proto__.id.eq(1).and(r['b.dot'].id.eq(2))).orderBy(r => r.__typedhouse_leaf_0.asc().nullsFirst());
   const decoded = await client.run(nested);
-  const expected = (await client.run(nestedA.where(r => r.__proto__.id.eq(1).and(r['b.dot'].id.eq(2))).orderBy(r => r.__chql_leaf_0.asc().nullsFirst())));
+  const expected = (await client.run(nestedA.where(r => r.__proto__.id.eq(1).and(r['b.dot'].id.eq(2))).orderBy(r => r.__typedhouse_leaf_0.asc().nullsFirst())));
   expect(decoded).toEqual(expected.flatMap(row => [row, row]));
   expect(decoded).toHaveLength(4);
   expect(Object.hasOwn(decoded[0]!, '__proto__')).toBe(true);
@@ -1205,17 +1205,17 @@ it('composes Cartesian products with repeated nullable LEFT expansion and hostil
   await sql('CREATE TABLE cross_expansion_probe (id UInt32, xs Array(Nullable(Int32))) ENGINE=Memory');
   await sql('INSERT INTO cross_expansion_probe VALUES (1,[NULL,7,7]),(2,[])');
   const side = from(table('cross_expansion_probe', { id: col.UInt32, xs: col.Array(col.Nullable(col.Int32)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-  const expanded = crossJoin({ ['__proto__']: side, '__chql_leaf_0': side })
+  const expanded = crossJoin({ ['__proto__']: side, '__typedhouse_leaf_0': side })
     .leftArrayJoin(r => r.__proto__.xs, 'x')
-    .leftArrayJoin(r => r.__chql_leaf_0.xs, 'y');
-  const ordered = expanded.map(r => ({ a: r.__proto__.id, b: r.__chql_leaf_0.id, x: r.x, y: r.y }))
+    .leftArrayJoin(r => r.__typedhouse_leaf_0.xs, 'y');
+  const ordered = expanded.map(r => ({ a: r.__proto__.id, b: r.__typedhouse_leaf_0.id, x: r.x, y: r.y }))
     .orderBy(r => r.a).thenBy(r => r.b).thenBy(r => r.x.asc().nullsFirst()).thenBy(r => r.y.asc().nullsFirst());
   const baseline = (await sql('SELECT a.id AS a,b.id AS b,a.x AS x,b.y AS y FROM (SELECT id,arrayJoin(emptyArrayToSingle(xs)) AS x FROM cross_expansion_probe) a CROSS JOIN (SELECT id,arrayJoin(emptyArrayToSingle(xs)) AS y FROM cross_expansion_probe) b ORDER BY a,b,x NULLS FIRST,y NULLS FIRST FORMAT JSONEachRow')).trim().split('\n').map(line => JSON.parse(line) as unknown);
   expect(baseline).toHaveLength(16);
   expect(await client.run(ordered)).toEqual(baseline);
   expect(await client.run(expanded.aggregate(() => count()))).toEqual([{ count: 16n }]);
-  const empty = await client.run(expanded.where(r => r.__proto__.id.eq(2).and(r.__chql_leaf_0.id.eq(2))));
-  expect(empty).toEqual([{ ['__proto__']: { id: 2, xs: [] }, __chql_leaf_0: { id: 2, xs: [] }, x: null, y: null }]);
+  const empty = await client.run(expanded.where(r => r.__proto__.id.eq(2).and(r.__typedhouse_leaf_0.id.eq(2))));
+  expect(empty).toEqual([{ ['__proto__']: { id: 2, xs: [] }, __typedhouse_leaf_0: { id: 2, xs: [] }, x: null, y: null }]);
   expect(Object.hasOwn(empty[0]!, '__proto__')).toBe(true);
   const nested = crossJoin({ nested: expanded, other: side.limit(0) });
   expect(await client.run(nested)).toEqual([]);
@@ -1252,7 +1252,7 @@ it('executes inner ALL self/three-way/nested joins with residuals, nullable keys
   expect(await client.run(both.where(r => r.a.id.eq(1)).distinct().limit(1).map(r => r.a.labels.arrayElement(1)))).toEqual([{ labels: 'a' }]);
   expect(await client.run(join({ a: q.limit(0), b: q }).on(r => r.a.id.eq(r.b.id)))).toEqual([]);
   expect(await client.run(join({ a: q, b: q.limit(0) }).on(r => r.a.id.eq(r.b.id)))).toEqual([]);
-  for (const alias of ['__proto__', 'constructor', 'a.b', '42', '__chql_leaf_0', 'x`\\\\ hostile']) {
+  for (const alias of ['__proto__', 'constructor', 'a.b', '42', '__typedhouse_leaf_0', 'x`\\\\ hostile']) {
     const hostile = join({ [alias]: q, other: q }).on(r => r[alias]!.id.eq(r.other!.id)).map(r => ({ id: r[alias]!.id }));
     expect(await client.run(hostile.orderBy(r => r.id))).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
   }
@@ -1307,29 +1307,29 @@ it('retains nested expansion descriptors, remaps transport aliases, and composes
   await sql("INSERT INTO nested_expansion_probe VALUES ('a',[(7,['x','x'])])");
   const q = from(table('nested_expansion_probe', { id: col.String, pairs: col.Array(pair) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
   const joined = join({ a: q, b: q }).on(r => r.a.id.eq(r.b.id));
-  const expanded = joined.arrayJoin(r => r.a.pairs, '__chql_leaf_0').leftArrayJoin(r => r.__chql_leaf_0.element('labels'), '__proto__');
-  const row = { a: { id: 'a', pairs: [{ n: 7n, labels: ['x', 'x'] }] }, b: { id: 'a', pairs: [{ n: 7n, labels: ['x', 'x'] }] }, __chql_leaf_0: { n: 7n, labels: ['x', 'x'] }, ['__proto__']: 'x' };
+  const expanded = joined.arrayJoin(r => r.a.pairs, '__typedhouse_leaf_0').leftArrayJoin(r => r.__typedhouse_leaf_0.element('labels'), '__proto__');
+  const row = { a: { id: 'a', pairs: [{ n: 7n, labels: ['x', 'x'] }] }, b: { id: 'a', pairs: [{ n: 7n, labels: ['x', 'x'] }] }, __typedhouse_leaf_0: { n: 7n, labels: ['x', 'x'] }, ['__proto__']: 'x' };
   expect(await client.run(expanded.where(r => r.a.id.eq('a')).orderBy(r => r.__proto__).limit(2))).toEqual([row, row]);
   expect(await client.run(expanded.distinct())).toEqual([row]);
-  expect(await client.run(expanded.groupBy(r => r.a.id).aggregate(g => ({ n: max(g.__chql_leaf_0.element('n')), count: count() }))))
+  expect(await client.run(expanded.groupBy(r => r.a.id).aggregate(g => ({ n: max(g.__typedhouse_leaf_0.element('n')), count: count() }))))
     .toEqual([{ id: 'a', n: 7n, count: 2n }]);
   const again = join({ expanded, q }).on(r => r.expanded.a.id.eq(r.q.id));
-  expect(await client.run(again.map(r => ({ n: r.expanded.__chql_leaf_0.element('n'), label: r.expanded.__proto__ })))).toEqual([{ n: 7n, label: 'x' }, { n: 7n, label: 'x' }]);
+  expect(await client.run(again.map(r => ({ n: r.expanded.__typedhouse_leaf_0.element('n'), label: r.expanded.__proto__ })))).toEqual([{ n: 7n, label: 'x' }, { n: 7n, label: 'x' }]);
 });
 it('normalizes nullable keys and preserves nested transport collisions through residual and sort scopes', async () => {
-  const q = from(db.entity_ots_component).where(r => r.tenantId.eq('acme')).map(r => ({ id: r.entityId, key: r.category, ['__chql_leaf_0']: r.countOfParts }));
-  const inner = join({ ['__chql_leaf_0']: q, b: q }).on(r => [
-    r.__chql_leaf_0.key.ifNull('missing').eq(r.b.key.ifNull('missing')),
-    r.__chql_leaf_0.id.le(r.b.id), r.b.id.ge('a'),
+  const q = from(db.entity_ots_component).where(r => r.tenantId.eq('acme')).map(r => ({ id: r.entityId, key: r.category, ['__typedhouse_leaf_0']: r.countOfParts }));
+  const inner = join({ ['__typedhouse_leaf_0']: q, b: q }).on(r => [
+    r.__typedhouse_leaf_0.key.ifNull('missing').eq(r.b.key.ifNull('missing')),
+    r.__typedhouse_leaf_0.id.le(r.b.id), r.b.id.ge('a'),
   ]);
-  const nested = join({ ['__chql_leaf__0']: inner, c: q }).on(r => r.__chql_leaf__0.b.id.eq(r.c.id));
-  const ordered = nested.orderBy(r => r.c.id.desc()).thenBy(r => r.__chql_leaf__0.b.id).orderBy(r => r.c.id).distinct().limit(2);
+  const nested = join({ ['__typedhouse_leaf__0']: inner, c: q }).on(r => r.__typedhouse_leaf__0.b.id.eq(r.c.id));
+  const ordered = nested.orderBy(r => r.c.id.desc()).thenBy(r => r.__typedhouse_leaf__0.b.id).orderBy(r => r.c.id).distinct().limit(2);
   const rows = await client.run(ordered);
   expect(rows).toEqual([
-    { __chql_leaf__0: { __chql_leaf_0: { id: 'a', key: null, __chql_leaf_0: 18446744073709551615n }, b: { id: 'a', key: null, __chql_leaf_0: 18446744073709551615n } }, c: { id: 'a', key: null, __chql_leaf_0: 18446744073709551615n } },
-    { __chql_leaf__0: { __chql_leaf_0: { id: 'c', key: 'visible', __chql_leaf_0: 0n }, b: { id: 'c', key: 'visible', __chql_leaf_0: 0n } }, c: { id: 'c', key: 'visible', __chql_leaf_0: 0n } },
+    { __typedhouse_leaf__0: { __typedhouse_leaf_0: { id: 'a', key: null, __typedhouse_leaf_0: 18446744073709551615n }, b: { id: 'a', key: null, __typedhouse_leaf_0: 18446744073709551615n } }, c: { id: 'a', key: null, __typedhouse_leaf_0: 18446744073709551615n } },
+    { __typedhouse_leaf__0: { __typedhouse_leaf_0: { id: 'c', key: 'visible', __typedhouse_leaf_0: 0n }, b: { id: 'c', key: 'visible', __typedhouse_leaf_0: 0n } }, c: { id: 'c', key: 'visible', __typedhouse_leaf_0: 0n } },
   ]);
-  expect(await client.run(ordered.groupBy(r => r.c.key).aggregate(g => ({ n: count(), total: sum(g.__chql_leaf__0.b.__chql_leaf_0) })).orderBy(r => r.key.asc().nullsFirst()))).toEqual([{ key: null, n: 1n, total: 18446744073709551615n }, { key: 'visible', n: 1n, total: 0n }]);
+  expect(await client.run(ordered.groupBy(r => r.c.key).aggregate(g => ({ n: count(), total: sum(g.__typedhouse_leaf__0.b.__typedhouse_leaf_0) })).orderBy(r => r.key.asc().nullsFirst()))).toEqual([{ key: null, n: 1n, total: 18446744073709551615n }, { key: 'visible', n: 1n, total: 0n }]);
 });
 it('runs the unchanged generic latest helper on FINAL and joins expanded component parts', async () => {
   type Versioned = { tenantId: string; entityId: string; version: number };
@@ -1404,7 +1404,7 @@ it('expands arrays without replacing originals and uses exact LEFT child default
   expect(await client.run(q.orderBy(r => r.id.desc()).limit(1).arrayJoin(r => r.a, 'v'))).toEqual([]);
   expect(await client.run(q.arrayJoin(r => r.a, 'v').orderBy(r => r.v).limit(1).map(r => r.v))).toEqual([{ v: 'x' }]);
   expect(await client.run(q.arrayJoin(r => r.a, 'v').groupBy(r => r.v).aggregate(() => count()).orderBy(r => r.v))).toEqual([{ v: 'x', count: 2n }, { v: 'y', count: 1n }]);
-  for (const alias of ['__chql_input', '__chql_element', 'constructor', 'x`\\\\ hostile']) {
+  for (const alias of ['__typedhouse_input', '__typedhouse_element', 'constructor', 'x`\\\\ hostile']) {
     const joined = q.where(r => r.id.eq(1)).arrayJoin(r => r.a, alias).map(r => ({ item: r[alias]! }));
     expect(await client.run(joined)).toEqual([{ item: 'x' }, { item: 'x' }, { item: 'y' }]);
   }
@@ -1445,11 +1445,11 @@ it('creates only the selected pattern or union alias, including after FINAL and 
 it('keeps repeated expansions Cartesian across distinct, aliases and empty Bool defaults', async () => {
   const q = from(db.entity_ots_component).where(r => r.entityId.eq('a'))
     .map(r => ({ id: r.entityId, a: val([true, false, true], col.Array(col.Bool)) }));
-  const twice = q.arrayJoin(r => r.a, '__chql_input').arrayJoin(r => r.a, '__chql_element');
+  const twice = q.arrayJoin(r => r.a, '__typedhouse_input').arrayJoin(r => r.a, '__typedhouse_element');
   expect(await client.run(twice.aggregate(() => count()))).toEqual([{ count: 9n }]);
   expect(await client.run(twice.distinct().aggregate(() => count()))).toEqual([{ count: 4n }]);
-  expect(await client.run(twice.where(r => r.__chql_input.eq(false)).where(r => r.__chql_element.eq(false))
-    .map(r => ({ a: r.a, first: r.__chql_input, second: r.__chql_element })))).toEqual([{ a: [true, false, true], first: false, second: false }]);
+  expect(await client.run(twice.where(r => r.__typedhouse_input.eq(false)).where(r => r.__typedhouse_element.eq(false))
+    .map(r => ({ a: r.a, first: r.__typedhouse_input, second: r.__typedhouse_element })))).toEqual([{ a: [true, false, true], first: false, second: false }]);
   const empty = q.map(r => ({ id: r.id, a: val([], col.Array(col.Bool)) }));
   expect(await client.run(empty.leftArrayJoin(r => r.a, 'v').map(r => ({ a: r.a, v: r.v })))).toEqual([{ a: [], v: false }]);
   expect(await client.run(empty.arrayJoin(r => r.a, 'v').aggregate(() => count()))).toEqual([{ count: 0n }]);
@@ -1514,7 +1514,7 @@ it('orders mixed keys, null placement and replacement ordering after filter/proj
   await sql("INSERT INTO ordering_probe VALUES ('a',2,NULL,[('x')]),('b',1,'z',[(NULL)]),('c',2,'a',[('x')]),('d',1,NULL,[(NULL)]),('e',2,'a',[('x')])");
   const t = table('ordering_probe', { id: col.String, n: col.UInt32, label: col.Nullable(col.String), specs: col.Array(col.Tuple({ name: col.Nullable(col.String) })) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
   const q = from(t).where(r => r.n.gt(0)).map(r => ({ renamed: r.id, n: r.n, label: r.label, specs: r.specs }));
-  const ids = async (query: { ir: import('@chql/core').Rel } & import('@chql/core').Query<import('@chql/core').Infer<typeof q>>) => (await client.run(query)).map(r => r.renamed);
+  const ids = async (query: { ir: import('@typedhouse/core').Rel } & import('@typedhouse/core').Query<import('@typedhouse/core').Infer<typeof q>>) => (await client.run(query)).map(r => r.renamed);
   expect(await ids(q.orderBy(r => r.n.desc()).thenBy(r => r.renamed))).toEqual(['a','c','e','b','d']);
   expect(await ids(q.orderBy(r => r.label.asc().nullsFirst()).thenBy(r => r.renamed.desc()))).toEqual(['d','a','e','c','b']);
   expect(await ids(q.orderBy(r => r.label.asc().nullsLast()).thenBy(r => r.renamed))).toEqual(['c','e','b','a','d']);
@@ -1605,12 +1605,12 @@ it('composes LowCardinality nullable equality and projections without changing v
   expect(await client.run(from(t).where(r => r.optional.eq(null)))).toEqual([]);
 });
 it('keeps internal-alias-shaped and dotted column names scoped through composition', async () => {
-  const t = table('scope_probe', { __chql_input: col.String, 'a.b': col.String, p0: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
-  await sql('CREATE TABLE scope_probe (`__chql_input` String, `a.b` String, p0 String) ENGINE=Memory');
+  const t = table('scope_probe', { __typedhouse_input: col.String, 'a.b': col.String, p0: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+  await sql('CREATE TABLE scope_probe (`__typedhouse_input` String, `a.b` String, p0 String) ENGINE=Memory');
   await sql("INSERT INTO scope_probe VALUES ('one', 'two', 'three')");
-  const q = from(t).map(r => ({ __chql_input: r['a.b'], 'a.b': r.p0, p0: r.__chql_input }))
-    .where(r => r.__chql_input.eq('two')).limit(1, 0)
-    .map(r => ({ original: r.p0, dotted: r['a.b'], alias: r.__chql_input }));
+  const q = from(t).map(r => ({ __typedhouse_input: r['a.b'], 'a.b': r.p0, p0: r.__typedhouse_input }))
+    .where(r => r.__typedhouse_input.eq('two')).limit(1, 0)
+    .map(r => ({ original: r.p0, dotted: r['a.b'], alias: r.__typedhouse_input }));
   expect(await client.run(q)).toEqual([{ original: 'one', dotted: 'three', alias: 'two' }]);
 });
 it('executes structural filters and composed projections through the catalog', async () => {

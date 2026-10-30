@@ -221,7 +221,7 @@ export class Query<R, C extends Caps = Caps, Proxy = Row<R>, Nested extends bool
     return new OrderedQuery(relNode({ kind: 'Sort', input, keys: [...keys, key], output: input.output }), { live: this.caps.live && deterministic(key.expr) }) as OrderedQuery<R, ExpressionCaps<C>, this['row'], Nested>;
   }
   toSQL(): CompiledQuery {
-    if (!compiler) throw new Error('compiler_not_registered: call registerCompiler(emitNaive) from @chql/compiler');
+    if (!compiler) throw new Error('compiler_not_registered: call registerCompiler(emitNaive) from @typedhouse/compiler');
     return compiler(this.ir);
   }
 }

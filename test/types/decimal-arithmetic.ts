@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, sum, val, type Decimal, type Expr, type NodeId } from '@chql/core';
+import { col, columnExpr, sum, val, type Decimal, type Expr, type NodeId } from '@typedhouse/core';
 
 type Phantoms<E> = E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
 declare function phantoms<E>(value: E): Phantoms<E>;

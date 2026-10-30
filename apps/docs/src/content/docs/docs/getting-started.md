@@ -22,12 +22,12 @@ Callbacks such as `e => e.id` receive typed **expressions**, not database values
 
 You need Node.js 20+, pnpm, and TypeScript with `strict: true`. This documentation describes the **current workspace preview**, not a guarantee that every package is published yet.
 
-TypedHouse was formerly chql. Packages still use `@chql/*` to keep existing imports and installations compatible; the `chql` codegen command is unchanged.
+TypedHouse was formerly typedhouse. Packages still use `@typedhouse/*` to keep existing imports and installations compatible; the `typedhouse` codegen command is unchanged.
 
 If your release is available in your package registry:
 
 ```sh
-pnpm add @chql/core @chql/compiler
+pnpm add @typedhouse/core @typedhouse/compiler
 ```
 
 For the source preview, clone the repository and build its workspace packages instead:
@@ -36,7 +36,7 @@ For the source preview, clone the repository and build its workspace packages in
 git clone https://github.com/fhur/typedhouse.git
 cd typedhouse
 pnpm install --frozen-lockfile
-pnpm --filter @chql/core --filter @chql/compiler build
+pnpm --filter @typedhouse/core --filter @typedhouse/compiler build
 ```
 
 Workspace consumers use `workspace:*` dependencies. You can also [open the playground](/playground/) without installing anything.
@@ -46,8 +46,8 @@ Workspace consumers use `workspace:*` dependencies. You can also [open the playg
 Copy this complete example into a TypeScript module. The small `events` fixture is reused in the next guide. Its `id` is a UInt32; assume IDs are unique within each tenant for deterministic ordering.
 
 ```ts
-import { col, table, from } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, table, from } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -130,18 +130,18 @@ The playground **compiles SQL**, but neither connects to ClickHouse nor performs
 <details>
 <summary>Already prefer query.toSQL()?</summary>
 
-Core deliberately has no implicit compiler dependency. Import `registerCompiler` from `@chql/core`, call `registerCompiler(compile)` once, then call `query.toSQL()`. This is an alternative to `compile(query.ir)`, not another required step. Both let you inspect `sql` and `params` before execution.
+Core deliberately has no implicit compiler dependency. Import `registerCompiler` from `@typedhouse/core`, call `registerCompiler(compile)` once, then call `query.toSQL()`. This is an alternative to `compile(query.ir)`, not another required step. Both let you inspect `sql` and `params` before execution.
 
 </details>
 
 ## Execute on a server
 
-**Optional:** install `@chql/client` for your server application. Build that package too if working from source. The real ClickHouse table must match the descriptor; compilation does not validate a live database.
+**Optional:** install `@typedhouse/client` for your server application. Build that package too if working from source. The real ClickHouse table must match the descriptor; compilation does not validate a live database.
 
 Append this to the module above. This example is typechecked but is **not executed** by the docs build.
 
 ```ts typecheck-only
-import { createClient } from '@chql/client';
+import { createClient } from '@typedhouse/client';
 
 const client = createClient({
   url:
@@ -166,7 +166,7 @@ try {
 Handwritten descriptors are useful for learning. For an application, generate them from your database so schema changes become visible to TypeScript:
 
 ```sh
-pnpm --filter @chql/codegen... build
+pnpm --filter @typedhouse/codegen... build
 node packages/codegen/dist/cli.js generate --url http://localhost:8123 \
   --database analytics --out-dir examples/generated
 pnpm typecheck

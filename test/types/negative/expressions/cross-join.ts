@@ -1,4 +1,4 @@
-import { from, table, col, crossJoin } from '@chql/core';
+import { from, table, col, crossJoin } from '@typedhouse/core';
 const q = from(table('t', { id: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 crossJoin({ a: q }); // expect: TS2345 join_input_count
 const empty = {};

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { col, count, crossJoin, from, join, max, outputLeaves, scalar, table, unionAll, val, cast, flatOutput, Query, type Rel } from '@chql/core';
+import { col, count, crossJoin, from, join, max, outputLeaves, scalar, table, unionAll, val, cast, flatOutput, Query, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { pruneColumns } from '../src/prune-columns.js';
 const wide = from(table('wide', { id: col.String, tenant: col.String, unused: col.String, amount: col.UInt64, ids: col.Array(col.String) }, { engine: 'MergeTree', sortingKey: [], partitionKey: [] }));
@@ -53,7 +53,7 @@ describe('physical source-ordered demand', () => {
     expect(names(q.ir, wide.ir)).toEqual([['id'], ['tenant'], ['amount']]);
     expect(names(q.ir, inner.ir)).toEqual([['first', 'id'], ['second', 'id'], ['second', 'amount']]);
     const physical = pruneColumns(q.ir).get(inner.ir)!;
-    expect(physical.map(l => l.name)).toEqual(['__chql_leaf_0', '__chql_leaf_5', '__chql_leaf_8']);
+    expect(physical.map(l => l.name)).toEqual(['__typedhouse_leaf_0', '__typedhouse_leaf_5', '__typedhouse_leaf_8']);
     expect(compile(q.ir).sql).not.toContain('unused'); metadata(q.ir);
   });
   it('retains unused cross sides and expansion multiplicity with deterministic carriers', () => {
@@ -101,22 +101,22 @@ describe('physical source-ordered demand', () => {
     expect(compile(q.ir)).toEqual(sql);
   });
   it('preserves numeric/dotted/colliding source order from authoritative schemas', () => {
-    const source = from(table('odd', { '2': col.String, '10': col.String, 'a.b': col.String, __chql_leaf_0: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-    const output = flatOutput([['10', col.String.type], ['2', col.String.type], ['a.b', col.String.type], ['__chql_leaf_0', col.String.type]]);
+    const source = from(table('odd', { '2': col.String, '10': col.String, 'a.b': col.String, __typedhouse_leaf_0: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    const output = flatOutput([['10', col.String.type], ['2', col.String.type], ['a.b', col.String.type], ['__typedhouse_leaf_0', col.String.type]]);
     const manual = { ...source.ir, output } as Rel;
-    const q = crossJoin({ source, other: source }).map(r => ({ x: r.source['a.b'], y: r.other.__chql_leaf_0 }));
-    expect(outputLeaves(manual.output).map(l => l.name)).toEqual(['10', '2', 'a.b', '__chql_leaf_0']);
+    const q = crossJoin({ source, other: source }).map(r => ({ x: r.source['a.b'], y: r.other.__typedhouse_leaf_0 }));
+    expect(outputLeaves(manual.output).map(l => l.name)).toEqual(['10', '2', 'a.b', '__typedhouse_leaf_0']);
     expect(pruneColumns(manual).get(manual)?.map(l => l.name)).toEqual(output.order);
-    const ordered = new Query<{ '10': string; '2': string; 'a.b': string; __chql_leaf_0: string }>(manual, { live: false });
+    const ordered = new Query<{ '10': string; '2': string; 'a.b': string; __typedhouse_leaf_0: string }>(manual, { live: false });
     const subset = ordered.map(r => ({ second: r['2'], first: r['10'] }));
     if (subset.ir.kind !== 'Project') throw new Error('expected project');
     expect(names(subset.ir, subset.ir.input)).toEqual([['10'], ['2']]);
     expect(compile(subset.ir).sql).toBe('SELECT `2` AS `second`, `10` AS `first` FROM `odd`');
-    expect(compile(q.ir).sql).toContain('SELECT `source`.`a.b` AS `x`, `other`.`__chql_leaf_0` AS `y`');
+    expect(compile(q.ir).sql).toContain('SELECT `source`.`a.b` AS `x`, `other`.`__typedhouse_leaf_0` AS `y`');
     // The direct selection now bypasses transport aliases; the logical nested
     // output still reserves collision-free transport names for derived uses.
     if (q.ir.kind !== 'Project') throw new Error('shape');
-    expect(outputLeaves(q.ir.input.output).map(l => l.name).every(n => n.startsWith('__chql_leaf__'))).toBe(true);
+    expect(outputLeaves(q.ir.input.output).map(l => l.name).every(n => n.startsWith('__typedhouse_leaf__'))).toBe(true);
     metadata(q.ir);
   });
   it('keeps nested expansion dependencies and output aliases through sort/limit scopes', () => {
@@ -144,7 +144,7 @@ describe('physical source-ordered demand', () => {
       .map(r => ({ renamed: r.value })).map(r => ({ x: r.renamed }));
     for (const root of [crossJoin({ early, late }), crossJoin({ late, early })]) {
       expect(names(root.ir, shared.ir)).toEqual([['left', 'id'], ['right', 'amount']]);
-      expect(pruneColumns(root.ir).get(shared.ir)?.map(l => l.name)).toEqual(['__chql_leaf_0', '__chql_leaf_8']);
+      expect(pruneColumns(root.ir).get(shared.ir)?.map(l => l.name)).toEqual(['__typedhouse_leaf_0', '__typedhouse_leaf_8']);
       expect(names(root.ir, wide.ir)).toEqual([['id'], ['amount']]);
       expect(compile(root.ir).sql).not.toContain('unused');
       metadata(root.ir);

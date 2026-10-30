@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { uniqExact, uniqExactIf, from, table, col, val, exprNode, relNode, flatOutput, columnExpr, unionAll, scalar, type Query } from '@chql/core';
+import { uniqExact, uniqExactIf, from, table, col, val, exprNode, relNode, flatOutput, columnExpr, unionAll, scalar, type Query } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 const q = from(table('strings', { value: col.String, selected: col.Nullable(col.Bool) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 it('emits exact/If with shared not value-deduplicated Params through union and scalar', () => {

@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const snapshots = join(root, 'test/types/snapshots/corpus');
 const refresh = process.argv.includes('--refresh');
 const selfTest = process.argv.includes('--self-test');
-const version = process.env.CHQL_TYPESCRIPT_VERSION;
+const version = process.env.TYPEDHOUSE_TYPESCRIPT_VERSION;
 const cli = [...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc'])];
 function run(args, success = true) {
   const result = spawnSync('pnpm', [...cli, ...args], { cwd: root, encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
@@ -20,7 +20,7 @@ function run(args, success = true) {
 const actualVersion = run(['--version']).stdout.trim().replace(/^Version /, '');
 assert.match(actualVersion, /^\d+\.\d+\.\d+$/);
 console.log(`Corpus official CLI TypeScript ${actualVersion}`);
-const directory = mkdtempSync(join(tmpdir(), 'chql-corpus-types-'));
+const directory = mkdtempSync(join(tmpdir(), 'typedhouse-corpus-types-'));
 function verifySnapshot(path, text) {
   assert.equal(readFileSync(path, 'utf8'), text, `Stale snapshot: ${path}`);
 }
@@ -57,18 +57,18 @@ function readable(text, path) {
 }
 try {
   mkdirSync(snapshots, { recursive: true });
-  mkdirSync(join(directory, 'node_modules/@chql'), { recursive: true });
-  symlinkSync(join(root, 'packages/core'), join(directory, 'node_modules/@chql/core'), 'dir');
+  mkdirSync(join(directory, 'node_modules/@typedhouse'), { recursive: true });
+  symlinkSync(join(root, 'packages/core'), join(directory, 'node_modules/@typedhouse/core'), 'dir');
   symlinkSync(join(root, 'node_modules/expect-type'), join(directory, 'node_modules/expect-type'), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
   const files = ['packages/compiler/test/fixtures/corpus/supported-types.ts', 'test/types/bench/queries.ts', 'packages/compiler/test/fixtures/corpus/components-latest.ts', 'packages/compiler/test/fixtures/corpus/projection-enrichment.ts', 'packages/compiler/test/fixtures/corpus/known-functions.ts', 'packages/compiler/test/fixtures/corpus/user-functions.ts'];
-  const config = { compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true, incremental: false, skipLibCheck: false, types: [], declaration: true, rootDir: root, outDir: join(directory, 'emit'), paths: { '@chql/core': [join(root, 'packages/core/dist/index.d.ts')] } }, files: files.map(f => join(root, f)) };
+  const config = { compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true, incremental: false, skipLibCheck: false, types: [], declaration: true, rootDir: root, outDir: join(directory, 'emit'), paths: { '@typedhouse/core': [join(root, 'packages/core/dist/index.d.ts')] } }, files: files.map(f => join(root, f)) };
   const configPath = join(directory, 'tsconfig.json');
   writeFileSync(configPath, JSON.stringify(config));
   run(['-p', configPath]);
   run(['-p', configPath, '--emitDeclarationOnly']);
   let rows = '// Generated solely from ordered runtime CHType output; check-corpus-types.mjs.\n';
-  let assertions = "// Generated exact/not-any correspondence to independently runtime-derived snapshots.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport * as supported from '../../packages/compiler/test/fixtures/corpus/supported-types.js';\nimport * as bench from './bench/queries.js';\nimport type * as Snapshot from './snapshots/corpus/rows.js';\n";
+  let assertions = "// Generated exact/not-any correspondence to independently runtime-derived snapshots.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport * as supported from '../../packages/compiler/test/fixtures/corpus/supported-types.js';\nimport * as bench from './bench/queries.js';\nimport type * as Snapshot from './snapshots/corpus/rows.js';\n";
   const descriptors = {};
   const declarations = [];
   for (const [index, source] of files.slice(0, 2).entries()) {
@@ -89,18 +89,18 @@ try {
   const latestOutput = latestModule.componentsLatest.ir.output;
   sameOrRefresh(join(snapshots, 'components-latest-row.d.ts'), `// Generated from runtime CHType output.\nexport type ComponentsLatest = ${decoded(latestOutput)};\n`);
   sameOrRefresh(join(snapshots, 'components-latest-descriptors.json'), JSON.stringify(latestOutput, null, 2) + '\n');
-  const latestAssertions = `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { componentsLatest } from '../../packages/compiler/test/fixtures/corpus/components-latest.js';\nimport type { ComponentsLatest } from './snapshots/corpus/components-latest-row.js';\nexpectTypeOf<Infer<typeof componentsLatest>>().toEqualTypeOf<ComponentsLatest>();\nexpectTypeOf<Infer<typeof componentsLatest>>().not.toBeAny();\n`;
+  const latestAssertions = `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { componentsLatest } from '../../packages/compiler/test/fixtures/corpus/components-latest.js';\nimport type { ComponentsLatest } from './snapshots/corpus/components-latest-row.js';\nexpectTypeOf<Infer<typeof componentsLatest>>().toEqualTypeOf<ComponentsLatest>();\nexpectTypeOf<Infer<typeof componentsLatest>>().not.toBeAny();\n`;
   sameOrRefresh(join(root, 'test/types/components-latest-corpus.ts'), latestAssertions);
   declarations.push([`components-latest-${actualVersion}.d.ts`, readFileSync(join(directory, 'emit', files[2].replace(/\.ts$/, '.d.ts')), 'utf8')]);
   const projectionModule = await import(pathToFileURL(join(directory, 'emit', files[3].replace(/\.ts$/, '.js'))).href);
   const projectionOutput = projectionModule.projectionEnrichment.ir.output;
   sameOrRefresh(join(snapshots, 'projection-enrichment-row.d.ts'), `// Generated from runtime CHType output.\nexport type ProjectionEnrichment = ${decoded(projectionOutput)};\n`);
   sameOrRefresh(join(snapshots, 'projection-enrichment-descriptors.json'), JSON.stringify(projectionOutput, null, 2) + '\n');
-  sameOrRefresh(join(root, 'test/types/projection-enrichment-corpus.ts'), `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { projectionEnrichment } from '../../packages/compiler/test/fixtures/corpus/projection-enrichment.js';\nimport type { ProjectionEnrichment } from './snapshots/corpus/projection-enrichment-row.js';\nexpectTypeOf<Infer<typeof projectionEnrichment>>().toEqualTypeOf<ProjectionEnrichment>();\nexpectTypeOf<Infer<typeof projectionEnrichment>>().not.toBeAny();\n`);
+  sameOrRefresh(join(root, 'test/types/projection-enrichment-corpus.ts'), `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { projectionEnrichment } from '../../packages/compiler/test/fixtures/corpus/projection-enrichment.js';\nimport type { ProjectionEnrichment } from './snapshots/corpus/projection-enrichment-row.js';\nexpectTypeOf<Infer<typeof projectionEnrichment>>().toEqualTypeOf<ProjectionEnrichment>();\nexpectTypeOf<Infer<typeof projectionEnrichment>>().not.toBeAny();\n`);
   declarations.push([`projection-enrichment-${actualVersion}.d.ts`, readFileSync(join(directory, 'emit', files[3].replace(/\.ts$/, '.d.ts')), 'utf8')]);
   const knownModule = await import(pathToFileURL(join(directory, 'emit', files[4].replace(/\.ts$/, '.js'))).href);
   let knownRows = '// Generated from runtime CHType output.\n';
-  let knownAssertions = `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport * as queries from '../../packages/compiler/test/fixtures/corpus/known-functions.js';\nimport type * as Snapshot from './snapshots/corpus/known-functions-row.js';\n`;
+  let knownAssertions = `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport * as queries from '../../packages/compiler/test/fixtures/corpus/known-functions.js';\nimport type * as Snapshot from './snapshots/corpus/known-functions-row.js';\n`;
   const knownDescriptors = {};
   for (const [name, query] of Object.entries(knownModule)) {
     knownDescriptors[name] = query.ir.output;
@@ -115,7 +115,7 @@ try {
   const userOutput = userModule.userEditDistance.ir.output;
   sameOrRefresh(join(snapshots, 'user-functions-row.d.ts'), `// Generated from runtime CHType output.\nexport type UserEditDistance = ${decoded(userOutput)};\n`);
   sameOrRefresh(join(snapshots, 'user-functions-descriptors.json'), JSON.stringify(userOutput, null, 2) + '\n');
-  sameOrRefresh(join(root, 'test/types/user-functions-corpus.ts'), `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { userEditDistance } from '../../packages/compiler/test/fixtures/corpus/user-functions.js';\nimport type { UserEditDistance } from './snapshots/corpus/user-functions-row.js';\nexpectTypeOf<Infer<typeof userEditDistance>>().toEqualTypeOf<UserEditDistance>();\nexpectTypeOf<Infer<typeof userEditDistance>>().not.toBeAny();\n`);
+  sameOrRefresh(join(root, 'test/types/user-functions-corpus.ts'), `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { userEditDistance } from '../../packages/compiler/test/fixtures/corpus/user-functions.js';\nimport type { UserEditDistance } from './snapshots/corpus/user-functions-row.js';\nexpectTypeOf<Infer<typeof userEditDistance>>().toEqualTypeOf<UserEditDistance>();\nexpectTypeOf<Infer<typeof userEditDistance>>().not.toBeAny();\n`);
   declarations.push([`user-functions-${actualVersion}.d.ts`, readFileSync(join(directory, 'emit', files[5].replace(/\.ts$/, '.d.ts')), 'utf8')]);
   const coverage = JSON.parse(readFileSync(join(root, 'test/types/corpus-coverage.json'), 'utf8'));
   assert.equal(coverage.fullM3, false);
@@ -128,7 +128,7 @@ try {
   sameOrRefresh(join(snapshots, 'rows.d.ts'), rows);
   sameOrRefresh(join(snapshots, 'descriptors.json'), JSON.stringify(descriptors, null, 2) + '\n');
   sameOrRefresh(join(root, 'test/types/corpus-types.ts'), assertions);
-  const benchAssertions = "// Generated runtime correspondence for the isolated 200+2 bench.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport * as bench from './queries.js';\nimport type * as Snapshot from '../snapshots/corpus/rows.js';\n" + assertions.split('\n').filter(line => line.startsWith('expectTypeOf<Infer<typeof bench.')).join('\n') + '\n';
+  const benchAssertions = "// Generated runtime correspondence for the isolated 200+2 bench.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport * as bench from './queries.js';\nimport type * as Snapshot from '../snapshots/corpus/rows.js';\n" + assertions.split('\n').filter(line => line.startsWith('expectTypeOf<Infer<typeof bench.')).join('\n') + '\n';
   sameOrRefresh(join(root, 'test/types/bench/correspondence.ts'), benchAssertions);
   console.log(`${Object.keys(descriptors).length} runtime-derived row snapshots; checking exact/not-any inference.`);
   // Compile exactly the checked-in correspondence assertions against published types.
@@ -140,11 +140,11 @@ try {
     const stalePath = join(directory, 'stale.d.ts');
     writeFileSync(stalePath, rows + '// stale');
     assert.throws(() => verifySnapshot(stalePath, rows), /Stale snapshot/);
-    assert.throws(() => readable('export declare const broken: import("@chql/core").Query<Infer<Row<X>>>;', 'synthetic.d.ts'), /Unreadable/);
+    assert.throws(() => readable('export declare const broken: import("@typedhouse/core").Query<Infer<Row<X>>>;', 'synthetic.d.ts'), /Unreadable/);
     // Real compiler controls: mutate an expected field, then widen the inferred row.
     const probe = join(directory, 'control.ts');
     const row = 'supported_filterTenantActive';
-    const prefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { filterTenantActive } from ${JSON.stringify(join(root, files[0]).replace(/\.ts$/, '.js'))};\n`;
+    const prefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { filterTenantActive } from ${JSON.stringify(join(root, files[0]).replace(/\.ts$/, '.js'))};\n`;
     for (const assertion of [
       `type Expected = ${decoded(descriptors[row]).replace('"tenantId": string', '"tenantId": number')};\nexpectTypeOf<Infer<typeof filterTenantActive>>().toEqualTypeOf<Expected>();`,
       `type Expected = ${decoded(descriptors[row])};\nexpectTypeOf<Infer<typeof filterTenantActive> | undefined>().toEqualTypeOf<Expected>();`,
@@ -158,7 +158,7 @@ try {
       assert.notEqual(failure.status, 0);
       assert.match(failure.stdout, /control\.ts.*error TS/);
     }
-    const latestPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { componentsLatest } from ${JSON.stringify(join(root, files[2]).replace(/\.ts$/, '.js'))};\n`;
+    const latestPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { componentsLatest } from ${JSON.stringify(join(root, files[2]).replace(/\.ts$/, '.js'))};\n`;
     for (const [from, to] of [['"asOf": Date', '"asOf": string'], ['"category": (string) | null', '"category": string']]) {
       const wrong = decoded(latestOutput).replace(from, to);
       assert.notEqual(wrong, decoded(latestOutput), 'Control must really mutate a descriptor-derived field');
@@ -167,7 +167,7 @@ try {
       assert.notEqual(failure.status, 0);
       assert.match(failure.stdout, /control\.ts.*error TS/);
     }
-    const projectionPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { projectionEnrichment } from ${JSON.stringify(join(root, files[3]).replace(/\.ts$/, '.js'))};\n`;
+    const projectionPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { projectionEnrichment } from ${JSON.stringify(join(root, files[3]).replace(/\.ts$/, '.js'))};\n`;
     for (const [from, to] of [['"age": bigint', '"age": number'], ['"category": string', '"category": string | null'], ['"tier": string', '"tier": string | null']]) {
       const wrong = decoded(projectionOutput).replace(from, to);
       assert.notEqual(wrong, decoded(projectionOutput));
@@ -176,14 +176,14 @@ try {
       assert.notEqual(failure.status, 0);
       assert.match(failure.stdout, /control\.ts.*error TS/);
     }
-    const knownPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { knownHash } from ${JSON.stringify(join(root, files[4]).replace(/\.ts$/, '.js'))};\n`;
+    const knownPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { knownHash } from ${JSON.stringify(join(root, files[4]).replace(/\.ts$/, '.js'))};\n`;
     const wrongKnown = decoded(knownDescriptors.knownHash).replace('bigint', 'number');
     assert.notEqual(wrongKnown, decoded(knownDescriptors.knownHash));
     writeFileSync(probe, knownPrefix + `type Expected = ${wrongKnown};\nexpectTypeOf<Infer<typeof knownHash>>().toEqualTypeOf<Expected>();`);
     const knownFailure = run(['-p', configPath], false);
     assert.notEqual(knownFailure.status, 0);
     assert.match(knownFailure.stdout, /control\.ts.*error TS/);
-    const userPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { userEditDistance } from ${JSON.stringify(join(root, files[5]).replace(/\.ts$/, '.js'))};\n`;
+    const userPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { userEditDistance } from ${JSON.stringify(join(root, files[5]).replace(/\.ts$/, '.js'))};\n`;
     const wrongUser = decoded(userOutput).replace('bigint', 'number');
     assert.notEqual(wrongUser, decoded(userOutput));
     writeFileSync(probe, userPrefix + `type Expected = ${wrongUser};\nexpectTypeOf<Infer<typeof userEditDistance>>().toEqualTypeOf<Expected>();`);

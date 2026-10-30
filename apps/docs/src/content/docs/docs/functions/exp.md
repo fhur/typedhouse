@@ -5,7 +5,7 @@ sidebar:
   order: 26
 ---
 
-`value.exp()` computes e raised to the value. The free `exp(value)` export from `@chql/core` builds the same function; both forms return a Float64 expression.
+`value.exp()` computes e raised to the value. The free `exp(value)` export from `@typedhouse/core` builds the same function; both forms return a Float64 expression.
 
 ## Example
 
@@ -13,8 +13,8 @@ sidebar:
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, exp, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, exp, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const scores = table(
   'scores',
@@ -48,9 +48,9 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
-  exp(`__chql_input`.`logWeight`) AS `methodWeight`,
-  exp(`__chql_input`.`logWeight`) AS `functionWeight`
+  `__typedhouse_input`.`id` AS `id`,
+  exp(`__typedhouse_input`.`logWeight`) AS `methodWeight`,
+  exp(`__typedhouse_input`.`logWeight`) AS `functionWeight`
 FROM
   (
     SELECT
@@ -58,7 +58,7 @@ FROM
       `logWeight`
     FROM
       `scores`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

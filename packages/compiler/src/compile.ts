@@ -1,4 +1,4 @@
-import type { CompiledQuery, Rel } from '@chql/core';
+import type { CompiledQuery, Rel } from '@typedhouse/core';
 import { emitPlanned, validateRel } from './emit-naive.js';
 import { planSelects } from './plan-selects.js';
 

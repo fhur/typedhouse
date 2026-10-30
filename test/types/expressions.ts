@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { Expr, cast, col, count, countIf, defineAggregate, defineFunction, max, maxIf, maxState, countMerge, stringLike, sum, sumIf, sumState, val, type DescribedConstant, type DescribedExpr, type AggExpr, type AggregateState, type Grouped, type GroupedRow, type Infer, type Row } from '@chql/core';
+import { Expr, cast, col, count, countIf, defineAggregate, defineFunction, max, maxIf, maxState, countMerge, stringLike, sum, sumIf, sumState, val, type DescribedConstant, type DescribedExpr, type AggExpr, type AggregateState, type Grouped, type GroupedRow, type Infer, type Row } from '@typedhouse/core';
 const forTenant = (tenantId: string) => <R extends { tenantId: string }>(r: Row<R>) => r.tenantId.eq(tenantId);
 expectTypeOf(forTenant('acme')({ tenantId: val('acme') as Expr<string, 'tenantId'> })).toEqualTypeOf<Expr<boolean, 'tenantId'>>();
 function genericVersion<R extends { version: number }>(r: Row<R>, v: Expr<number, 'version'>) { return r.version.eq(v); }
@@ -50,8 +50,8 @@ expectTypeOf(countIf(val(true))).toEqualTypeOf<AggExpr<bigint, 'count'>>();
 expectTypeOf(phantoms(sumIf(declaredConstant, val(true)))).toEqualTypeOf<AggExpr<bigint, 'sum'>>();
 expectTypeOf(phantoms(sumIf(declaredConstant, g.stock.gt(0n)))).toEqualTypeOf<AggExpr<bigint, 'stock'>>();
 expectTypeOf(phantoms(maxIf(declaredConstant, g.stock.gt(0n)))).toEqualTypeOf<AggExpr<bigint, 'stock'>>();
-expectTypeOf(sumState(declaredConstant)).toEqualTypeOf<DescribedExpr<AggregateState<'sum'>, 'sum', 'agg', { readonly kind: 'AggregateFunction'; readonly fn: 'sum'; readonly args: [typeof declaredConstant.ir.type & import('@chql/core').CHType] }>>();
-expectTypeOf(maxState(declaredConstant)).toEqualTypeOf<DescribedExpr<AggregateState<'max'>, 'max', 'agg', { readonly kind: 'AggregateFunction'; readonly fn: 'max'; readonly args: [typeof declaredConstant.ir.type & import('@chql/core').CHType] }>>();
+expectTypeOf(sumState(declaredConstant)).toEqualTypeOf<DescribedExpr<AggregateState<'sum'>, 'sum', 'agg', { readonly kind: 'AggregateFunction'; readonly fn: 'sum'; readonly args: [typeof declaredConstant.ir.type & import('@typedhouse/core').CHType] }>>();
+expectTypeOf(maxState(declaredConstant)).toEqualTypeOf<DescribedExpr<AggregateState<'max'>, 'max', 'agg', { readonly kind: 'AggregateFunction'; readonly fn: 'max'; readonly args: [typeof declaredConstant.ir.type & import('@typedhouse/core').CHType] }>>();
 expectTypeOf(countMerge(val({ __aggregateState: 'count' }, col.AggregateFunction('count')))).toEqualTypeOf<AggExpr<bigint, 'count'>>();
 // @ts-expect-error declaring a row column does not turn it into a constant
 sum(r.stock.as(col.UInt64));

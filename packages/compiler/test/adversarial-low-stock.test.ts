@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, count, from, sum, table } from '@chql/core';
+import { col, count, from, sum, table } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { emitPlanned } from '../src/emit-naive.js';
 import { planSelects } from '../src/plan-selects.js';
@@ -25,7 +25,7 @@ it('preserves separately planned HAVING disjunctions without relying on MergeFil
     .where(r => r.tally.eq(1n).or(r.tally.eq(2n)))
     .where(r => r.tally.gt(1n));
   // Exercise physical clause composition before the optional logical merge.
-  expect(emitPlanned(planSelects(query.ir, [query.ir])).sql).toBe('SELECT count() AS `tally` FROM `review_numbers` AS `__chql_input` HAVING (`tally` = {p0:UInt64} OR `tally` = {p1:UInt64}) AND `tally` > {p2:UInt64}');
+  expect(emitPlanned(planSelects(query.ir, [query.ir])).sql).toBe('SELECT count() AS `tally` FROM `review_numbers` AS `__typedhouse_input` HAVING (`tally` = {p0:UInt64} OR `tally` = {p1:UInt64}) AND `tally` > {p2:UInt64}');
 });
 
 it('does not wrap a single OR clause unnecessarily', () => {
@@ -36,6 +36,6 @@ it('preserves OR on either side of aggregate source WHERE conjunctions', () => {
   const query = q.where(r => r.n.eq(1).or(r.n.eq(2)))
     .where(r => r.n.gt(1).or(r.n.lt(0)))
     .aggregate(g => ({ total: sum(g.n) }));
-  expect(compile(query.ir).sql).toBe('SELECT sum(`__chql_input`.`n`) AS `total` FROM `review_numbers` AS `__chql_input` WHERE (`__chql_input`.`n` = {p0:Float64} OR `__chql_input`.`n` = {p1:Float64}) AND (`__chql_input`.`n` > {p2:Float64} OR `__chql_input`.`n` < {p3:Float64})');
+  expect(compile(query.ir).sql).toBe('SELECT sum(`__typedhouse_input`.`n`) AS `total` FROM `review_numbers` AS `__typedhouse_input` WHERE (`__typedhouse_input`.`n` = {p0:Float64} OR `__typedhouse_input`.`n` = {p1:Float64}) AND (`__typedhouse_input`.`n` > {p2:Float64} OR `__typedhouse_input`.`n` < {p3:Float64})');
   expect(compile(query.ir).params).toEqual(emitNaive(query.ir).params);
 });

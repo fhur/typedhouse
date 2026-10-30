@@ -10,7 +10,7 @@
     "incremental": false,
     "noEmit": true,
     "types": [],
-    "paths": { "@chql/core": ["../../../packages/core/dist/index.d.ts"] }
+    "paths": { "@typedhouse/core": ["../../../packages/core/dist/index.d.ts"] }
   },
   "files": ["queries.ts", "correspondence.ts", "chain25.ts", "join10.ts"]
 }

@@ -1,4 +1,4 @@
-import { print, type CHType, type ExprNode } from '@chql/core';
+import { print, type CHType, type ExprNode } from '@typedhouse/core';
 
 /** Decoder-backed bounded result grammar. No Unknown-to-String fallback. */
 function supported(type: CHType): boolean {

@@ -1,4 +1,4 @@
-import { col, columnExpr, count, defineFunction, from, stringLike, table, val, type NodeId } from '@chql/core';
+import { col, columnExpr, count, defineFunction, from, stringLike, table, val, type NodeId } from '@typedhouse/core';
 const distance = defineFunction({ name: 'editDistance', args: [stringLike, stringLike], returns: col.UInt64, deterministic: true });
 const repeat = defineFunction({ name: 'repeat', args: [col.String, col.UInt64], returns: col.String, deterministic: true });
 const q = from(table('parts', { mpn: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));

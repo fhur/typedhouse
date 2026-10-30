@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, from, table, val } from '@chql/core';
+import { col, from, table, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { planSelects } from '../src/plan-selects.js';
 
@@ -44,7 +44,7 @@ it('pushes renames while keeping computed columns and sort/limit as fences', () 
   ];
   expect(cases.map(query => countSelects(compile(query.ir).sql))).toEqual([2, 3, 3, 2]);
   expect(compile(cases[0]!.ir).sql).toContain('WHERE `stock` > {p0:UInt32}');
-  expect(compile(cases[3]!.ir).sql).toContain('LIMIT 1) AS `__chql_input` WHERE `__chql_input`.`id` > {p0:UInt32}');
+  expect(compile(cases[3]!.ir).sql).toContain('LIMIT 1) AS `__typedhouse_input` WHERE `__typedhouse_input`.`id` > {p0:UInt32}');
 });
 
 it('folds inside set subqueries and retains the outer scope', () => {

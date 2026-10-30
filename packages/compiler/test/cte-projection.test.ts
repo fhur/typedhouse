@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { col, from, table } from '@chql/core';
+import { col, from, table } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 
 const events = table('events', { id: col.UInt32, tenant: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
@@ -30,6 +30,6 @@ it('keeps renamed and computed projections in explicit scopes', () => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   const input = from(events).cte();
   for (const query of [input.map(r => ({ renamed: r.id })), input.map(r => ({ id: r.id.plus(1) }))]) {
-    expect(compile(query.ir).sql).toContain(') AS `__chql_input`');
+    expect(compile(query.ir).sql).toContain(') AS `__typedhouse_input`');
   }
 });

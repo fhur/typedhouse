@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import fc from 'fast-check';
-import { compile, emitNaive, ValidationError } from '@chql/compiler';
-import { crossJoin } from '@chql/core';
+import { compile, emitNaive, ValidationError } from '@typedhouse/compiler';
+import { crossJoin } from '@typedhouse/core';
 import { createClickHouseBackend, createClientFromBackend } from '../src/index.js';
 import { build, recipeArbitrary, seed, shape } from './cte-arbitrary.js';
 import { source } from './pruning-arbitrary.js';

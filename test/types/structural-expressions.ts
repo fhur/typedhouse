@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, sum, val, type Column, type Expr, type NodeId, type Decimal } from '@chql/core';
+import { col, columnExpr, sum, val, type Column, type Expr, type NodeId, type Decimal } from '@typedhouse/core';
 const column = <C extends Column>(c: C) => columnExpr(c, 1 as NodeId, ['parts'], 'parts', 'grouped');
 type Phantoms<E> = E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
 const parts = column(col.Array(col.Tuple({ mpn: col.Nullable(col.String), description: col.Nullable(col.String), at: col.DateTime64(9) })));

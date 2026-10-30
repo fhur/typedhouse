@@ -1,5 +1,5 @@
 import type { ClickHouseClientConfigOptions } from '@clickhouse/client';
-import type { Caps, Query, Rel } from '@chql/core';
+import type { Caps, Query, Rel } from '@typedhouse/core';
 import { createClickHouseBackend, type Backend, type Plan } from './backend.js';
 export { createClickHouseBackend, type Backend, type Plan } from './backend.js';
 export { decoder, rowDecoder } from './decode.js';

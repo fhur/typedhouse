@@ -14,7 +14,7 @@ const directory = section === 'readme'
   ? new URL('../../../', import.meta.url)
   : new URL(`../src/content/docs/docs/${section === 'guides' ? '' : `${section}/`}`, import.meta.url);
 const check = process.argv.includes('--check');
-const cache = new URL(`../node_modules/.cache/chql-${section}-examples/`, import.meta.url);
+const cache = new URL(`../node_modules/.cache/typedhouse-${section}-examples/`, import.meta.url);
 await mkdir(cache, { recursive: true });
 const files = [];
 const names = section === 'readme' ? ['README.md'] : section === 'guides'
@@ -41,8 +41,8 @@ for (const name of names) {
       stdin: { contents: source, loader: 'ts', resolveDir: root },
       bundle: true, write: false, format: 'esm', platform: 'node',
       alias: {
-        '@chql/core': `${root}packages/core/src/index.ts`,
-        '@chql/compiler': `${root}packages/compiler/src/index.ts`,
+        '@typedhouse/core': `${root}packages/core/src/index.ts`,
+        '@typedhouse/compiler': `${root}packages/compiler/src/index.ts`,
       },
     });
     let compiled;
@@ -71,7 +71,7 @@ for (const name of names) {
   assert.ok(!/```ts\n/.test(trailing), `${name}: TypeScript example is missing output markers`);
   if (!exampleIndex) continue;
   updated += trailing;
-  if (check) assert.equal(markdown, updated, `${name}: run pnpm --filter @chql/docs examples:${section}`);
+  if (check) assert.equal(markdown, updated, `${name}: run pnpm --filter @typedhouse/docs examples:${section}`);
   else await writeFile(path, updated);
   console.log(`${check ? 'Verified' : 'Generated'} ${name}`);
 }
@@ -80,9 +80,9 @@ const program = ts.createProgram(files, {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
   moduleResolution: ts.ModuleResolutionKind.NodeNext,
   paths: {
-    '@chql/core': [`${root}packages/core/src/index.ts`],
-    '@chql/compiler': [`${root}packages/compiler/src/index.ts`],
-    '@chql/client': [`${root}packages/client/src/index.ts`],
+    '@typedhouse/core': [`${root}packages/core/src/index.ts`],
+    '@typedhouse/compiler': [`${root}packages/compiler/src/index.ts`],
+    '@typedhouse/client': [`${root}packages/client/src/index.ts`],
   },
 });
 const diagnostics = ts.getPreEmitDiagnostics(program);

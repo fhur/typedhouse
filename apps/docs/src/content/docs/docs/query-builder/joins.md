@@ -15,8 +15,8 @@ Match events to accounts, then project a flat result with explicit field names.
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, join, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, join, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',

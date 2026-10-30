@@ -1,4 +1,4 @@
-import { print as printType, type CHType } from '@chql/core';
+import { print as printType, type CHType } from '@typedhouse/core';
 
 /** Date values are instants: parse our UTC text in UTC, not the sibling/server timezone.
  * Keep the resolved sibling descriptor on the IR and for identity checks. The

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, type CHType, type Rel } from '@chql/core';
+import { col, type CHType, type Rel } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 import { validateStructure } from '../src/validate-structure.js';
 import { mutation, source } from './validation-arbitrary.js';

@@ -1,6 +1,6 @@
 import { createClient as createDriver, type ClickHouseClientConfigOptions } from '@clickhouse/client';
-import { compile, emitNaive } from '@chql/compiler';
-import { unwrap, type CompiledQuery, type Rel } from '@chql/core';
+import { compile, emitNaive } from '@typedhouse/compiler';
+import { unwrap, type CompiledQuery, type Rel } from '@typedhouse/core';
 import { rowDecoder } from './decode.js';
 import { QueryError } from './errors.js';
 

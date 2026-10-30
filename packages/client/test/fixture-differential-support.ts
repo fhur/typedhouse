@@ -1,4 +1,4 @@
-import type { Rel } from '@chql/core';
+import type { Rel } from '@typedhouse/core';
 import type { Tree, Recipe } from './fixture-differential-arbitrary.js';
 export function size(t: Tree): number { return t.op === 'metric' ? 1 : t.op === 'union' ? 1 + size(t.left) + size(t.repeat ? t.left : t.right) : 1 + size(t.input); }
 export function coverage(r: Recipe): string[] {

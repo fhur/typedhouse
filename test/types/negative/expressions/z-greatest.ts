@@ -1,4 +1,4 @@
-import { col, columnExpr, greatest, max, val, type DescribedExpr, type Expr, type Mode, type NodeId } from '@chql/core';
+import { col, columnExpr, greatest, max, val, type DescribedExpr, type Expr, type Mode, type NodeId } from '@typedhouse/core';
 const id = 1 as NodeId;
 const a = columnExpr(col.DateTime64(1), id, ['a'], 'a', 'row');
 const b = columnExpr(col.DateTime64(3), id, ['b'], 'b', 'row');

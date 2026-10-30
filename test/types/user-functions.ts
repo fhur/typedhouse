@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, count, defineFunction, from, stringLike, table, val, type DefinedFunction, type DescribedExpr, type Infer, type NodeId } from '@chql/core';
+import { col, columnExpr, count, defineFunction, from, stringLike, table, val, type DefinedFunction, type DescribedExpr, type Infer, type NodeId } from '@typedhouse/core';
 const editDistance = defineFunction({ name: 'editDistance', args: [stringLike, stringLike], returns: col.UInt64, deterministic: true });
 const parts = from(table('parts', { mpn: col.String, optional: col.Nullable(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 const query = parts.map(p => ({ mpn: p.mpn, distance: editDistance(p.mpn, 'GRM155R61A104KA01D') }));

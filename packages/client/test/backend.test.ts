@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { col, from, table, val } from '@chql/core';
-import { compile, emitNaive } from '@chql/compiler';
+import { col, from, table, val } from '@typedhouse/core';
+import { compile, emitNaive } from '@typedhouse/compiler';
 import { createClient, createClientFromBackend, createClickHouseBackend, QueryError, type Backend } from '../src/index.js';
 import { collect } from './backend-harness.js';
 const driver = vi.hoisted(() => ({ query: vi.fn(), close: vi.fn(async () => {}) }));

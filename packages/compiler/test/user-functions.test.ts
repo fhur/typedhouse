@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { col, count, defineFunction, defineAggregate, deterministic, Expr, from, numeric, print, stringLike, table, val, type ExprNode, type Rel } from '@chql/core';
+import { col, count, defineFunction, defineAggregate, deterministic, Expr, from, numeric, print, stringLike, table, val, type ExprNode, type Rel } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 import { safePredicate } from '../src/rewrite-expressions.js';
 const source = from(table('parts', { mpn: col.String, nullable: col.Nullable(col.String), n: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));

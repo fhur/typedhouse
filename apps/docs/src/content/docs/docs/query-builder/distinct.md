@@ -15,8 +15,8 @@ Return each tenant once, regardless of how many events belong to it.
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -48,14 +48,14 @@ Final SQL:
 
 ```sql
 SELECT DISTINCT
-  `__chql_input`.`tenant`
+  `__typedhouse_input`.`tenant`
 FROM
   (
     SELECT
       `tenant`
     FROM
       `events`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

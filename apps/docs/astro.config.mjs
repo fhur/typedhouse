@@ -6,7 +6,7 @@ import rehypeBaseLinks from './scripts/rehype-base-links.mjs';
 const base = process.env.BASE_PATH || '/';
 
 export default defineConfig({
-  site: process.env.SITE_URL || 'https://chql.pages.dev',
+  site: process.env.SITE_URL || 'https://fhur.github.io',
   output: 'static',
   base,
   markdown: { rehypePlugins: [[rehypeBaseLinks, { base }]] },

@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, sum, sumIf, sumMerge, max, maxIf, maxMerge, sumState, maxState, val, type Expr, type NodeId, type Decimal } from '@chql/core';
+import { col, columnExpr, sum, sumIf, sumMerge, max, maxIf, maxMerge, sumState, maxState, val, type Expr, type NodeId, type Decimal } from '@typedhouse/core';
 
 type Phantoms<E> = E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
 declare function phantoms<E>(value: E): Phantoms<E>;
@@ -31,7 +31,7 @@ const builtState = sumState(f);
 expectTypeOf(builtState.ir.type.fn).toEqualTypeOf<'sum'>();
 expectTypeOf(builtState.ir.type.args[0].name).toEqualTypeOf<'Float64'>();
 // Aggregate output becomes grouped at the next relational boundary, preserving its descriptor.
-const regrouped = columnExpr({ type: builtState.ir.type } as import('@chql/core').Column<import('@chql/core').AggregateState<'sum'>, false, typeof builtState.ir.type>, 2 as NodeId, ['s'], 's', 'grouped');
+const regrouped = columnExpr({ type: builtState.ir.type } as import('@typedhouse/core').Column<import('@typedhouse/core').AggregateState<'sum'>, false, typeof builtState.ir.type>, 2 as NodeId, ['s'], 's', 'grouped');
 expectTypeOf(phantoms(sumMerge(regrouped))).toEqualTypeOf<Expr<number, 's', 'agg'>>();
 expectTypeOf(sumMerge(regrouped)).not.toBeAny();
 expectTypeOf(phantoms(maxMerge(columnExpr(col.AggregateFunction('max', col.Float64), 1 as NodeId, ['s'], 's', 'grouped')))).toEqualTypeOf<Expr<number, 's', 'agg'>>();

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { col, createKnownFunctions, from, join, table, val, type Rel } from '@chql/core';
-import { decoder } from '@chql/client';
+import { col, createKnownFunctions, from, join, table, val, type Rel } from '@typedhouse/core';
+import { decoder } from '@typedhouse/client';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 import { conjuncts, safePredicate, safeAggregate } from '../src/rewrite-expressions.js';
 

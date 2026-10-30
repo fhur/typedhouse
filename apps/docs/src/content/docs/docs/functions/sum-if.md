@@ -15,8 +15,8 @@ Result widening matches `sum`: small integers become 64-bit integers (`bigint`),
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, sumIf, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, sumIf, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const orders = table(
   'orders',
@@ -47,12 +47,15 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`customer` AS `customer`,
-  sumIf (`__chql_input`.`amount`, `__chql_input`.`paid`) AS `paidAmount`
+  `__typedhouse_input`.`customer` AS `customer`,
+  sumIf (
+    `__typedhouse_input`.`amount`,
+    `__typedhouse_input`.`paid`
+  ) AS `paidAmount`
 FROM
-  `orders` AS `__chql_input`
+  `orders` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`customer`
+  `__typedhouse_input`.`customer`
 ```
 
 Parameters:

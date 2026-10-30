@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import fc from 'fast-check';
-import { compile, emitNaive } from '@chql/compiler';
+import { compile, emitNaive } from '@typedhouse/compiler';
 import { type Backend } from '../src/index.js';
 import { differential } from './backend-harness.js';
 import { anchors, build, recipeArbitrary, seed, topology, type Tree } from './differential-arbitrary.js';

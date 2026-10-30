@@ -1,4 +1,4 @@
-import { from, table, col, unionAll, count } from '@chql/core';
+import { from, table, col, unionAll, count } from '@typedhouse/core';
 const q = from(table('t', { id: col.UInt32, name: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 unionAll(q); // expect: TS2345 Source has 0 element(s) but target requires 1
 unionAll(q, q.map(r => r.id)); // expect: TS2345 union_row_mismatch

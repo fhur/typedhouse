@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import fc from 'fast-check';
-import { compile, emitNaive } from '@chql/compiler';
+import { compile, emitNaive } from '@typedhouse/compiler';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { planSelects } from '../../compiler/src/plan-selects.js';
 import { validateRel } from '../../compiler/src/emit-naive.js';

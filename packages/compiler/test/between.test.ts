@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, countIf, from, quantile, table, val } from '@chql/core';
+import { col, countIf, from, quantile, table, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 const q = from(table('ranges', { n: col.UInt64, lo: col.UInt64, hi: col.Nullable(col.UInt64), at: col.DateTime64(3, 'Europe/Amsterdam'), text: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 it('resolves both bounds from the receiver, uses UTC wire types and never inlines values', () => {

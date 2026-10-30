@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, crossJoin, from, join, scalar, sum, table, val } from '@chql/core';
+import { cast, col, count, crossJoin, from, join, scalar, sum, table, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 const meta = { engine: 'MergeTree', sortingKey: [], partitionKey: [] };
 const a = from(table('left_table', { id: col.String, n: col.UInt32, extra: col.String }, meta));
@@ -20,9 +20,9 @@ it('places three-way conditions at the earliest valid occurrence and keeps neste
   const q = join({ a: nested, b, c: a }).on(r => [r.a.x.id.eq(r.b.id), r.a.y.id.eq(r.c.id), r.b.id.eq(r.c.id)])
     .map(r => ({ left: r.a.x.n, right: r.a.y.n, end: r.c.n }));
   const compiled = compile(q.ir);
-  expect(compiled.sql).toContain('`a`.`__chql_leaf_1` AS `left`, `a`.`__chql_leaf_4` AS `right`, `c`.`n` AS `end`');
-  expect(compiled.sql).toContain('AS `b` ON `a`.`__chql_leaf_0` = `b`.`id`');
-  expect(compiled.sql).toContain('AS `c` ON `a`.`__chql_leaf_3` = `c`.`id` AND `b`.`id` = `c`.`id`');
+  expect(compiled.sql).toContain('`a`.`__typedhouse_leaf_1` AS `left`, `a`.`__typedhouse_leaf_4` AS `right`, `c`.`n` AS `end`');
+  expect(compiled.sql).toContain('AS `b` ON `a`.`__typedhouse_leaf_0` = `b`.`id`');
+  expect(compiled.sql).toContain('AS `c` ON `a`.`__typedhouse_leaf_3` = `c`.`id` AND `b`.`id` = `c`.`id`');
   expect(compiled.columns).toEqual(emitNaive(q.ir).columns);
 });
 it('keeps computed, materialized and clause-reversal boundaries, residual predicates and shared demands', () => {
@@ -36,7 +36,7 @@ it('keeps computed, materialized and clause-reversal boundaries, residual predic
   expect(compile(computed.ir).sql).toContain('CAST('); // unused fallible evaluation is not removed
   const limited = crossJoin({ a: a.limit(1), b }).orderBy(r => r.a.id).where(r => r.b.n.gt(0));
   expect(compile(limited.ir).sql).toContain('LIMIT 1');
-  expect(compile(limited.ir).sql).toContain(') AS `__chql_input` WHERE');
+  expect(compile(limited.ir).sql).toContain(') AS `__typedhouse_input` WHERE');
 });
 it('renders precedence from the tree, keeps distinct equal Params and isolated scalar/IN scopes', () => {
   const one = val(1, col.Float64), another = val(1, col.Float64);

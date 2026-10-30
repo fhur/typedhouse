@@ -1,4 +1,4 @@
-import { from, table, col, countIf } from '@chql/core';
+import { from, table, col, countIf } from '@typedhouse/core';
 const q = from(table('s', { id: col.UInt64, text: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.row.id.in([1]); // expect: TS2769 No overload matches this call
 q.row.id.in([null]); // expect: TS2769 No overload matches this call

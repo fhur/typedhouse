@@ -15,8 +15,13 @@ Both UNION inputs reuse the exact same `shared` query object. The compiler extra
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table, unionAll } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  table,
+  unionAll,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -59,8 +64,8 @@ WITH
       `tenant` = {p0:String}
   )
 SELECT
-  `__chql_input`.`id` AS `id`,
-  `__chql_input`.`tenant` AS `tenant`
+  `__typedhouse_input`.`id` AS `id`,
+  `__typedhouse_input`.`tenant` AS `tenant`
 FROM
   (
     SELECT
@@ -68,11 +73,11 @@ FROM
       `t0`.`tenant`
     FROM
       `t0`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 UNION ALL
 SELECT
-  `__chql_input`.`id` AS `id`,
-  `__chql_input`.`tenant` AS `tenant`
+  `__typedhouse_input`.`id` AS `id`,
+  `__typedhouse_input`.`tenant` AS `tenant`
 FROM
   (
     SELECT
@@ -80,7 +85,7 @@ FROM
       `t0`.`tenant`
     FROM
       `t0`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

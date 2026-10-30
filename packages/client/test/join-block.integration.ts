@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { col, from, table, type Caps } from '@chql/core';
+import { col, from, table, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys } from './backend-harness.js';
 import { build, native, recipes, seed, shape, type Recipe } from './join-block-arbitrary.js';
@@ -43,7 +43,7 @@ it('runs 500 shrinkable variable join/project/aggregate recipes against independ
       expect(plans[0]!.compiled.columnPaths).toEqual(plans[1]!.compiled.columnPaths);
       for (const [i, b] of backends.entries()) expect(keys<unknown, Caps>(q, (await collect(b.run(plans[i]!))).flat())).toEqual(keys<unknown, Caps>(q, expected));
     } catch (cause) { throw new Error(`${String(cause)}\n${JSON.stringify(plans.map(p => ({ sql: p.compiled.sql, params: p.compiled.params })))}`, { cause }); }
-  }), { seed: Number(process.env.CHQL_JOIN_BLOCK_SEED ?? seed), numRuns: 500, ...(process.env.CHQL_JOIN_BLOCK_PATH ? { path: process.env.CHQL_JOIN_BLOCK_PATH } : {}) });
+  }), { seed: Number(process.env.TYPEDHOUSE_JOIN_BLOCK_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_JOIN_BLOCK_PATH ? { path: process.env.TYPEDHOUSE_JOIN_BLOCK_PATH } : {}) });
   console.info('join-block differential', { runs: result.numRuns, seed: result.seed, shapes: shapes.size, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(500); expect(shapes.size).toBeGreaterThan(100);

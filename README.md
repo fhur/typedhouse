@@ -26,8 +26,8 @@ TypedHouse is a **ClickHouse query builder**, not an object-relational mapper (O
 Select the first ten purchase event IDs for one tenant. This complete example compiles locally without a database:
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -104,15 +104,15 @@ git clone https://github.com/fhur/typedhouse.git
 cd typedhouse
 corepack enable
 pnpm install --frozen-lockfile
-pnpm --filter @chql/core --filter @chql/compiler --filter @chql/client build
+pnpm --filter @typedhouse/core --filter @typedhouse/compiler --filter @typedhouse/client build
 ```
 
 Workspace consumers use `workspace:*` dependencies. For releases available in your package registry, the package names are:
 
 ```sh
-pnpm add @chql/core @chql/compiler
+pnpm add @typedhouse/core @typedhouse/compiler
 # Optional: execute queries from your Node.js server.
-pnpm add @chql/client
+pnpm add @typedhouse/client
 ```
 
 Registry availability depends on the release you use.
@@ -122,7 +122,7 @@ Registry availability depends on the release you use.
 Append this to the quick example in a **server-side** TypeScript module. Your ClickHouse table must match the descriptor. This snippet is typechecked but never executed by documentation builds.
 
 ```ts typecheck-only
-import { createClient } from '@chql/client';
+import { createClient } from '@typedhouse/client';
 
 const client = createClient({
   url: process.env.CLICKHOUSE_URL ?? 'http://localhost:8123',
@@ -153,7 +153,7 @@ Keep credentials on the server. Never paste them into the playground or include 
 Use schema introspection instead of maintaining table descriptors by hand. From the source repository:
 
 ```sh
-pnpm --filter @chql/codegen... build
+pnpm --filter @typedhouse/codegen... build
 node packages/codegen/dist/cli.js generate \
   --url http://localhost:8123 \
   --database analytics \

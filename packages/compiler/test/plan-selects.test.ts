@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
-import { col, count, from, table } from '@chql/core';
+import { col, count, from, table } from '@typedhouse/core';
 import { validateRel } from '../src/emit-naive.js';
 import { planSelects } from '../src/plan-selects.js';
 
 const t = table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
-const plan = (root: import('@chql/core').Rel) => planSelects(root, Object.values(validateRel(root).nodes));
+const plan = (root: import('@typedhouse/core').Rel) => planSelects(root, Object.values(validateRel(root).nodes));
 
 it('lowers ordered clauses into a block retaining the original scopes', () => {
   const scan = from(t);

@@ -1,4 +1,4 @@
-import { aggregateDefinitions, functionCatalog, isNullable, nullable, print, type CHType, type ExprNode, type UserArgumentContract } from '@chql/core';
+import { aggregateDefinitions, functionCatalog, isNullable, nullable, print, type CHType, type ExprNode, type UserArgumentContract } from '@typedhouse/core';
 
 const safeName = (name: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
 const base = (t: CHType) => t.kind === 'Nullable' ? t.inner : t;

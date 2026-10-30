@@ -13,8 +13,8 @@ sidebar:
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const products = table(
   'products',
@@ -47,8 +47,8 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
-  `__chql_input`.`price` * {p0:Float64} AS `priceWithTax`
+  `__typedhouse_input`.`id` AS `id`,
+  `__typedhouse_input`.`price` * {p0:Float64} AS `priceWithTax`
 FROM
   (
     SELECT
@@ -56,7 +56,7 @@ FROM
       `price`
     FROM
       `products`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

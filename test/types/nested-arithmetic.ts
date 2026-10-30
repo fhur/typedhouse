@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, crossJoin, from, sum, table, val, type Infer } from '@chql/core';
+import { col, crossJoin, from, sum, table, val, type Infer } from '@typedhouse/core';
 
 const numbers = from(table('nested_numbers', { n: col.Float64, u: col.UInt16, nullable: col.Nullable(col.Float64) }, { engine: 'MergeTree', sortingKey: [], partitionKey: [] }));
 const one = val(1, col.Float64);

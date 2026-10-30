@@ -1,4 +1,4 @@
-import { col, from, table, uniqExact, uniqExactIf, val, type Column } from '@chql/core';
+import { col, from, table, uniqExact, uniqExactIf, val, type Column } from '@typedhouse/core';
 const q = from(table('unsupported', { fixed: col.FixedString(3), precise: col.DateTime64(6), decimal: col.Decimal64(2), low: col.LowCardinality(col.String), array: col.Array(col.String), mixed: Math.random() ? col.String : col.DateTime64(6), nested: Math.random() ? col.Nullable(col.String) : col.Nullable(col.FixedString(3)), n: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.aggregate(g => uniqExact(g.fixed)); // expect: TS2345 parameter of type 'never'
 q.aggregate(g => uniqExact(g.precise)); // expect: TS2345 parameter of type 'never'

@@ -1,5 +1,5 @@
-import type { CHType } from '@chql/core';
-import { canonicalKey } from '@chql/core';
+import type { CHType } from '@typedhouse/core';
+import { canonicalKey } from '@typedhouse/core';
 import { decodedRecord } from './backend-harness.js';
 import type { Recipe, Scope, Tree } from './fixture-differential-arbitrary.js';
 

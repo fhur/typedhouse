@@ -1,4 +1,4 @@
-import { isDayDescriptor, setDescriptor, membershipBase, aggregateDefinitions, functionCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@chql/core';
+import { isDayDescriptor, setDescriptor, membershipBase, aggregateDefinitions, functionCatalog, isNullable, nullable, unwrap, print, numeric, stringLike, dateLike, type CHType, type ExprNode } from '@typedhouse/core';
 
 import { resolveKnown } from './resolve-known.js';
 import { resolveUser } from './resolve-user.js';

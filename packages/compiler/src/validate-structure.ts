@@ -1,4 +1,4 @@
-import type { Rel } from '@chql/core';
+import type { Rel } from '@typedhouse/core';
 import { ValidationError } from './validation-error.js';
 
 type Role = 'rel' | 'expr' | 'output' | 'flatOutput' | 'nestedOutput' | 'type' | 'castType' | 'table' | 'fn' | 'aggregateFn' | 'sort' | 'branch' | 'tupleItem' | 'enumItem' | 'provenance' | 'knownEvidence' | 'knownEntry' | 'knownDeclaration' | 'userContract' | 'userArgument';

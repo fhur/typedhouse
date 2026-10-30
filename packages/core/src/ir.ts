@@ -76,7 +76,7 @@ export type Union = RelBase & { readonly kind: 'Union'; readonly inputs: readonl
 export type Materialize = RelBase & { readonly kind: 'Materialize'; readonly input: Rel };
 export type Rel = Scan | RawRel | Filter | Project | Aggregate | Join | ArrayJoin | Sort | Limit | Distinct | Union | Materialize;
 type WithoutId<T> = T extends Node ? Omit<T, 'id'> : never;
-const graphNode = Symbol('chql.graphNode');
+const graphNode = Symbol('typedhouse.graphNode');
 // The marker is inspectable, not an authority: only finalized constructors may
 // enter this weak registry. Inherited/copied symbols must never bypass copying.
 const finalizedNodes = new WeakSet<object>();

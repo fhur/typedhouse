@@ -1,6 +1,6 @@
 # Generated known functions
 
-`chql generate` retains the `functions` metadata export and exports callable `fn` (scalar) and `agg` (aggregate) namespaces using `createKnownFunctions(functions)` from `@chql/core`.
+`typedhouse generate` retains the `functions` metadata export and exports callable `fn` (scalar) and `agg` (aggregate) namespaces using `createKnownFunctions(functions)` from `@typedhouse/core`.
 
 ```ts
 import { fn, agg } from './generated/functions.js';

@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { col, crossJoin, from, join, table, type Query } from '@chql/core';
+import { col, crossJoin, from, join, table, type Query } from '@typedhouse/core';
 export const seed = 20261107;
 export const source = from(table('pruning_wide', { id: col.String, tenant: col.String, amount: col.UInt64, spare: col.String, ids: col.Array(col.String), waste: col.String }, { engine: 'MergeTree', sortingKey: ['tenant', 'id'], partitionKey: [] }));
 export interface Row { id: string; tenant: string; amount: bigint; spare: string; ids: string[] }

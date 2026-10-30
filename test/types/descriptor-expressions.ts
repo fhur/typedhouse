@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, cast, sum, sumIf, val, type AggExpr, type GroupedRow, type Infer, type NodeId, type Expr } from '@chql/core';
+import { col, columnExpr, cast, sum, sumIf, val, type AggExpr, type GroupedRow, type Infer, type NodeId, type Expr } from '@typedhouse/core';
 
 declare function phantoms<E>(value: E): E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
 const f = columnExpr(col.Float64, 1 as NodeId, ['stock'], 'stock', 'grouped');

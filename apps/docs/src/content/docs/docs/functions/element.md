@@ -11,8 +11,8 @@ sidebar:
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const users = table(
   'users',
@@ -49,9 +49,9 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`id` AS `id`,
-  tupleElement(`__chql_input`.`profile`, {p0:String}) AS `name`,
-  tupleElement(`__chql_input`.`profile`, {p1:String}) AS `age`
+  `__typedhouse_input`.`id` AS `id`,
+  tupleElement(`__typedhouse_input`.`profile`, {p0:String}) AS `name`,
+  tupleElement(`__typedhouse_input`.`profile`, {p1:String}) AS `age`
 FROM
   (
     SELECT
@@ -59,7 +59,7 @@ FROM
       `profile`
     FROM
       `users`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:

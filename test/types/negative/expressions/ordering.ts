@@ -1,4 +1,4 @@
-import { from, table, col, val, count, columnExpr, Expr, exprNode, type NodeId } from '@chql/core';
+import { from, table, col, val, count, columnExpr, Expr, exprNode, type NodeId } from '@typedhouse/core';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 const ordered = q.orderBy(r => r.id);
 ordered.map(r => r.id).thenBy; // expect: TS2339 Property 'thenBy' does not exist

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, table, from, val, Expr, exprNode, type ExprNode } from '@chql/core';
+import { col, table, from, val, Expr, exprNode, type ExprNode } from '@typedhouse/core';
 import { emitNaive } from '../src/index.js';
 import { serializeParameter, parameterWireType } from '../src/parameters.js';
 const t = table('t', { n: col.UInt32, names: col.Array(col.String), specs: col.Array(col.Tuple({ text: col.Nullable(col.String) })) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });

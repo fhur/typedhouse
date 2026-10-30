@@ -15,8 +15,13 @@ Integer and float inputs produce `Float64` (`number`); nullable values retain nu
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, quantileIf, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  quantileIf,
+  table,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const requests = table(
   'requests',
@@ -50,15 +55,15 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`endpoint` AS `endpoint`,
+  `__typedhouse_input`.`endpoint` AS `endpoint`,
   quantileIf ({p0:Float64}) (
-    `__chql_input`.`durationMs`,
-    `__chql_input`.`successful`
+    `__typedhouse_input`.`durationMs`,
+    `__typedhouse_input`.`successful`
   ) AS `medianSuccessfulDurationMs`
 FROM
-  `requests` AS `__chql_input`
+  `requests` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`endpoint`
+  `__typedhouse_input`.`endpoint`
 ```
 
 Parameters:

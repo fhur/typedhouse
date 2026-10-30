@@ -2,20 +2,20 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-const directory = mkdtempSync(join(tmpdir(), 'chql-query-consumer-'));
+const directory = mkdtempSync(join(tmpdir(), 'typedhouse-query-consumer-'));
 function run(command, args, cwd = process.cwd()) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 120000 });
   if (result.status !== 0) throw new Error(`${command}: ${result.stdout}\n${result.stderr}`);
 }
 try {
-  mkdirSync(join(directory, 'node_modules/@chql'), { recursive: true });
-  for (const name of ['core', 'compiler', 'client']) symlinkSync(resolve(`packages/${name}`), join(directory, `node_modules/@chql/${name}`), 'dir');
+  mkdirSync(join(directory, 'node_modules/@typedhouse'), { recursive: true });
+  for (const name of ['core', 'compiler', 'client']) symlinkSync(resolve(`packages/${name}`), join(directory, `node_modules/@typedhouse/${name}`), 'dir');
   for (const name of ['expect-type', '@types']) symlinkSync(resolve(`node_modules/${name}`), join(directory, `node_modules/${name}`), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
   writeFileSync(join(directory, 'consumer.ts'), readFileSync('test/types/query.ts', 'utf8') + '\nimport type { AggregationSnapshot } from "./aggregation.d.ts";\nconst snapshotQuery = q.groupBy(r => r.id).aggregate(g => ({ total: sum(g.id), count: count() }));\nexpectTypeOf<Infer<typeof snapshotQuery>>().toEqualTypeOf<AggregationSnapshot>();\nexpectTypeOf<Infer<typeof snapshotQuery>>().not.toBeAny();\n');
   writeFileSync(join(directory, 'query-proxy.ts'), readFileSync('test/types/query-proxy.ts', 'utf8'));
   writeFileSync(join(directory, 'expansion.ts'), `import { expectTypeOf } from 'expect-type';
-import { from, table, col, join, crossJoin, unionAll, sum, scalar, type Infer } from '@chql/core';
+import { from, table, col, join, crossJoin, unionAll, sum, scalar, type Infer } from '@typedhouse/core';
 import type { JoinSnapshot } from './join.d.ts';
 const side = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 import type { MembershipSnapshot } from './membership.d.ts';
@@ -55,9 +55,9 @@ expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, toTypeScript, count, sum, max, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@chql/core';
-import { emitNaive } from '@chql/compiler';
-import { createClient, createClientFromBackend, createClickHouseBackend, decoder, rowDecoder } from '@chql/client';
+import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, toTypeScript, count, sum, max, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@typedhouse/core';
+import { emitNaive } from '@typedhouse/compiler';
+import { createClient, createClientFromBackend, createClickHouseBackend, decoder, rowDecoder } from '@typedhouse/client';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).where(r => r.id.eq(2n)).map(r => ({ id: r.id })).limit(10);
 assert.throws(() => q.toSQL(), /compiler_not_registered/);
 registerCompiler(emitNaive);
@@ -190,7 +190,7 @@ await lazy.return(); // no server required: unused iterators do not execute
 await streamClient.close();
 `);
   run(process.execPath, ['smoke.mjs'], directory);
-  const version = process.env.CHQL_TYPESCRIPT_VERSION;
+  const version = process.env.TYPEDHOUSE_TYPESCRIPT_VERSION;
   run('pnpm', [...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc']), '--project', join(directory, 'tsconfig.json')]);
   run(process.execPath, ['scripts/check-type-performance.mjs', '--self-test']);
   run(process.execPath, ['scripts/check-type-performance.mjs']);

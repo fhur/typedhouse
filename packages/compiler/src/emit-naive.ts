@@ -1,4 +1,4 @@
-import { print, scalarDescriptor, outputLeaves, expandedOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@chql/core';
+import { print, scalarDescriptor, outputLeaves, expandedOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@typedhouse/core';
 import type { SqlPlan } from './plan-selects.js';
 import { parameterExpression, parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
@@ -45,7 +45,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
   let weekBucketing = false;
   let dateMembership = false;
   // Each derived input owns this local SQL scope; ColumnRefs never bind SELECT aliases.
-  const inputAlias = quoteIdentifier(plan?.ctes?.inputAlias ?? '__chql_input');
+  const inputAlias = quoteIdentifier(plan?.ctes?.inputAlias ?? '__typedhouse_input');
   const defined = new Set<Rel>();
   const joinAlias = (rel: Rel, alias: string) => quoteIdentifier(plan?.ctes?.aliases.get(rel)?.get(alias) ?? alias);
   // A physical-table block has no competing input or SELECT aliases. Derived
@@ -149,7 +149,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           // to Date first would silently clamp/wrap. toDate32 retains the input's
           // calendar timezone; Date output represents that day at UTC midnight.
           const week = `toStartOfWeek(toDate32(${args[0]}), 0)`;
-          return `addDays(toDate(${week}), throwIf(ifNull((${week} < toDate32('1970-01-01')) OR (${week} > toDate32('2149-06-06')), 0), 'chql_date_out_of_range'))`;
+          return `addDays(toDate(${week}), throwIf(ifNull((${week} < toDate32('1970-01-01')) OR (${week} > toDate32('2149-06-06')), 0), 'typedhouse_date_out_of_range'))`;
         }
         if (plan) {
           const operators: Record<string, readonly [string, number]> = { or: ['OR', 1], and: ['AND', 2], eq: ['=', 3], ne: ['!=', 3], lt: ['<', 3], le: ['<=', 3], gt: ['>', 3], ge: ['>=', 3], plus: ['+', 4], minus: ['-', 4], multiply: ['*', 5], divide: ['/', 5] };
@@ -398,10 +398,10 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           const expected = outputLeaves(expandedOutput(input, rel.alias, type.inner));
           if (JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(expected.map(l => [l.path, print(l.type)])) || Object.keys(rel.columns).length !== order.length || order.some(k => !Object.hasOwn(rel.columns, k) || !same(rel.columns[k]!, columns[k]!))) return fail('invalid_output', rel, path);
           // Internal element aliases cannot capture a user column or the input table alias.
-          let element = plan?.ctes?.elementAlias ?? '__chql_element';
+          let element = plan?.ctes?.elementAlias ?? '__typedhouse_element';
           while (Object.hasOwn(columns, element) || inputLeaves.some(l => l.name === element)) element += '_';
           const quotedElement = quoteIdentifier(element);
-          let sourceAlias = plan?.ctes?.inputAlias ?? '__chql_input';
+          let sourceAlias = plan?.ctes?.inputAlias ?? '__typedhouse_input';
           while (Object.hasOwn(columns, sourceAlias) || inputLeaves.some(l => l.name === sourceAlias)) sourceAlias += '_';
           const qualifier = quoteIdentifier(sourceAlias);
           const items = physical.map(leaf => {

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, from, table, val } from '@chql/core';
+import { col, from, table, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 
 const inventory = table('inventory', { sku: col.String, onHand: col.UInt32, reserved: col.UInt32, reorderPoint: col.Int64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
@@ -30,12 +30,12 @@ it('retains fences for alias collisions, fallible expressions and limits', () =>
     input.limit(1).map(r => ({ available: r.onHand.minus(r.reserved) })),
     input.map(r => ({ available: r.onHand.minus(r.reserved) })).where(r => r.available.gt(0n)),
   ];
-  for (const query of queries) expect(compile(query.ir).sql).toContain(') AS `__chql_input`');
+  for (const query of queries) expect(compile(query.ir).sql).toContain(') AS `__typedhouse_input`');
 });
 
 it('checks collisions against columns hidden by an earlier selection', () => {
   const query = from(inventory).where(r => r.reorderPoint.gt(0n))
     .map(r => ({ onHand: r.onHand, reserved: r.reserved }))
     .map(r => ({ reorderPoint: r.onHand.minus(r.reserved) }));
-  expect(compile(query.ir).sql).toContain(') AS `__chql_input`');
+  expect(compile(query.ir).sql).toContain(') AS `__typedhouse_input`');
 });

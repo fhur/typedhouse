@@ -1,4 +1,4 @@
-import { col, from, table, val } from '@chql/core';
+import { col, from, table, val } from '@typedhouse/core';
 const q = from(table('dates', { day32: col.Date32, time: col.DateTime(), high: col.DateTime64(4), low: col.LowCardinality(col.Date), text: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.row.day32.toStartOfWeek(); // expect: TS2684 The 'this' context
 q.row.time.toStartOfWeek(); // expect: TS2684 The 'this' context

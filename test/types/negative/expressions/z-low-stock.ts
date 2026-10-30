@@ -1,4 +1,4 @@
-import { col, columnExpr, exp, uniq, sum, type NodeId } from '@chql/core';
+import { col, columnExpr, exp, uniq, sum, type NodeId } from '@typedhouse/core';
 const id = 1 as NodeId;
 const text = columnExpr(col.String, id, ['text'], 'text', 'row');
 const n = columnExpr(col.Float64, id, ['n'], 'n', 'row');

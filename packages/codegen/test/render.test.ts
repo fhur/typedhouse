@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { col, createKnownFunctions, parseCHType, type CHType, type Column, type KnownFunctionCatalog, type KnownFunctions } from '@chql/core';
+import { col, createKnownFunctions, parseCHType, type CHType, type Column, type KnownFunctionCatalog, type KnownFunctions } from '@typedhouse/core';
 import fc from 'fast-check';
 import { renderColumn, renderSchema, renderFunctions } from '../src/render.js';
 import type { DatabaseSchema } from '../src/introspect.js';
@@ -31,9 +31,9 @@ it('imports callable namespaces from rendered metadata with hostile properties a
   const ts = await import('typescript');
   const javascript = ts.default.transpileModule(text, { compilerOptions: { target: ts.default.ScriptTarget.ES2022, module: ts.default.ModuleKind.ESNext } }).outputText;
   // Import the actual emitted module; supply the same factory rather than a fake wrapper.
-  const body = javascript.replace("import { createKnownFunctions } from '@chql/core';", 'const createKnownFunctions = globalThis.__chqlKnownFactory;');
-  const host = globalThis as typeof globalThis & { __chqlKnownFactory?: typeof createKnownFunctions };
-  host.__chqlKnownFactory = createKnownFunctions;
+  const body = javascript.replace("import { createKnownFunctions } from '@typedhouse/core';", 'const createKnownFunctions = globalThis.__typedhouseKnownFactory;');
+  const host = globalThis as typeof globalThis & { __typedhouseKnownFactory?: typeof createKnownFunctions };
+  host.__typedhouseKnownFactory = createKnownFunctions;
   try {
     const module = await import(`data:text/javascript;base64,${Buffer.from(body).toString('base64')}`) as KnownFunctions<KnownFunctionCatalog> & { functions: KnownFunctionCatalog };
     expect(Object.keys(module.fn)).toEqual(['__proto__', 'alias', 'bad);SELECT 1', 'constructor', 'default']);
@@ -41,7 +41,7 @@ it('imports callable namespaces from rendered metadata with hostile properties a
     expect(module.functions.alias).toEqual({ isAggregate: false, deterministic: null, aliasTo: 'original' });
     expect(Object.getPrototypeOf(module.fn)).toBeNull();
     expect(text).toBe(renderFunctions({ tables: [], functions: [...functions].reverse() }));
-  } finally { delete host.__chqlKnownFactory; }
+  } finally { delete host.__typedhouseKnownFactory; }
 });
 it('hashes exactly the emitted body', () => {
   for (const rendered of [renderSchema(fixture), renderFunctions(fixture)]) {

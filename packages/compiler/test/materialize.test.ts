@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { col, from, table, val, unionAll, scalar, sum, relNode, flatOutput, type Rel } from '@chql/core';
+import { col, from, table, val, unionAll, scalar, sum, relNode, flatOutput, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
-const source = from(table('t0', { id: col.UInt64, ['__proto__']: col.String, 'a.b': col.Nullable(col.String), __chql_input: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const source = from(table('t0', { id: col.UInt64, ['__proto__']: col.String, 'a.b': col.Nullable(col.String), __typedhouse_input: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 afterEach(() => vi.restoreAllMocks());
 it('emits explicit deterministic collision-safe CTEs without obsolete materialization warnings', () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -11,7 +11,7 @@ it('emits explicit deterministic collision-safe CTEs without obsolete materializ
   expect(plan.sql).toMatch(/^WITH `t3` AS/);
   expect(plan.sql).toContain('WITH `t1` AS');
   expect(plan.sql).toContain('WITH `t2` AS');
-  expect(plan.sql).toContain('SELECT `t1`.`id`, `t1`.`__proto__`, `t1`.`a.b`, `t1`.`__chql_input` FROM `t1`');
+  expect(plan.sql).toContain('SELECT `t1`.`id`, `t1`.`__proto__`, `t1`.`a.b`, `t1`.`__typedhouse_input` FROM `t1`');
   expect(plan.sql).toContain('ORDER BY');
   expect(plan.sql).toContain('LIMIT 2');
   expect(plan.sql).toContain('SELECT DISTINCT');

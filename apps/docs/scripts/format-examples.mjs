@@ -17,7 +17,7 @@ for (const name of (await readdir(root, { recursive: true })).filter(name => nam
     previousEnd = match.index + match[0].length;
   }
   updated += markdown.slice(previousEnd);
-  if (check) assert.equal(markdown, updated, `${name}: run pnpm --filter @chql/docs format:examples`);
+  if (check) assert.equal(markdown, updated, `${name}: run pnpm --filter @typedhouse/docs format:examples`);
   else if (updated !== markdown) { await writeFile(path, updated); changed++; }
 }
 console.log(`${check ? 'Verified' : 'Formatted'} ${examples} TypeScript examples at printWidth ${exampleWidth}${check ? '' : ` (${changed} pages changed)`}. SQL and other fences are untouched.`);

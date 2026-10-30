@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col } from '@chql/core';
+import { col } from '@typedhouse/core';
 import { decoder, rowDecoder } from '../src/index.js';
 it('decodes Date as strict UTC calendar days within the UInt16 day range', () => {
   for (const day of ['1970-01-01', '2000-02-29', '2024-02-29', '2149-06-06']) {

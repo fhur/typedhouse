@@ -1,4 +1,4 @@
-import { from, table, col, quantile, quantileIf, val, scalar } from '@chql/core';
+import { from, table, col, quantile, quantileIf, val, scalar } from '@typedhouse/core';
 const q = from(table('t', { n: col.UInt32, lc: col.LowCardinality(col.UInt32), date: col.Date, decimal: col.Decimal64(2), text: col.String, flag: col.Bool }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 quantile(); // expect: TS2554 Expected 1 arguments, but got 0.
 quantile('0.5'); // expect: TS2345 is not assignable to parameter of type 'number'.

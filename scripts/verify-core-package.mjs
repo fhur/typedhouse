@@ -4,18 +4,18 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 // A clean consumer has no workspace paths or Vitest aliases and resolves exports.
-const directory = mkdtempSync(join(tmpdir(), 'chql-consumer-'));
+const directory = mkdtempSync(join(tmpdir(), 'typedhouse-consumer-'));
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 90000 });
   if (result.status !== 0) throw new Error(`${command} failed: ${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
 }
 try {
-  mkdirSync(join(directory, 'node_modules/@chql'), { recursive: true });
-  symlinkSync(resolve('packages/core'), join(directory, 'node_modules/@chql/core'), 'dir');
+  mkdirSync(join(directory, 'node_modules/@typedhouse'), { recursive: true });
+  symlinkSync(resolve('packages/core'), join(directory, 'node_modules/@typedhouse/core'), 'dir');
   writeFileSync(join(directory, 'package.json'), JSON.stringify({ type: 'module' }));
   writeFileSync(join(directory, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
-import { col, table, parseCHType, print, toTypeScript, canonicalKey, exprNode, relNode, flatOutput } from '@chql/core';
+import { col, table, parseCHType, print, toTypeScript, canonicalKey, exprNode, relNode, flatOutput } from '@typedhouse/core';
 const t = table('test', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 assert.equal(print(t.columns.id), 'UInt64');
 assert.equal(toTypeScript(parseCHType('Array(UInt64)')), 'Array<bigint>');
@@ -35,7 +35,7 @@ assert.notEqual(canonicalKey({ m: [['1.2', 2n]] }, mapColumns), canonicalKey({ m
 assert.notEqual(canonicalKey({ id: 1n }, [['id', col.UInt64.type]]), canonicalKey({ id: 2n }, [['id', col.UInt64.type]]));
 `);
   writeFileSync(join(directory, 'consumer.ts'), `
-import { col, table, exprNode, type NodeId, type Infer, type Decimal } from '@chql/core';
+import { col, table, exprNode, type NodeId, type Infer, type Decimal } from '@typedhouse/core';
 const param = exprNode({ kind: 'Param', type: null, value: 1n });
 const nodeId: NodeId = param.id;
 const paramKind: 'Param' = param.kind;
@@ -44,14 +44,14 @@ const t = table('test', { id: col.UInt64, d: col.Decimal(18, 4), tuple: col.Tupl
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 const kindExact: Equal<typeof param.kind, 'Param'> = true;
 const idExact: Equal<typeof param.id, NodeId> = true;
-const typeExact: Equal<typeof param.type, import('@chql/core').CHType | null> = true;
+const typeExact: Equal<typeof param.type, import('@typedhouse/core').CHType | null> = true;
 void kindExact; void idExact; void typeExact;
 const exact: Equal<Infer<typeof t>, { id: bigint; d: Decimal<18, 4>; tuple: readonly [string, number] }> = true;
 void exact;
 `);
   writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, types: [] }, include: ['consumer.ts'] }));
   run(process.execPath, ['smoke.mjs'], directory);
-  const version = process.env.CHQL_TYPESCRIPT_VERSION;
+  const version = process.env.TYPEDHOUSE_TYPESCRIPT_VERSION;
   run('pnpm', [...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc']), '--project', join(directory, 'tsconfig.json')], process.cwd());
-  console.log('Built @chql/core ESM exports and standalone consumer declarations verified.');
+  console.log('Built @typedhouse/core ESM exports and standalone consumer declarations verified.');
 } finally { rmSync(directory, { recursive: true, force: true }); }

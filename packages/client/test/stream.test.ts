@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { col, from, table } from '@chql/core';
-import * as compiler from '@chql/compiler';
+import { col, from, table } from '@typedhouse/core';
+import * as compiler from '@typedhouse/compiler';
 import { createClient, QueryError } from '../src/index.js';
 const driver = vi.hoisted(() => ({ query: vi.fn(), close: vi.fn() }));
 vi.mock('@clickhouse/client', () => ({ createClient: () => driver }));

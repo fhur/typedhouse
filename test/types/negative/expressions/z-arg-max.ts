@@ -1,4 +1,4 @@
-import { from, table, col, argMax, argMaxIf, max, val } from '@chql/core';
+import { from, table, col, argMax, argMaxIf, max, val } from '@typedhouse/core';
 const q = from(table('t', { n: col.UInt32, v: col.Nullable(col.UInt32), text: col.String, lc: col.LowCardinality(col.String), date: col.Date, decimal: col.Decimal64(2), array: col.Array(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 q.aggregate(g => argMax(g.n)); // expect: TS2554 Expected 2 arguments, but got 1.
 q.aggregate(g => argMax(g.n, g.v)); // expect: TS2345 is not assignable to parameter of type

@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   testcontainers@10.28.0:
-    hash: 4f56b3513ebbab9847961dc2fbec153ff3ddf4f2b5d9cb1bcb3085264242aa2a
+    hash: 2f35cc06e761e34b5d14a5d4c374a7649cdd82672be4b832ff36b8e884beaaf5
     path: patches/testcontainers@10.28.0.patch
 
 importers:
@@ -24,7 +24,7 @@ importers:
         version: 4.10.2
       testcontainers:
         specifier: 10.28.0
-        version: 10.28.0(patch_hash=4f56b3513ebbab9847961dc2fbec153ff3ddf4f2b5d9cb1bcb3085264242aa2a)
+        version: 10.28.0(patch_hash=2f35cc06e761e34b5d14a5d4c374a7649cdd82672be4b832ff36b8e884beaaf5)
       tsup:
         specifier: ^8.4.0
         version: 8.5.1(postcss@8.5.32)(typescript@5.8.3)(yaml@2.9.1)
@@ -43,12 +43,6 @@ importers:
       '@astrojs/starlight':
         specifier: ^0.34.0
         version: 0.34.8(astro@5.18.2(@types/node@24.19.2)(rollup@4.65.1)(typescript@5.8.3)(yaml@2.9.1))
-      '@chql/compiler':
-        specifier: workspace:*
-        version: link:../../packages/compiler
-      '@chql/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@codemirror/autocomplete':
         specifier: ^6.18.6
         version: 6.20.4
@@ -76,6 +70,12 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.5
         version: 1.2.5
+      '@typedhouse/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
+      '@typedhouse/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       astro:
         specifier: ^5.7.0
         version: 5.18.2(@types/node@24.19.2)(rollup@4.65.1)(typescript@5.8.3)(yaml@2.9.1)
@@ -116,43 +116,43 @@ importers:
 
   apps/playground:
     dependencies:
-      '@chql/client':
+      '@typedhouse/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@chql/codegen':
+      '@typedhouse/codegen':
         specifier: workspace:*
         version: link:../../packages/codegen
-      '@chql/compiler':
+      '@typedhouse/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
-      '@chql/core':
+      '@typedhouse/core':
         specifier: workspace:*
         version: link:../../packages/core
 
   packages/client:
     dependencies:
-      '@chql/compiler':
-        specifier: workspace:*
-        version: link:../compiler
-      '@chql/core':
-        specifier: workspace:*
-        version: link:../core
       '@clickhouse/client':
         specifier: ^1.11.0
         version: 1.24.1
+      '@typedhouse/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@typedhouse/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/codegen:
     dependencies:
-      '@chql/core':
-        specifier: workspace:*
-        version: link:../core
       '@clickhouse/client':
         specifier: ^1.11.0
         version: 1.24.1
+      '@typedhouse/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/compiler:
     dependencies:
-      '@chql/core':
+      '@typedhouse/core':
         specifier: workspace:*
         version: link:../core
 
@@ -7314,7 +7314,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  testcontainers@10.28.0(patch_hash=4f56b3513ebbab9847961dc2fbec153ff3ddf4f2b5d9cb1bcb3085264242aa2a):
+  testcontainers@10.28.0(patch_hash=2f35cc06e761e34b5d14a5d4c374a7649cdd82672be4b832ff36b8e884beaaf5):
     dependencies:
       '@balena/dockerignore': 1.0.2
       '@types/dockerode': 3.3.47

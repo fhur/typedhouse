@@ -15,8 +15,14 @@ Keep events whose ID matches the maximum ID in a separate reference table.
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, max, scalar, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  max,
+  scalar,
+  table,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const events = table(
   'events',
@@ -69,14 +75,14 @@ FROM
 WHERE
   `id` = (
     SELECT
-      max(`__chql_input`.`id`) AS `id`
+      max(`__typedhouse_input`.`id`) AS `id`
     FROM
       (
         SELECT
           `id`
         FROM
           `reference_events`
-      ) AS `__chql_input`
+      ) AS `__typedhouse_input`
   )
 ```
 

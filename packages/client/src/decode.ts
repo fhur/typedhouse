@@ -1,4 +1,4 @@
-import { print, type CHType, type FlatColumns } from '@chql/core';
+import { print, type CHType, type FlatColumns } from '@typedhouse/core';
 export function decoder(type: CHType): (value: unknown) => unknown {
   const invalid = (value: unknown): never => { throw new Error(`decode_invalid: ${print(type)}: ${String(value)}`); };
   if (type.kind === 'Nullable') { const inner = decoder(type.inner); return v => v === null ? null : inner(v); }

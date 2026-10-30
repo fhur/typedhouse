@@ -12,12 +12,12 @@ import { spawnSync } from 'node:child_process';
 // and latest metrics via argMax/If
 // and explicit CAST union alignment through run/stream. Requires the generated
 // fixture's component and metric_group_ots_component_indices tables; no core runtime deps.
-const directory = mkdtempSync(join(tmpdir(), 'chql-first-query-'));
+const directory = mkdtempSync(join(tmpdir(), 'typedhouse-first-query-'));
 try {
-  mkdirSync(join(directory, 'node_modules/@chql'), { recursive: true });
-  for (const name of ['core', 'compiler', 'client']) symlinkSync(resolve(`packages/${name}`), join(directory, `node_modules/@chql/${name}`), 'dir');
+  mkdirSync(join(directory, 'node_modules/@typedhouse'), { recursive: true });
+  for (const name of ['core', 'compiler', 'client']) symlinkSync(resolve(`packages/${name}`), join(directory, `node_modules/@typedhouse/${name}`), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
-  await build({ entry: ['examples/first-query.ts'], format: ['esm'], outDir: directory, external: ['@chql/core', '@chql/compiler', '@chql/client'], silent: true });
+  await build({ entry: ['examples/first-query.ts'], format: ['esm'], outDir: directory, external: ['@typedhouse/core', '@typedhouse/compiler', '@typedhouse/client'], silent: true });
   const result = spawnSync(process.execPath, [join(directory, 'first-query.js')], { stdio: 'inherit', timeout: 120000 });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exitCode = result.status ?? 1;

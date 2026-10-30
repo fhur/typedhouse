@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { cast, col, countIf, from, table, val } from '@chql/core';
+import { cast, col, countIf, from, table, val } from '@typedhouse/core';
 import { createClickHouseBackend, createClientFromBackend } from '../src/index.js';
 import { collect } from './backend-harness.js';
 import { stockHistory } from '../../compiler/test/fixtures/corpus/stock-history.js';

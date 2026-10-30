@@ -1,6 +1,6 @@
 import ts from 'typescript';
-import * as core from '@chql/core';
-import { compile } from '@chql/compiler';
+import * as core from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 import { formatSql } from './format-sql';
 
 core.registerCompiler(compile);
@@ -17,8 +17,8 @@ self.onmessage = (event: MessageEvent<unknown>) => {
     const ast = ts.createSourceFile('query.ts', source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
     const inspect = (node: ts.Node) => {
       if (ts.isImportDeclaration(node) &&
-          (!ts.isStringLiteral(node.moduleSpecifier) || node.moduleSpecifier.text !== '@chql/core')) {
-        throw new Error('Only imports from @chql/core are supported. Define fixture tables in this file.');
+          (!ts.isStringLiteral(node.moduleSpecifier) || node.moduleSpecifier.text !== '@typedhouse/core')) {
+        throw new Error('Only imports from @typedhouse/core are supported. Define fixture tables in this file.');
       }
       if (ts.isImportEqualsDeclaration(node) ||
           (ts.isExportDeclaration(node) && node.moduleSpecifier) ||
@@ -37,7 +37,7 @@ self.onmessage = (event: MessageEvent<unknown>) => {
     if (errors.length) throw new Error(errors.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n'));
     const module = { exports: {} as { default?: unknown } };
     const requireModule = (name: string) => {
-      if (name !== '@chql/core') throw new Error(`Unsupported module: ${name}`);
+      if (name !== '@typedhouse/core') throw new Error(`Unsupported module: ${name}`);
       return core;
     };
     // Only runs in the opaque-origin, network-restricted sandbox worker.

@@ -30,6 +30,6 @@ Each concept below has a standalone code example and the **final SQL and paramet
 
 Each operation returns a query you can pass around, extend, or reuse without changing the original. Operation order matters: limiting before filtering selects a different subset than filtering before limiting. See the [composition tutorial](/docs/tutorials/composition/) for reuse across application boundaries.
 
-Examples export the result of `compile(query.ir)` so you can inspect SQL without connecting to a database. For `query.toSQL()`, register `compile` with `registerCompiler` from `@chql/core`. To execute a query on a server, use `client.run` or `client.stream`; see [getting started](/docs/getting-started/#execute-on-a-server).
+Examples export the result of `compile(query.ir)` so you can inspect SQL without connecting to a database. For `query.toSQL()`, register `compile` with `registerCompiler` from `@typedhouse/core`. To execute a query on a server, use `client.run` or `client.stream`; see [getting started](/docs/getting-started/#execute-on-a-server).
 
 This section documents the implemented workspace preview, not the full language specification. Table descriptors must match your real schema. Typechecking and parameterization do not enforce authorization or make arbitrary raw SQL safe.

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { expectTypeOf } from 'expect-type';
-import { col, from, join, max, count, table, val, relNode, exprNode, type Query, type Infer, type ExprNode } from '@chql/core';
+import { col, from, join, max, count, table, val, relNode, exprNode, type Query, type Infer, type ExprNode } from '@typedhouse/core';
 import { emitNaive } from '../src/index.js';
 import { rowDecoder } from '../../client/src/decode.js';
 

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, table, from, val, Expr, exprNode, type CHType } from '@chql/core';
+import { col, table, from, val, Expr, exprNode, type CHType } from '@typedhouse/core';
 import { emitNaive } from '../src/index.js';
 import { serializeParameter } from '../src/parameters.js';
 
@@ -14,7 +14,7 @@ it('transports Date calendar days and array elements without server overflow', (
   const compiled = emitNaive(q.ir);
   expect(compiled.params).toEqual({ p0: '2024-02-29' });
   expect(compiled.sql).toContain('{p0:Date}');
-  expect(compiled.sql).toContain('chql_date_out_of_range');
+  expect(compiled.sql).toContain('typedhouse_date_out_of_range');
   expect(compiled.sql).toContain('SETTINGS enable_extended_results_for_datetime_functions = 1');
   expect(emitNaive(source.ir).sql).not.toContain('SETTINGS');
 });

@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, from, greatest, max, table, val, type DescribedExpr, type Expr, type Infer, type NodeId } from '@chql/core';
+import { col, columnExpr, from, greatest, max, table, val, type DescribedExpr, type Expr, type Infer, type NodeId } from '@typedhouse/core';
 import { componentsLatest } from '../../packages/compiler/test/fixtures/corpus/components-latest.js';
 type Result = { entityId: string; category: string | null; stockTotal: number; stockP50: number; leadDays: number; stockIndex: number; asOf: Date };
 expectTypeOf<Infer<typeof componentsLatest>>().toEqualTypeOf<Result>();

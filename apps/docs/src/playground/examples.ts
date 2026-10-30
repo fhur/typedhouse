@@ -1,5 +1,5 @@
 export const examples = {
-  composition: `import { col, from, table } from '@chql/core';
+  composition: `import { col, from, table } from '@typedhouse/core';
 
 const products = table('products', {
   id: col.UInt32,
@@ -15,7 +15,7 @@ export default available
   .orderBy(p => p.stock.desc())
   .limit(10);
 `,
-  parameters: `import { col, from, table } from '@chql/core';
+  parameters: `import { col, from, table } from '@typedhouse/core';
 
 const products = table('products', {
   id: col.UInt32,

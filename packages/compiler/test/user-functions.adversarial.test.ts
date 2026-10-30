@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { aggregateDefinitions, col, defineFunction, from, functionCatalog, table, type ExprNode } from '@chql/core';
+import { aggregateDefinitions, col, defineFunction, from, functionCatalog, table, type ExprNode } from '@typedhouse/core';
 import { compile, emitNaive, ValidationError } from '../src/index.js';
 
 const source = from(table('parts', { n: col.UInt64 }, {

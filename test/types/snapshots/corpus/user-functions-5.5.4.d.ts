@@ -1,19 +1,19 @@
-export declare const userEditDistance: import("@chql/core").Query<{
+export declare const userEditDistance: import("@typedhouse/core").Query<{
     mpn: string;
     distance: bigint;
-}, import("@chql/core").ExpressionCaps<{
+}, import("@typedhouse/core").ExpressionCaps<{
     live: false;
 }>, {
-    readonly mpn: import("@chql/core").Expr<string, "mpn", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly mpn: import("@typedhouse/core").Expr<string, "mpn", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "String";
             };
         };
     };
-    readonly distance: import("@chql/core").Expr<bigint, "distance", "row"> & {
-        readonly ir: import("@chql/core").ExprNode & {
+    readonly distance: import("@typedhouse/core").Expr<bigint, "distance", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
             readonly type: {
                 kind: "scalar";
                 name: "UInt64";

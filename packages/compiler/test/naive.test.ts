@@ -1,12 +1,12 @@
 import { expect, it } from 'vitest';
-import { col, table, from, val, exprNode, relNode, flatOutput, Expr, type Rel } from '@chql/core';
+import { col, table, from, val, exprNode, relNode, flatOutput, Expr, type Rel } from '@typedhouse/core';
 import { emitNaive, ValidationError } from '../src/index.js';
 const t = table('t`\\; DROP TABLE x--', { 'id`\\': col.UInt64, value: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 it('quotes hostile identifiers and parameterizes hostile values', () => {
   const hostile = "x'\\; DROP TABLE t; --\n\0";
   const q = from(t).where(r => r.value.eq(hostile)).map(r => ({ renamed: r['id`\\'] })).limit(10, 2);
   const result = emitNaive(q.ir);
-  expect(result.sql).toBe('SELECT `renamed` FROM (SELECT `__chql_input`.`id\\`\\\\` AS `renamed` FROM (SELECT `id\\`\\\\`, `value` FROM (SELECT `id\\`\\\\`, `value` FROM `t\\`\\\\; DROP TABLE x--`) AS `__chql_input` WHERE (`__chql_input`.`value` = {p0:String})) AS `__chql_input`) LIMIT 10 OFFSET 2');
+  expect(result.sql).toBe('SELECT `renamed` FROM (SELECT `__typedhouse_input`.`id\\`\\\\` AS `renamed` FROM (SELECT `id\\`\\\\`, `value` FROM (SELECT `id\\`\\\\`, `value` FROM `t\\`\\\\; DROP TABLE x--`) AS `__typedhouse_input` WHERE (`__typedhouse_input`.`value` = {p0:String})) AS `__typedhouse_input`) LIMIT 10 OFFSET 2');
   expect(result.params).toEqual({ p0: hostile });
   expect(result.sql).not.toContain(hostile);
   expect(q.ir.kind).toBe('Limit');

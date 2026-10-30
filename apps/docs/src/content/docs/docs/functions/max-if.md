@@ -15,8 +15,8 @@ The catalog accepts any value descriptor, subject to ClickHouse support for the 
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, maxIf, table } from '@chql/core';
-import { compile } from '@chql/compiler';
+import { col, from, maxIf, table } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const orders = table(
   'orders',
@@ -47,12 +47,15 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`customer` AS `customer`,
-  maxIf (`__chql_input`.`amount`, `__chql_input`.`paid`) AS `largestPaidAmount`
+  `__typedhouse_input`.`customer` AS `customer`,
+  maxIf (
+    `__typedhouse_input`.`amount`,
+    `__typedhouse_input`.`paid`
+  ) AS `largestPaidAmount`
 FROM
-  `orders` AS `__chql_input`
+  `orders` AS `__typedhouse_input`
 GROUP BY
-  `__chql_input`.`customer`
+  `__typedhouse_input`.`customer`
 ```
 
 Parameters:

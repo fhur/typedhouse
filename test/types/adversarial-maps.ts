@@ -1,5 +1,5 @@
 import { expectTypeOf } from 'expect-type';
-import { col, table, type Decimal, type Infer } from '@chql/core';
+import { col, table, type Decimal, type Infer } from '@typedhouse/core';
 // Deliberately distinguish ClickHouse string-like keys from values decoded to TS strings.
 // The runtime-to-phantom bridge asserts the complete exact row type for these cases.
 export const adversarialMaps = table('adversarial_maps', {

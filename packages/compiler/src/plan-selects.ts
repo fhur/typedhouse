@@ -1,4 +1,4 @@
-import { outputLeaves, type CHType, type ExprNode, type Rel } from '@chql/core';
+import { outputLeaves, type CHType, type ExprNode, type Rel } from '@typedhouse/core';
 import { safePredicate } from './rewrite-expressions.js';
 import { directSelection, type ColumnDemand } from './prune-columns.js';
 import type { CtePlan } from './plan-ctes.js';
@@ -22,7 +22,7 @@ export interface SqlPlan {
   readonly ctes?: CtePlan;
 }
 const rank = { Filter: 1, Sort: 2, Limit: 3 } as const;
-function referencesName(e: import('@chql/core').ExprNode, name: string): boolean {
+function referencesName(e: import('@typedhouse/core').ExprNode, name: string): boolean {
   if (e.kind === 'ColumnRef') return e.path.length === 1 && e.path[0] === name;
   if (e.kind === 'Call' || e.kind === 'Agg') return e.args.some(a => referencesName(a, name));
   if (e.kind === 'Cast') return referencesName(e.expr, name);

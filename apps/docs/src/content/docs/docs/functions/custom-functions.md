@@ -23,8 +23,8 @@ import {
   table,
   type Infer,
   type Row,
-} from '@chql/core';
-import { compile } from '@chql/compiler';
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const inventory = table(
   'inventory',
@@ -67,8 +67,8 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`sku` AS `sku`,
-  `__chql_input`.`onHand` - `__chql_input`.`reserved` AS `available`
+  `__typedhouse_input`.`sku` AS `sku`,
+  `__typedhouse_input`.`onHand` - `__typedhouse_input`.`reserved` AS `available`
 FROM
   (
     SELECT
@@ -79,7 +79,7 @@ FROM
       `inventory`
     WHERE
       `onHand` - `reserved` < `reorderPoint`
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:
@@ -100,8 +100,13 @@ Gross margin is `(revenue - cost) / revenue`, expressed as a percentage—not ma
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table, type Expr } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  table,
+  type Expr,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const sales = table(
   'sales',
@@ -147,8 +152,10 @@ Final SQL:
 
 ```sql
 SELECT
-  `__chql_input`.`product` AS `product`,
-  (`__chql_input`.`revenue` - `__chql_input`.`cost`) / `__chql_input`.`revenue` * {p0:Float64} AS `marginPercent`
+  `__typedhouse_input`.`product` AS `product`,
+  (
+    `__typedhouse_input`.`revenue` - `__typedhouse_input`.`cost`
+  ) / `__typedhouse_input`.`revenue` * {p0:Float64} AS `marginPercent`
 FROM
   (
     SELECT
@@ -159,7 +166,7 @@ FROM
       `sales`
     WHERE
       `revenue` > {p1:Float64}
-  ) AS `__chql_input`
+  ) AS `__typedhouse_input`
 ```
 
 Parameters:
@@ -183,8 +190,13 @@ A nullable email address needs an explicit policy. Here NULL and the empty strin
 <summary>Setup: imports and table definitions</summary>
 
 ```ts
-import { col, from, table, type Expr } from '@chql/core';
-import { compile } from '@chql/compiler';
+import {
+  col,
+  from,
+  table,
+  type Expr,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 
 const customers = table(
   'customers',

@@ -1,6 +1,6 @@
 // Generated exact/not-any runtime correspondence.
 import { expectTypeOf } from 'expect-type';
-import type { Infer } from '@chql/core';
+import type { Infer } from '@typedhouse/core';
 import * as queries from '../../packages/compiler/test/fixtures/corpus/known-functions.js';
 import type * as Snapshot from './snapshots/corpus/known-functions-row.js';
 expectTypeOf<Infer<typeof queries.knownHash>>().toEqualTypeOf<Snapshot.knownHash>();

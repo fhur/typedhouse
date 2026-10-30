@@ -9,7 +9,7 @@ class UsageError extends Error {}
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
-  if (command !== 'generate' && command !== 'check') throw new UsageError('Usage: chql generate|check --database DATABASE --out-dir DIR [--url URL] [--user USER] [--password PASSWORD] [--skip-alias]');
+  if (command !== 'generate' && command !== 'check') throw new UsageError('Usage: typedhouse generate|check --database DATABASE --out-dir DIR [--url URL] [--user USER] [--password PASSWORD] [--skip-alias]');
   const flags = new Map<string, string>();
   let skipAlias = false;
   for (let i = 0; i < args.length; i++) {

@@ -3,7 +3,6 @@
 > Preserved from the former README. These incremental development notes include historical limitations and may lag the current implementation. Start with the [README](README.md) and [documentation](https://fhur.github.io/typedhouse/); consult [TODO.md](TODO.md) for current development status.
 
 TypedHouse is a type-safe ClickHouse query builder for TypeScript.
-Formerly chql; the `@chql/*` packages and `chql` codegen command are unchanged.
 TypedHouse is an independent project, not affiliated with ClickHouse.
 
 Implementation contract: [spec.md](spec.md).
@@ -64,7 +63,7 @@ capability is the AND of inputs; scan-only and thenBy stages are not retained.
 Matching TypeScript rows are not sufficient for SQL compatibility: UInt32 and
 Float64 both decode to number, but this increment rejects their union explicitly
 with `union_descriptor_mismatch`. Automatic common-type/coercion support remains backlog.
-Use explicit alignment instead (import `cast`, `col`, `unionAll` from `@chql/core`):
+Use explicit alignment instead (import `cast`, `col`, `unionAll` from `@typedhouse/core`):
 ```ts
 const aligned = unionAll(
   integers.map(r => ({ value: cast(r.value, col.Float64) })),
@@ -95,7 +94,7 @@ See `examples/first-query.ts` for executable composition.
 
 Mean metrics over a caller-selected history window:
 ```ts
-import { from, avg, avgIf } from '@chql/core';
+import { from, avg, avgIf } from '@typedhouse/core';
 const since = new Date('2026-01-01T00:00:00Z');
 const until = new Date('2027-01-01T00:00:00Z');
 const history = from(db.metric_group_ots_component_market_availability).final()
@@ -124,7 +123,7 @@ queries (scalar remains Nullable).
 
 Weekly stock/lead-time history (Sunday-start weeks, not ISO/Monday):
 ```ts
-import { quantile } from '@chql/core';
+import { quantile } from '@typedhouse/core';
 const weekly = from(db.metric_group_ots_component_market_availability).final()
   .where(a => a.tenantId.eq('acme')).where(a => a.entityId.eq('cmp_7'))
   .groupBy(a => ({ week: a.effectiveAt.toStartOfWeek() }))
@@ -147,7 +146,7 @@ On pinned 24.8, native DateTime64 week results change from Date to Date32 with
 explicitly emit `SETTINGS enable_extended_results_for_datetime_functions = 1`,
 bucket through Date32 with mode 0, check the result range, then normalize to Date.
 Other queries do not acquire this setting. A week before 1970-01-01 or after
-2149-06-06 raises `chql_date_out_of_range` instead of silently wrapping/clamping;
+2149-06-06 raises `typedhouse_date_out_of_range` instead of silently wrapping/clamping;
 notably 1970-01-01–03 belong to an unsupported pre-epoch Sunday week.
 Date wire strings must be valid canonical YYYY-MM-DD within 1970-01-01–2149-06-06.
 Date parameters use the UTC calendar day of a valid JS Date (time-of-day discarded),
@@ -173,7 +172,7 @@ broader descriptors remain unsupported.
 
 Latest metric values do not require a self-join:
 ```ts
-import { from, max, argMax } from '@chql/core';
+import { from, max, argMax } from '@typedhouse/core';
 const latestMetrics = from(db.metric_group_ots_component_indices).final()
   .where(i => i.tenantId.eq('acme'))
   .groupBy(i => ({ entityId: i.entityId }))
@@ -295,7 +294,7 @@ and UInt64 descriptors with `aggregate_functions_null_for_empty=0` or `1`; no
 setting override or client fallback is applied. Empty grouped inputs produce no groups.
 
 ```ts
-import { uniqExact, uniqExactIf, count } from '@chql/core';
+import { uniqExact, uniqExactIf, count } from '@typedhouse/core';
 const scoped = components.where(forTenant('acme'));
 const categories = scoped.aggregate(g => ({ categories: uniqExact(g.category) }));
 const matched = join({ c: scoped.arrayJoin(c => c.matched_part_ids, 'partId'), p: parts })
@@ -383,8 +382,8 @@ reference backend (discarding its SQL), and emission retains defensive checks; a
 standalone validation visitor is a future performance improvement.
 
 Core intentionally has no compiler dependency. Explicitly initialize `toSQL()` with
-`registerCompiler(compile)` (`registerCompiler` from `@chql/core`, `compile` from
-`@chql/compiler`). `createClient` from `@chql/client` compiles independently and
+`registerCompiler(compile)` (`registerCompiler` from `@typedhouse/core`, `compile` from
+`@typedhouse/compiler`). `createClient` from `@typedhouse/client` compiles independently and
 memoizes plans/decoders by IR identity. `run` forces ISO date output, quoted 64-bit
 integers and quoted non-finite floats; errors retain SQL, params, cause and the root
 node (fine-grained server attribution remains backlog). Always `await client.close()`.

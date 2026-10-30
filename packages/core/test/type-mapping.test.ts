@@ -13,7 +13,7 @@ it('runtime CHType mappings exactly equal descriptor phantoms under the selected
   try {
     const source = [
       "import { expectTypeOf } from 'expect-type';",
-      "import type { Infer, Decimal, UUID, IPv4, IPv6, AggregateState } from '@chql/core';",
+      "import type { Infer, Decimal, UUID, IPv4, IPv6, AggregateState } from '@typedhouse/core';",
       "import { scalars, structured, fixture } from '../ch-types.js';",
       "import { adversarialMaps } from '../adversarial-maps.js';",
       ...Object.entries({ scalars, structured, fixture, adversarialMaps }).map(([name, table]) => {
@@ -23,7 +23,7 @@ it('runtime CHType mappings exactly equal descriptor phantoms under the selected
     ].join('\n');
     writeFileSync(join(directory, 'mapping.ts'), source);
     writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ extends: '../../../tsconfig.json', include: ['./mapping.ts'] }));
-    const version = process.env.CHQL_TYPESCRIPT_VERSION;
+    const version = process.env.TYPEDHOUSE_TYPESCRIPT_VERSION;
     const args = version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc'];
     const result = spawnSync('pnpm', [...args, '--noEmit', '--project', join(directory, 'tsconfig.json')], { encoding: 'utf8', timeout: 60000 });
     expect({ status: result.status, error: result.error?.message, output: result.stdout }).toEqual({ status: 0, error: undefined, output: '' });

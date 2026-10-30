@@ -1,4 +1,4 @@
-import { col, columnExpr, val, type NodeId } from '@chql/core';
+import { col, columnExpr, val, type NodeId } from '@typedhouse/core';
 const array = columnExpr(col.Array(col.UInt64), 1 as NodeId, ['a'], 'a', 'grouped');
 const tuple = columnExpr(col.Tuple({ field: col.String }), 1 as NodeId, ['t'], 't', 'grouped');
 const row = columnExpr(col.UInt64, 1 as NodeId, ['r'], 'r', 'row');
