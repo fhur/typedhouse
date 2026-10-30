@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, table, exprNode, relNode, flatOutput } from '../src/index.js';
+import { col, table, exprNode, relNode, flatOutput, assertDataContainer } from '../src/index.js';
 const t = table('source', { x: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 const output = flatOutput([['x', col.String.type]]);
 const scan = () => relNode({ kind: 'Scan', table: t, columns: t.columns, output });
@@ -16,6 +16,39 @@ it('preserves shared parent identity and snapshots containers without freezing c
   expect(union.inputs).toEqual([a, a]); expect(union.inputs[0]).toBe(a);
   expect(Object.isFrozen(inputs)).toBe(false); expect(Object.isFrozen(union.inputs)).toBe(true);
   expect(Object.isFrozen(union)).toBe(true);
+});
+it('reuses owned immutable containers without interning fresh nodes or caller data', () => {
+  const a = scan();
+  const b = relNode({ kind: 'Scan', table: a.table, columns: a.columns, output: a.output });
+  expect(b).not.toBe(a);
+  expect(b.output).toBe(a.output);
+  expect(b.columns).toBe(a.columns);
+  expect(b.table).toBe(a.table);
+  const caller = Object.freeze({ nested: { value: 1 } });
+  const p = exprNode({ kind: 'Param', type: null, value: caller });
+  caller.nested.value = 2;
+  expect(p.value).toEqual({ nested: { value: 1 } });
+  expect(p.value).not.toBe(caller);
+  const q = exprNode({ kind: 'Param', type: null, value: p.value });
+  expect(q.value).toBe(p.value);
+  const proxy = new Proxy(p.value as object, {});
+  expect(exprNode({ kind: 'Param', type: null, value: proxy }).value).not.toBe(proxy);
+});
+it('retains defensive Date access when owned snapshots are reused', () => {
+  const date = new Date(0);
+  const p = exprNode({ kind: 'Param', type: null, value: { dates: [date] } });
+  const q = exprNode({ kind: 'Param', type: null, value: p.value });
+  expect(q.value).toBe(p.value);
+  const owned = q.value as { dates: Date[] };
+  date.setTime(10);
+  owned.dates[0]!.setTime(20);
+  expect(owned.dates[0]!.getTime()).toBe(0);
+  const standalone = exprNode({ kind: 'Param', type: null, value: owned.dates[0] });
+  (standalone.value as Date).setTime(30);
+  expect((standalone.value as Date).getTime()).toBe(0);
+  // Ownership permits reuse, not bypassing structural accessor validation.
+  expect(() => assertDataContainer(owned.dates)).toThrow('IR: invalid_data_container');
+  expect(() => assertDataContainer(q)).not.toThrow();
 });
 it('retains ordered numeric/prototype aliases and dotted path segments', () => {
   const entries = [['42', col.String.type], ['0', col.UInt64.type], ['__proto__', col.String.type], ['a.b', col.String.type]] as const;

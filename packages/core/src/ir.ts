@@ -68,6 +68,9 @@ const graphNode = Symbol('chql.graphNode');
 // The marker is inspectable, not an authority: only finalized constructors may
 // enter this weak registry. Inherited/copied symbols must never bypass copying.
 const finalizedNodes = new WeakSet<object>();
+// Only our recursively frozen copies are reusable: Object.freeze on caller data
+// is shallow and does not establish ownership of nested containers or Dates.
+const ownedSnapshots = new WeakSet<object>();
 let counter = 0;
 
 /** Reject executable/inherited container fields before any owned-data reads.
@@ -84,13 +87,14 @@ export function assertDataContainer(value: unknown): asserts value is object {
 }
 
 /** Copy owned containers, but retain references to already constructed graph nodes.
- * No id->node registry: unreachable graphs can be collected. Dates are copied on read
+ * Reuse trusted immutable snapshots as well; both registries are weak so
+ * unreachable graphs can be collected. Dates are copied on read
  * because Object.freeze(Date) cannot freeze its internal time slot.
  */
 function snapshot<T>(value: T, ancestors = new Set<object>()): T {
   if (typeof value === 'function' || typeof value === 'symbol') throw new TypeError('IR: unsupported owned value');
   if (value === null || typeof value !== 'object') return value;
-  if (finalizedNodes.has(value)) return value;
+  if (finalizedNodes.has(value) || ownedSnapshots.has(value)) return value;
   if (value instanceof Date) return new Date(value.getTime()) as T;
   if (ancestors.has(value)) throw new TypeError('IR: cyclic owned value');
   if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) throw new TypeError('IR: unsupported owned object');
@@ -108,7 +112,9 @@ function snapshot<T>(value: T, ancestors = new Set<object>()): T {
         ? { enumerable, get: () => new Date(item.getTime()) }
         : { enumerable, value: item });
     }
-    return Object.freeze(result) as T;
+    Object.freeze(result);
+    ownedSnapshots.add(result);
+    return result as T;
   } finally { ancestors.delete(value); }
 }
 function construct<T extends Node>(fields: WithoutId<T>): T {
