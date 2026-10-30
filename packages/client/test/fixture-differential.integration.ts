@@ -6,6 +6,7 @@ import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClickHouseBackend, createClientFromBackend } from '../src/index.js';
 import { collect, multiplicityDiff } from './backend-harness.js';
+import { concurrentReads } from './concurrent-reads.js';
 import { build, buildTree, metricSource, componentPayload, partPayload, metricDetails, nonfinite, latestAvailabilityTotals, latestComponentTotals, latestPartTotals, latestPriceTotals, recipes, seed, shape, type Recipe } from './fixture-differential-arbitrary.js';
 import { native, descriptors, decodeNative, independentKeys, componentColumns, partColumns, decodeColumns } from './fixture-differential-native.js';
 
@@ -41,12 +42,15 @@ async function check(r: Recipe, fault = false, evidence?: Set<string>) {
   const q = build(r), oracle = native(r);
   const plans = backends.map(backend => backend.compile(q.ir));
   try {
-    const expected = await direct(r);
-    for (const [i, backend] of backends.entries()) {
+    const [expected, optimized, naive] = await concurrentReads([
+      () => direct(r),
+      async () => (await collect(backends[0]!.run(plans[0]!))).flat(),
+      async () => (await collect(backends[1]!.run(plans[1]!))).flat(),
+    ]);
+    for (const [i, actual] of [optimized, naive].entries()) {
       const plan = plans[i]!;
       expect(Object.entries(plan.compiled.columns), 'independent ordered descriptors').toEqual(Object.entries(descriptors(r.end)));
       expect(plan.compiled.columnPaths, 'flat independent paths').toBeUndefined();
-      const actual = (await collect(backend.run(plan))).flat();
       // Intentional wrong result only after genuine official-backend IO.
       if (fault && i === 0 && actual.length) actual.pop();
       const wanted = independentKeys(expected, r.end, r.end === 'limit');

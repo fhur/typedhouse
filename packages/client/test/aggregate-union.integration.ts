@@ -5,6 +5,7 @@ import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainer
 import { cast, col, count, from, max, scalar, sum, table, val, unionAll, type Caps } from '@chql/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys, verify } from './backend-harness.js';
+import { concurrentReads } from './concurrent-reads.js';
 import { source } from './pruning-arbitrary.js';
 import { build, buildComposition, native, recipeArbitrary, seed, shape, anchor, type Recipe } from './aggregate-union-arbitrary.js';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
@@ -31,17 +32,22 @@ async function direct(r: Recipe) {
   finally { result.close(); }
 }
 async function check(r: Recipe) {
-  const q = build(r), expected = await direct(r), plans = backends.map(b => b.compile(q.ir));
+  const q = build(r), plans = backends.map(b => b.compile(q.ir));
   try {
+    const [expected, optimized, naive] = await concurrentReads([
+      () => direct(r),
+      async () => (await collect(backends[0]!.run(plans[0]!))).flat(),
+      async () => (await collect(backends[1]!.run(plans[1]!))).flat(),
+    ]);
+    const results = [optimized, naive];
     expect(plans[0]!.compiled.columns).toEqual(plans[1]!.compiled.columns);
     expect(plans[0]!.compiled.columnPaths).toEqual(plans[1]!.compiled.columnPaths);
-    for (const [i, backend] of backends.entries()) {
-      const rows = (await collect(backend.run(plans[i]!))).flat();
+    for (const rows of results) {
       expect(keys<unknown, Caps>(q, rows)).toEqual(keys<unknown, Caps>(q, expected));
       expect(rows).toEqual(expected); // key is the complete unique grouping key.
     }
+    return expected;
   } catch (cause) { throw new Error(`${String(cause)}\n${JSON.stringify(plans.map(p => ({ sql: p.compiled.sql, params: p.compiled.params })))}`, { cause }); }
-  return expected;
 }
 it('runs 500 fixed-seed recursive aggregate/Union recipes against native bags with rule evidence', async () => {
   const path = process.env.CHQL_AGG_UNION_PATH;
