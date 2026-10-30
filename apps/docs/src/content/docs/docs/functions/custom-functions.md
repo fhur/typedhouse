@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-Expression helpers give names to business rules you use across queries. They accept typed expressions and return an expression built from chql's methods. Import them like any other TypeScript function—no registration or database setup is required.
+Expression helpers give names to business rules you use across queries. They accept typed expressions and return an expression built from TypedHouse's methods. Import them like any other TypeScript function—no registration or database setup is required.
 
 The helper runs when you build the query. ClickHouse evaluates the resulting SQL against the rows; it does not call your JavaScript function.
 

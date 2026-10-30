@@ -1,6 +1,10 @@
-# chql docs
+# TypedHouse docs
 
 Static Astro 5 + Starlight app. This is a modest foundation / vertical slice, **not completion of docs.spec.md**. Plain Markdown is the source of truth for HTML, agent exports, search and blog content.
+
+## Brand and compatibility
+
+Use TypedHouse in public prose. The project was formerly chql; retain `@chql/*` package names and imports, the `chql` codegen command, repository URLs and clone paths, and SQL identifiers for compatibility. TypedHouse is an independent project, not affiliated with ClickHouse.
 
 ## Develop and validate
 

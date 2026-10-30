@@ -1,6 +1,10 @@
-# chql
+# TypedHouse
 
-Typed ClickHouse query algebra. Implementation contract: [spec.md](spec.md).
+TypedHouse is a type-safe ClickHouse query builder for TypeScript.
+Formerly chql; the `@chql/*` packages and `chql` codegen command are unchanged.
+TypedHouse is an independent project, not affiliated with ClickHouse.
+
+Implementation contract: [spec.md](spec.md).
 Progress and current tasks: [TODO.md](TODO.md).
 
 ## First runnable query (bounded preview)
