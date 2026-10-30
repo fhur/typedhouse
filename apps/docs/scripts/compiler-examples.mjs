@@ -6,15 +6,18 @@ import { fileURLToPath } from 'node:url';
 import { format } from 'sql-formatter';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
-const section = process.argv.includes('--guides') ? 'guides'
+const section = process.argv.includes('--readme') ? 'readme'
+  : process.argv.includes('--guides') ? 'guides'
   : process.argv.includes('--functions') ? 'functions'
   : process.argv.includes('--query-builder') ? 'query-builder' : 'compiler';
-const directory = new URL(`../src/content/docs/docs/${section === 'guides' ? '' : `${section}/`}`, import.meta.url);
+const directory = section === 'readme'
+  ? new URL('../../../', import.meta.url)
+  : new URL(`../src/content/docs/docs/${section === 'guides' ? '' : `${section}/`}`, import.meta.url);
 const check = process.argv.includes('--check');
 const cache = new URL(`../node_modules/.cache/chql-${section}-examples/`, import.meta.url);
 await mkdir(cache, { recursive: true });
 const files = [];
-const names = section === 'guides'
+const names = section === 'readme' ? ['README.md'] : section === 'guides'
   ? ['getting-started.md', 'tutorials/composition.md', 'tutorials/advanced-example.md']
   : (await readdir(directory)).sort();
 for (const name of names) {
@@ -63,7 +66,7 @@ for (const name of names) {
     await writeFile(sourcePath, [firstExampleSource, ...typecheckOnly.map(match => match[1])].join('\n\n'));
     files.push(fileURLToPath(sourcePath));
   }
-  if (section === 'guides') assert.ok(exampleIndex, `${name}: guide must contain an executable checkpoint`);
+  if (section === 'guides' || section === 'readme') assert.ok(exampleIndex, `${name}: must contain an executable checkpoint`);
   const trailing = markdown.slice(previousEnd);
   assert.ok(!/```ts\n/.test(trailing), `${name}: TypeScript example is missing output markers`);
   if (!exampleIndex) continue;

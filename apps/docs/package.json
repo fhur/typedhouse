@@ -12,6 +12,8 @@
     "test:site": "node scripts/test-site.mjs",
     "format:examples": "node scripts/format-examples.mjs",
     "test:example-format": "node --test scripts/example-format.test.mjs && node scripts/format-examples.mjs --check",
+    "examples:readme": "node scripts/compiler-examples.mjs --readme",
+    "test:readme-examples": "node scripts/compiler-examples.mjs --readme --check",
     "examples:guides": "node scripts/compiler-examples.mjs --guides",
     "test:guide-examples": "node scripts/compiler-examples.mjs --guides --check",
     "examples:compiler": "node scripts/compiler-examples.mjs",

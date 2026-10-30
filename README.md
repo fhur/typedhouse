@@ -1,449 +1,235 @@
-# TypedHouse
+# TypedHouse — Type-safe ClickHouse query builder for TypeScript
 
-TypedHouse is a type-safe ClickHouse query builder for TypeScript.
-Formerly chql; the `@chql/*` packages and `chql` codegen command are unchanged.
-TypedHouse is an independent project, not affiliated with ClickHouse.
+**Build reusable ClickHouse queries in TypeScript, infer result types, and inspect the SQL before you run it.** TypedHouse combines a typed query builder, a SQL compiler, schema code generation, and a server-side client for Node.js.
 
-Implementation contract: [spec.md](spec.md).
-Progress and current tasks: [TODO.md](TODO.md).
+[Documentation](https://fhur.github.io/typedhouse/) · [Getting started](https://fhur.github.io/typedhouse/docs/getting-started/) · [Playground](https://fhur.github.io/typedhouse/playground/) · [API reference](https://fhur.github.io/typedhouse/docs/query-builder/overview/)
 
-## First runnable query (bounded preview)
+> **Status: workspace preview.** The supported API is evolving; this is not a claim of complete ClickHouse support or production readiness.
 
-`from(table).where(...).map(...).limit(n, offset?)` now runs through the permanent
-naive compiler and `client.run`. Single-expression `map(r => r.column)` keeps
-the root column name; unnamed constants require the object form. `.distinct()`
-removes duplicate output rows. `.orderBy(r => r.column)` defaults to ascending;
-generated `.asc()`/`.desc()` support immutable `.nullsFirst()`/`.nullsLast()`.
-Only ordered queries expose `.thenBy()`; another `.orderBy()` replaces the keys.
-Other operators drop `.thenBy()`. Sort and limit retain their written order:
-`q.orderBy(r => r.id).limit(10)` selects the first ten sorted rows, whereas
-`q.limit(10).orderBy(r => r.id)` sorts only the selected ten.
-`from(table)` returns a descriptor-preserving `TableQuery` with chainable
-`.final()` and `.sample(fraction)`; other operators drop these scan-only methods.
-SAMPLE accepts finite fractions in `(0, 1]` and emits inline after FINAL, without
-expression parameters. The fixture has no sampling key, so SAMPLE is SQL-only.
-Use FINAL on a suitable engine (e.g. ReplacingMergeTree) to deduplicate on reads.
-`q.arrayJoin(r => r.ids, 'item')` keeps original columns and emits one row per
-array element, including duplicates. `.leftArrayJoin(...)` also keeps empty-array
-rows, using ClickHouse child defaults (`''`, `0n`, `null` for nullable children,
-recursive tuple defaults), **not** nullable widening. Aliases cannot overwrite
-existing columns. Sequential expansions are nested operations; limit before
-expansion selects input rows, whereas limit after expansion selects expanded rows.
-Literal aliases retain exact child types. Union and template-pattern aliases expose
-optional additional fields (only one exists at runtime); patterned indexes also admit
-matching source values. Widened `string` aliases retain known source
-fields and expose possibly absent dynamic keys whose values include source and
-child types. Narrow/check dynamic keys before use; runtime collisions still fail.
-`join({ a: queryA, b: queryB, ... }).on(r => r.a.id.eq(r.b.id))` executes
-inner **ALL** joins (duplicates retained). An array of predicates supplies multiple
-keys; additional non-equality predicates become Filters above the join. Include
-tenant keys unless both sides are already tenant-scoped. Each input after the first
-must have an equality connecting it to an earlier input: disconnected input-order
-graphs fail with `join_condition_arity`, never silently become cross joins.
-Callbacks expose frozen nested rows; `map(r => ({ ...r.a }))` flattens a side and
-retains leaf descriptors. Direct `client.run(joined)` returns nested decoded rows,
-including when a join is itself another join's input. Tuple-valued columns remain
-expressions, not relational side objects. Filters/order/limit/distinct and grouped
-callbacks preserve nested structure. Transport names are collision-free internal
-ordinals, never dotted paths. Shared inputs retain IR identity; the naive emitter
-repeats them rather than extracting CTEs. ON references use an explicit occurrence
-scope (`Join.scope`) so same-input self-joins cannot accidentally bind both sides
-to one alias. `crossJoin({ a: queryA, b: queryB, ... })` directly returns a Query
-(no `.on` stage), retaining Cartesian multiplicity and returning no rows if any
-input is empty. It supports the same nested rows, descriptors and composition.
+## Why TypedHouse?
 
-`unionAll(q1, q2, ...rest)` requires at least two queries with exactly matching
-row types and retains duplicates. Branch fields are aligned by complete path to
-the first input's explicit order (reversed record insertion order is safe).
-Nested join rows, expanded fields and Tuple leaves retain descriptors and proxies;
-branch-local sorting/limits/distinct remain inside each branch. Apply global
-operators to the returned Query; UNION row order itself is unspecified. Live
-capability is the AND of inputs; scan-only and thenBy stages are not retained.
-Matching TypeScript rows are not sufficient for SQL compatibility: UInt32 and
-Float64 both decode to number, but this increment rejects their union explicitly
-with `union_descriptor_mismatch`. Automatic common-type/coercion support remains backlog.
-Use explicit alignment instead (import `cast`, `col`, `unionAll` from `@chql/core`):
+SQL is good at describing a query. Application code often needs to reuse part of that query across a dashboard, a report, and an export—without copying SQL strings or losing track of the result shape.
+
+TypedHouse makes those queries composable TypeScript values:
+
+- **Type-safe query construction:** table descriptors give callbacks typed columns and expressions. Projections and aggregates determine the output row type.
+- **Reusable queries:** extend an immutable base query with filters, joins, grouping, ordering, and limits without changing the original.
+- **Parameterized ClickHouse SQL:** input values become typed placeholders and separate parameters, not interpolated SQL fragments.
+- **Inspectable output:** compile a query without connecting to a database. Review its SQL and parameters before execution.
+- **Schema code generation:** introspect ClickHouse tables and generate TypeScript descriptors. Regenerate and typecheck to catch schema changes earlier.
+- **Typed execution and streaming:** run queries or consume decoded rows through an async iterator using the Node.js client.
+
+TypedHouse is a **ClickHouse query builder**, not an object-relational mapper (ORM). Table descriptors describe existing tables; they do not create tables, manage migrations, or implement authorization.
+
+## Quick example: TypeScript to ClickHouse SQL
+
+Select the first ten purchase event IDs for one tenant. This complete example compiles locally without a database:
+
 ```ts
-const aligned = unionAll(
-  integers.map(r => ({ value: cast(r.value, col.Float64) })),
-  floats.map(r => ({ value: r.value })),
+import { col, from, table } from '@chql/core';
+import { compile } from '@chql/compiler';
+
+const events = table(
+  'events',
+  {
+    tenant: col.String,
+    category: col.String,
+    id: col.UInt32,
+  },
+  {
+    engine: 'MergeTree',
+    sortingKey: ['id'],
+    partitionKey: [],
+  },
 );
-```
-`cast(expr, col.X)` emits SQL CAST, unlike `.as(col.X)` (a declaration only).
-It supports numeric integers/floats, String and Bool operands/targets, optionally
-Nullable, retaining root names, modes and original Params. Nullable operands
-require Nullable targets: nullable removal is rejected, so both values of the
-server's `cast_keep_nullable` setting produce truthful descriptors. Other type
-families (including Decimal, dates, LowCardinality and containers) are rejected.
-Invalid String conversions remain server errors wrapped in QueryError; casts do
-not substitute defaults or promise lossless/range-checked numeric conversion.
-Casts compose with grouping, aggregates, sorting, scalar/IN queries and run/stream.
 
-The naive compiler also supports low-level `Union { all: false }` with explicit
-UNION DISTINCT; no public intersect/except APIs are implied.
+// Reuse this tenant-scoped base in other queries.
+const tenantEvents = from(events)
+  .where(e => e.tenant.eq('acme'));
 
-`componentParts.cte()` is a composable **ordinary CTE hint**. It retains
-nested/expanded rows, descriptors and capabilities, but drops scan/thenBy stages
-and direct-aggregate scalar evidence. Filters, projections, grouping, ordering,
-limits, unions and membership can compose around it. Local WITH boundaries preserve
-input operations; ClickHouse may inline and evaluate each use repeatedly. This does
-**not** promise cached rows, one evaluation, or temporary tables. The compiler can
-also extract safe shared query objects automatically, based on object identity.
-See `examples/first-query.ts` for executable composition.
+const query = tenantEvents
+  .where(e => e.category.eq('purchase'))
+  .map(e => ({ id: e.id }))
+  .orderBy(e => e.id)
+  .limit(10);
 
-Mean metrics over a caller-selected history window:
-```ts
-import { from, avg, avgIf } from '@chql/core';
-const since = new Date('2026-01-01T00:00:00Z');
-const until = new Date('2027-01-01T00:00:00Z');
-const history = from(db.metric_group_ots_component_market_availability).final()
-  .where(a => a.tenantId.eq('acme'))
-  .where(a => a.effectiveAt.ge(since).and(a.effectiveAt.lt(until)))
-  .groupBy(a => ({ entityId: a.entityId }))
-  .aggregate(g => ({ stock: avg(g.market_stock_total),
-    leadDays: avg(g.market_lead_time_p50_days),
-    positiveStock: avgIf(g.market_stock_total, g.market_stock_total.gt(0)) }))
-  .orderBy(r => r.stock.desc());
-console.log(await client.run(history));
-for await (const row of client.stream(history)) console.log(row);
-```
-`avg`/`avgIf` accept closed integer/float descriptors, optionally Nullable,
-returning Float64/Nullable(Float64). NULL values are skipped; false or NULL
-predicates exclude rows without making a non-null value's result nullable.
-Empty/no-match non-null aggregates return **NaN**, not NULL or zero; nullable
-inputs return NULL when no non-null values qualify. Empty grouped input yields
-no rows. Non-finite values remain NaN/±Infinity through run and stream.
-Means use Float64: wide integers can lose precision (9007199254740993 becomes
-9007199254740992), and floating accumulation is not exact decimal arithmetic.
-Decimal, Bool, String, wrappers and containers are rejected; State/Merge are
-not exposed. Aligned means compose with UNION ALL and bounded global scalar
-queries (scalar remains Nullable).
-`pnpm example:first-query` runs the analogous indices history and weekly queries.
-
-Weekly stock/lead-time history (Sunday-start weeks, not ISO/Monday):
-```ts
-import { quantile } from '@chql/core';
-const weekly = from(db.metric_group_ots_component_market_availability).final()
-  .where(a => a.tenantId.eq('acme')).where(a => a.entityId.eq('cmp_7'))
-  .groupBy(a => ({ week: a.effectiveAt.toStartOfWeek() }))
-  .aggregate(g => ({ stock: avg(g.market_stock_total), leadDays: quantile(0.5)(g.market_lead_time_p50_days) }))
-  .where(r => r.week.ge(new Date('2026-01-04T00:00:00Z')))
-  .orderBy(r => r.week);
-console.log(await client.run(weekly));
-for await (const row of client.stream(weekly)) console.log(row);
-```
-The generated zero-argument method supports retained Date/DateTime64(0–3)
-(and Nullable) descriptors only. It preserves root names and row/grouped/aggregate
-modes; NULL produces NULL. Bucketing uses the input column's calendar timezone
-(or the server/session timezone for unzoned columns). DateTime64 JS parameters
-still represent UTC instants and use UTC wire descriptors, so a standalone
-parameter buckets in UTC. Returned Date days decode to **UTC midnight**, not a
-midnight instant in the source timezone.
-
-On pinned 24.8, native DateTime64 week results change from Date to Date32 with
-`enable_extended_results_for_datetime_functions`. Queries containing this method
-explicitly emit `SETTINGS enable_extended_results_for_datetime_functions = 1`,
-bucket through Date32 with mode 0, check the result range, then normalize to Date.
-Other queries do not acquire this setting. A week before 1970-01-01 or after
-2149-06-06 raises `chql_date_out_of_range` instead of silently wrapping/clamping;
-notably 1970-01-01–03 belong to an unsupported pre-epoch Sunday week.
-Date wire strings must be valid canonical YYYY-MM-DD within 1970-01-01–2149-06-06.
-Date parameters use the UTC calendar day of a valid JS Date (time-of-day discarded),
-with the same range validation, including Array elements. Invalid wire calendar
-days are rejected, never normalized by JavaScript. Date32/DateTime/high-precision
-bucketing remain unsupported; this is not full
-temporal-catalog acceptance.
-
-`quantile(level)(value)` and `quantileIf(level)(value, predicate)` accept finite
-numeric levels in [0, 1], emitted as Float64 parameters (never inlined). Inputs
-are closed integer/float descriptors, optionally Nullable; results are Float64
-or Nullable(Float64). NULL and NaN values are skipped; empty/no-match non-null
-inputs yield NaN, nullable empty/all-null inputs yield NULL (all-NaN nullable
-inputs still yield NaN). False/NULL predicates exclude rows.
-Infinity can propagate or interpolate to NaN; wide integers can lose precision.
-This is ClickHouse's approximate, nondeterministic reservoir quantile, not
-quantileExact; separate executions need not agree on large inputs. Small finite
-fixtures below the reservoir capacity use interpolation (0/1 select endpoints).
-Each application of a curried helper creates a fresh level Param; reusing its
-resulting aggregate expression shares that Param. Equal constructions are not
-merged by value. State/Merge, other parametric/user aggregate execution and
-broader descriptors remain unsupported.
-
-Latest metric values do not require a self-join:
-```ts
-import { from, max, argMax } from '@chql/core';
-const latestMetrics = from(db.metric_group_ots_component_indices).final()
-  .where(i => i.tenantId.eq('acme'))
-  .groupBy(i => ({ entityId: i.entityId }))
-  .aggregate(g => ({
-    version: max(g.version),
-    stockIndex: argMax(g.stock_index, g.version),
-    leadDays: argMax(g.lead_time_max_days, g.version),
-  })).orderBy(r => r.entityId);
-console.log(await client.run(latestMetrics));
-for await (const row of client.stream(latestMetrics)) console.log(row);
-```
-`argMax(value, version)` and `argMaxIf(value, version, predicate)` retain the value
-operand's descriptor and name (constant-first expressions use `argMax`, not the
-version/predicate name). Supported values are integer/float, String and Bool,
-optionally Nullable; versions must be non-null integer/float descriptors.
-LowCardinality, Decimal, dates, containers and nullable versions are rejected.
-ClickHouse 24.8 **skips NULL values**: each metric can come from a different older
-row even though `max(version)` reports the newest version. All-null or empty
-Nullable inputs return NULL; non-null empty/no-match inputs return the type's
-default (0, false or empty string). If predicates exclude false/NULL rows.
-Different values tied at the maximal version have **no stable tie breaker**;
-FINAL deduplicates sorting keys but does not resolve remaining version ties.
-Aligned aggregate outputs compose with UNION ALL, downstream filter/order/limit
-and bounded global scalar queries (whose descriptor remains Nullable).
-No argMax State/Merge helpers are exported in this bounded slice. The runnable
-`pnpm example:first-query` demonstrates this against the generated fixture tables.
-
-`scalar(q.aggregate(g => sum(g.stock)))` now embeds a directly built keyless,
-exactly-one-column aggregate as a row-mode expression. Object-form names and
-single-expression root names are retained. Use it in projections, arithmetic
-and predicates; inner references are independently scoped (no correlation).
-The naive emitter inlines the SELECT with shared Param identity; CTE extraction
-is still backlog. Cardinality-preserving wrappers and arbitrary Queries are
-not accepted, and no LIMIT 1 is inserted.
-**ClickHouse 24.8 reports Nullable even for scalar count/sum over a guaranteed
-one-row aggregate.** The expression therefore has `T | null` and a matching
-Nullable descriptor; stock-share arithmetic conservatively returns `number | null`,
-not the spec example's `number`. This discrepancy remains explicit rather than
-masking it with a default or pretending the descriptor is non-nullable. Current
-scalar descriptor support is numeric, String, Bool and Date (optionally Nullable);
-containers and other families are rejected pending server evidence.
-
-Generated `expr.in(valuesOrQuery)` / `notIn` accept readonly JS lists or exactly
-one flat column from an ordinary Query (including filtered/distinct/UNION sets).
-No cardinality restriction or LIMIT 1 is imposed. Examples:
-```ts
-components.where(c => c.entityId.in(cIndices.map(i => i.entityId)))
-parts.aggregate(g => ({ eol: countIf(g.lifecycleStatus.in(['EOL', 'Obsolete'])) }))
-```
-Numeric, bigint, String, Bool and Date descriptors (optionally Nullable) are supported;
-other families and container membership are explicitly rejected. Lists use
-`Array(<non-null receiver type>)`: NULL list elements and Expr-valued lists are
-not supported. Nullable set columns are supported. On pinned ClickHouse 24.8,
-NULL receivers produce NULL for both IN and NOT IN, even against an empty set;
-non-NULL receivers do not match NULL set entries. Results are boolean, nullable
-only when the receiver is nullable (Bool decoder accepts the server UInt8).
-Duplicates do not multiply rows. Inner queries are independently scoped, inline,
-and share the outer Param allocator; correlation and shared CTE extraction remain
-unsupported. Names and grouped modes survive membership (including countIf).
-
-Select weeks from a tenant/entity-scoped weekly summary (the runnable
-`examples/first-query.ts` includes this through both run and stream):
-```ts
-const selectedWeeks = weekly.where(r => r.stock.ge(20)).map(r => r.week);
-const selectedHistory = weekly
-  .where(r => r.week.in(unionAll(selectedWeeks, selectedWeeks)))
-  .where(r => r.week.in([new Date('2026-10-25T23:00:00Z')]))
-  .where(r => r.week.notIn([]))
-  .orderBy(r => r.week);
-console.log(await client.run(selectedHistory));
-```
-Date membership requires retained Date/Nullable(Date) descriptors on both the
-receiver and Query set; Date32, DateTime, DateTime64 and LowCardinality(Date) are
-not interchangeable even when decoded as JS Date. Lists use each Date's UTC
-calendar day, discard time-of-day, and reject invalid/out-of-range dates using
-the bounds above. Queries containing Date membership explicitly emit
-`SETTINGS transform_null_in = 0`: on 24.8, setting it to 1 changes nullable
-results from Nullable(UInt8) to UInt8 and allows NULL to match NULL. The emitted
-setting preserves the documented NULL behavior even when the client/session
-sets 1. Unrelated queries acquire no new setting.
-NULL/Expr list elements and temporal coercions remain unsupported.
-
-Select the newest available week without a round trip through application code:
-```ts
-const newestWeek = scalar(weekly.aggregate(g => max(g.week)));
-const newest = weekly.where(r => r.week.eq(newestWeek))
-  .map(r => ({ ...r, newestWeek })).orderBy(r => r.week);
-console.log(await client.run(newest));
-for await (const row of client.stream(newest)) console.log(row);
-```
-Date scalars require retained Date/Nullable(Date) evidence and a direct keyless,
-one-column aggregate; Date32/DateTime/DateTime64 are not interchangeable.
-On ClickHouse 24.8 max/maxIf over empty/nonmatching non-null Date inputs returns
-1970-01-01, not NULL. Nullable empty/all-null/nonmatching inputs return NULL.
-Scalar wrappers always expose Nullable(Date); decoding preserves the server value.
-With `aggregate_functions_null_for_empty=1`, empty/nonmatching Date aggregates
-return NULL too. This library does not override that aggregate setting or invent
-a fallback date. Grouped/arbitrary/LIMIT-1/wrapped scalar queries and correlation
-remain unsupported; broader temporal support and the scalar/spec nullability
-discrepancy remain backlog.
-
-Outer joins are owner-deferred unresolved v1 backlog, not a blocker for cross
-joins or independent features. Two explicit contract issues remain, without silently widened
-types: structural TypeScript records do not encode first/last insertion order
-(`{ a, b }` and `{ b, a }` have the same type), and ClickHouse 24.8 with
-`join_use_nulls=1` still fills unmatched Array/Tuple/Map columns with non-null
-defaults. Nullable containers are rejected by the server. Enabled regression
-reproductions are in `cross-join.test.ts` and `query.integration.ts`. A decision on
-ordered input evidence and structured null-extension representation is required
-before the specified outer-join API can honestly promise exact rows.
-### Exact String cardinality
-
-`uniqExact(value)` and `uniqExactIf(value, predicate)` accept String/Nullable(String)
-grouped expressions or `val` constants; predicates are Bool/Nullable(Bool).
-Results retain UInt64 and decode to **bigint**, never nullable. NULL values are
-skipped, empty String is a value, and empty/all-null/no-match inputs return `0n`.
-False/NULL predicates exclude rows. Pinned ClickHouse 24.8 preserves these values
-and UInt64 descriptors with `aggregate_functions_null_for_empty=0` or `1`; no
-setting override or client fallback is applied. Empty grouped inputs produce no groups.
-
-```ts
-import { uniqExact, uniqExactIf, count } from '@chql/core';
-const scoped = components.where(forTenant('acme'));
-const categories = scoped.aggregate(g => ({ categories: uniqExact(g.category) }));
-const matched = join({ c: scoped.arrayJoin(c => c.matched_part_ids, 'partId'), p: parts })
-  .on(r => [r.c.tenantId.eq(r.p.tenantId), r.c.partId.eq(r.p.entityId)])
-  .groupBy(r => ({ category: r.c.category.ifNull('uncategorised') }))
-  .aggregate(g => ({ rows: count(), components: uniqExact(g.c.entityId),
-    eol: uniqExactIf(g.c.entityId, g.p.lifecycleStatus.eq('EOL')) }))
-  .where(r => r.components.gt(0n)).orderBy(r => r.category).limit(10);
-console.log(await client.run(categories));
-for await (const row of client.stream(matched)) console.log(row);
+const compiled = compile(query.ir);
+console.log(compiled.sql, compiled.params);
+export default compiled;
 ```
 
-Duplicate matched IDs and duplicate joined part rows increase `rows`, not distinct
-component counts. The runnable small example fixture prints categories `1n` and
-matched components `[]` (its matched arrays are empty); the enabled multiplicity
-fixture asserts visible category `{ rows: 7n, entities: 2n, selected: 2n }` and
-uncategorised `{ rows: 1n, entities: 1n, selected: 0n }` against native SQL.
-Exact distinct **server memory grows with cardinality**. Client streaming and its
-10M-row heap gate do not bound aggregate server memory. Other descriptors,
-approximate uniq, multi-argument distinct and State/Merge remain unsupported.
+<!-- generated-sql:start -->
 
-Grouped and global aggregation execute `count`, `sum`, `avg`, `max`, `argMax`, `uniqExact`, `quantile(level)` and their `If`
-forms: `q.groupBy(r => r.category).aggregate(() => count())` or
-`q.aggregate(g => ({ total: sum(g.amount) }))`. Keys precede aggregate outputs;
-object forms choose names, single forms retain root names, and collisions fail.
-Grouped stages expose only `aggregate`; callbacks use grouped-mode operands.
-Integer sums decode as bigint, floating sums as number, and nullable aggregates
-retain null for all-null/empty inputs. `where` after aggregation is an outer
-naive filter. State/Merge construction remains available but execution and raw
-state selection remain explicitly unsupported. Builder ColumnRefs record row/grouped
-provenance; legacy low-level refs without a mode are checked in their contextual
-scope (their original wrapper mode cannot be recovered).
-All 26 existing scalar catalog methods execute: IN/NOT IN, six
-comparisons, and/or/not, plus/minus/multiply/divide, isNull/isNotNull/ifNull,
-length/empty/notEmpty/startsWith, has/hasAny/arrayElement/element. No additional
-operators or catalog families are implied; unsupported forms fail explicitly.
-The client decodes String/FixedString, Bool, integer widths, floats (including
-non-finite values), DateTime64(0–3), recursive Array and named/unnamed Tuple,
-Nullable and LowCardinality. Decimal, other dates/high-precision timestamps,
-Map, Enum, addresses, opaque states and unknown descriptors remain explicitly
-unsupported. Full catalog, outer joins, optimizations and Part 4 backend
-plugins remain backlog. M3–M6 and the remaining Part 4 constraints are incomplete;
-this preview is not full v1 acceptance. M7–M8 remain deferred.
+Final SQL:
 
-Against a ClickHouse database with the fixture's `entity_ots_component` schema:
+```sql
+SELECT
+  `id`
+FROM
+  `events`
+WHERE
+  `tenant` = {p0:String}
+  AND `category` = {p1:String}
+ORDER BY
+  `id` ASC
+LIMIT
+  10
+```
+
+Parameters:
+
+```json
+{
+  "p0": "acme",
+  "p1": "purchase"
+}
+```
+
+<!-- generated-sql:end -->
+
+Executed with the TypedHouse client, this query returns `{ id: number }[]`. `tenantEvents` remains unchanged and can also become a grouped dashboard query or an export.
+
+Callbacks build SQL expressions; they do not process fetched JavaScript rows. For example, `e.id.eq(42)` builds a SQL comparison, while `e.id === 42` is a JavaScript comparison. Operation order matters: filtering before a limit can produce different results from filtering afterward.
+
+**Try it without installing:** open the [ClickHouse query playground](https://fhur.github.io/typedhouse/playground/), paste the example, remove the compiler import, and replace the final three lines with `export default query`. The playground compiles SQL but does not connect to ClickHouse or perform full TypeScript checking.
+
+## Installation and local setup
+
+Requirements: **Node.js 20+**, **pnpm**, ESM, and TypeScript with `strict: true`. Docker is required for integration tests, not for compiling queries.
+
+The current development path is the source workspace:
 
 ```sh
-CLICKHOUSE_URL=http://localhost:8123 CLICKHOUSE_USER=default \
-  CLICKHOUSE_PASSWORD='' CLICKHOUSE_DATABASE=default pnpm example:first-query
-```
-
-[`examples/first-query.ts`](examples/first-query.ts) imports the checked-in generated
-fixture schema, prints `q.toSQL()`, runs the query, and always closes the client.
-The mandatory Docker integration test executes this exact command with fixture rows.
-To generate descriptors for your own database, build first, then run:
-
-```sh
-pnpm build
-node packages/codegen/dist/cli.js generate --url http://localhost:8123 \
-  --database analytics --out-dir examples/generated
-```
-
-Credentials can come from `CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD`. Change the example's
-schema import to `./generated/schema.js` and set `CLICKHOUSE_DATABASE=analytics`.
-Your table must have the demo columns; adjust the projection for another schema.
-
-The default `compile` pipeline validates relational IR, lowers it into SELECT blocks,
-then emits SQL and allocates parameters. It folds scan → filter → sort → limit
-into one SELECT. Blocks reading directly from a physical table omit the internal
-table alias and column qualifiers; derived-table and join scopes retain explicit
-qualification. Identifiers remain quoted. Consecutive filters combine with AND. Simple same-name column
-selections (for example `.map(p => ({ id: p.id, stock: p.stock }))`) fold before
-sorting/limiting, including filters on columns omitted by the selection. Repeated
-sorts/limits and out-of-order clauses start a derived table. Direct renames and
-integer `plus`/`minus`/`multiply` projections with typed operands can fold over a
-scan and its filters, provided output aliases do not shadow different physical
-columns. Computed projections retain a boundary for subsequent clauses; fallible
-expressions, projections after sort/limit, aggregates, joins, DISTINCT and
-materialization remain fences. A seeded ClickHouse property test compares rows
-and column types across 30 generated datasets/parameter sets and five query shapes;
-queries use unique ordering before LIMIT to make comparisons deterministic. `emitNaive` remains
-the one-subquery-per-node reference backend. Future logical rewrites belong between
-validation and block planning, not in SQL rendering. For now validation reuses the
-reference backend (discarding its SQL), and emission retains defensive checks; a
-standalone validation visitor is a future performance improvement.
-
-Core intentionally has no compiler dependency. Explicitly initialize `toSQL()` with
-`registerCompiler(compile)` (`registerCompiler` from `@chql/core`, `compile` from
-`@chql/compiler`). `createClient` from `@chql/client` compiles independently and
-memoizes plans/decoders by IR identity. `run` forces ISO date output, quoted 64-bit
-integers and quoted non-finite floats; errors retain SQL, params, cause and the root
-node (fine-grained server attribution remains backlog). Always `await client.close()`.
-`client.stream(q)` lazily compiles and executes on first iteration, sharing the same
-plan/decoder cache, parameter transport and output settings as `run`. It yields decoded
-rows incrementally from the driver's JSONEachRow batches, without collecting results.
-Exhaustion, early `break`, consumer exceptions and read/decode failures release the
-response, not the reusable client. Each iterator has its own cursor. The driver has
-bounded internal stream buffering; this is not a strict single-network-chunk guarantee.
-The enabled Docker test consumes 10,000,000 real `{ id: UInt32 }` rows in an isolated
-Node process (`scripts/verify-stream-memory.mjs`), checking count/checksum and sampled
-peak `heapUsed < 200_000_000` bytes (every 4096 rows plus a 10ms timer, no forced GC or
-baseline subtraction). Fixture population is outside that process. This budget applies
-only to this measured workload, not arbitrary row widths or consumer-retained rows.
-
-Rows and graph nodes are immutable. Named Tuple descriptors survive projections;
-named/unnamed tuples and arrays decode recursively. The executable example also
-shows structural filtering, tuple-field extraction and array lengths. Array indices
-follow ClickHouse's 1-based/negative-index semantics; non-integer indices are rejected.
-Arrays are serialized by the library, including nested nullable/bigint values.
-The client transports those preformatted literals via HTTP `param_*` fields rather
-than letting the driver's string formatter escape their quotes a second time;
-scalar parameters still use `query_params`. No values are interpolated into SQL.
-
-Date parameters are instants, not local wall times. The library serializes supported
-DateTime64(0–3) values as UTC text, truncating to the descriptor's precision, and
-uses an explicitly UTC-typed placeholder (including Nullable wrappers). The sibling
-column descriptor and Param identity remain unchanged. This deliberately resolves
-the spec tension between sibling-timezone placeholders and mandated UTC strings:
-parsing UTC text in the sibling/server timezone would change the instant.
-
-Typed NULL emits `CAST(NULL AS <resolved type>)`; equality with NULL retains SQL's
-unknown/drop behavior. This minimally qualifies the spec's NULL-rendering rule:
-bare NULL has type Nullable(Nothing), so `ifNull(NULL, UInt32)` returns UInt32,
-whereas an explicitly Nullable(Int32) operand requires Int64 (decoded as bigint).
-The cast preserves descriptor evidence without binding or interpolating a value.
-
-## Development
-
-Node.js 20+ and Corepack are required. Integration tests require Docker and
-use `clickhouse/clickhouse-server:24.8`.
-
-```sh
+git clone https://github.com/fhur/typedhouse.git
+cd typedhouse
 corepack enable
-pnpm install
+pnpm install --frozen-lockfile
+pnpm --filter @chql/core --filter @chql/compiler --filter @chql/client build
+```
+
+Workspace consumers use `workspace:*` dependencies. For releases available in your package registry, the package names are:
+
+```sh
+pnpm add @chql/core @chql/compiler
+# Optional: execute queries from your Node.js server.
+pnpm add @chql/client
+```
+
+Registry availability depends on the release you use.
+
+## Execute or stream typed results
+
+Append this to the quick example in a **server-side** TypeScript module. Your ClickHouse table must match the descriptor. This snippet is typechecked but never executed by documentation builds.
+
+```ts typecheck-only
+import { createClient } from '@chql/client';
+
+const client = createClient({
+  url: process.env.CLICKHOUSE_URL ?? 'http://localhost:8123',
+  username: process.env.CLICKHOUSE_USER ?? 'default',
+  password: process.env.CLICKHOUSE_PASSWORD ?? '',
+});
+
+try {
+  const rows = await client.run(query); // { id: number }[]
+  console.log(rows);
+
+  // Alternative to run(): consume rows incrementally.
+  // This executes a separate query, not a cached copy of rows.
+  for await (const row of client.stream(query)) {
+    console.log(row.id); // number
+  }
+} finally {
+  await client.close();
+}
+```
+
+The client compiles queries independently; compiler registration is not required for `run` or `stream`. Streaming avoids collecting the entire result in an application array, but does not bound ClickHouse's server-side memory use.
+
+Keep credentials on the server. Never paste them into the playground or include them in a browser bundle. Parameterization keeps values separate from SQL; your application must still enforce tenant and access rules.
+
+## Generate TypeScript types from your ClickHouse schema
+
+Use schema introspection instead of maintaining table descriptors by hand. From the source repository:
+
+```sh
+pnpm --filter @chql/codegen... build
+node packages/codegen/dist/cli.js generate \
+  --url http://localhost:8123 \
+  --database analytics \
+  --out-dir examples/generated
+```
+
+Credentials can come from `CLICKHOUSE_USER` and `CLICKHOUSE_PASSWORD`. Import the generated schema into your application, then run its TypeScript checks.
+
+After a database column is renamed, regenerate the descriptors: queries using the old field can then fail at typecheck time. Stale descriptors cannot detect live database drift automatically.
+
+[Schema generation reference →](packages/codegen/README.md)
+
+## Supported query-building concepts
+
+| Concept | What you can express | Reference |
+| --- | --- | --- |
+| Filters and projections | Typed predicates, selected columns, renamed output fields | [Filtering](https://fhur.github.io/typedhouse/docs/query-builder/filtering/) · [Projection](https://fhur.github.io/typedhouse/docs/query-builder/projection/) |
+| Sorting and pagination | `orderBy`, `thenBy`, `limit`, and offsets | [Ordering](https://fhur.github.io/typedhouse/docs/query-builder/ordering/) · [Limits](https://fhur.github.io/typedhouse/docs/query-builder/limits/) |
+| Aggregation | Grouped and global aggregates such as `count`, `sum`, `avg`, and `argMax` | [Aggregation](https://fhur.github.io/typedhouse/docs/query-builder/aggregation/) |
+| Joins | Named inputs, inner ALL joins, and cross joins | [Joins](https://fhur.github.io/typedhouse/docs/query-builder/joins/) |
+| Set operations | `unionAll` with compatible descriptors; `distinct` | [Unions](https://fhur.github.io/typedhouse/docs/query-builder/unions/) |
+| Subqueries | Single-column membership queries and supported scalar aggregates | [Set subqueries](https://fhur.github.io/typedhouse/docs/query-builder/set-subqueries/) · [Scalar subqueries](https://fhur.github.io/typedhouse/docs/query-builder/scalar-subqueries/) |
+| Array expansion | `arrayJoin` and `leftArrayJoin` | [Array expansion](https://fhur.github.io/typedhouse/docs/query-builder/array-expansion/) |
+| ClickHouse-specific operations | `FINAL`, `SAMPLE`, and CTE hints with explicit semantics | [Scan modifiers](https://fhur.github.io/typedhouse/docs/query-builder/scan-modifiers/) · [CTEs](https://fhur.github.io/typedhouse/docs/query-builder/cte-hints/) |
+
+These are supported building blocks, not a promise that every ClickHouse type, function, or combination is implemented. Refer to each API's constraints and the [current roadmap](TODO.md).
+
+## Learn TypedHouse in three guides
+
+1. **[Getting started](https://fhur.github.io/typedhouse/docs/getting-started/)** — understand descriptors, query expressions, SQL compilation, and execution.
+2. **[Simple example](https://fhur.github.io/typedhouse/docs/tutorials/composition/)** — build a report and dashboard from one reusable query.
+3. **[Advanced example](https://fhur.github.io/typedhouse/docs/tutorials/advanced-example/)** — combine tables, expand arrays, and deduplicate before counting.
+
+The guides include typechecked examples, compiler-generated SQL, and exercises that make operation order and result shapes concrete.
+
+## Frequently asked questions
+
+### Is TypedHouse a ClickHouse ORM or a database driver?
+
+Neither is its primary purpose. TypedHouse is a TypeScript query builder and compiler with an optional execution client. It describes queries over existing tables rather than managing entities, relationships, or database migrations.
+
+### Does type-safe mean every query is correct?
+
+No. Types catch supported construction and result-shape mistakes. They do not prove business logic, enforce authorization, detect stale schema descriptors, or guarantee compatibility with every server setting. Review the generated SQL and test against your database.
+
+### Does TypedHouse make ClickHouse queries faster?
+
+There is no blanket performance claim. The compiler simplifies supported query shapes and preserves operation order. Actual performance depends on your schema, data, query, and ClickHouse execution plan. Shared query objects and CTEs are not guaranteed result caches.
+
+### How are ClickHouse numeric types represented in TypeScript?
+
+The client uses descriptors to decode supported types. For example, UInt32 becomes `number`, while UInt64 and `count()` results become `bigint`. Matching JavaScript types do not necessarily mean two ClickHouse descriptors are interchangeable.
+
+### Is TypedHouse an official ClickHouse project?
+
+No. TypedHouse is an independent project and is not affiliated with ClickHouse.
+
+## Development and contributions
+
+This is an ESM-only pnpm workspace using strict TypeScript. The maintained integration target is `clickhouse/clickhouse-server:24.8`.
+
+```sh
+pnpm typecheck
+pnpm test
 pnpm check:all
 ```
 
-`check:all` requires the installed Testcontainers port checks and a fresh real
-ClickHouse/Ryuk smoke on every platform. The smoke preserves existing consumers'
-Ryuks and checks empty dynamic bindings only on affected local Mac Docker Desktop
-hosts (`0` elsewhere). See `patches/README.md`; the separate
-`node scripts/test-smoke-testcontainers-repeat.mjs` regression runs two consecutive
-smokes while a normal consumer keeps its foreign Ryuk alive.
+`pnpm check:all` includes builds, package verification, and Docker-backed integration tests. It requires a working Docker installation; see [Testcontainers setup notes](patches/README.md) if the environment check fails.
 
-ESM-only pnpm workspace with strict TypeScript and exact optional properties.
+| Package | Responsibility |
+| --- | --- |
+| [Core](packages/core) | Dependency-free types, table descriptors, expressions, and relational query representation |
+| [Compiler](packages/compiler) | Validation, query rewrites, parameter allocation, and ClickHouse SQL emission |
+| [Client](packages/client) | Server-side execution, streaming, and result decoding |
+| [Codegen](packages/codegen) | ClickHouse schema introspection and descriptor generation |
 
-- `packages/core`: dependency-free types, descriptors, expressions and relational IR
-- `packages/codegen`: ClickHouse introspection and generation CLI
-- `packages/compiler`: validation, rewrites and SQL emission
-- `packages/client`: execution, streaming and decoding
+Before proposing a change, check the [roadmap](TODO.md) and [implementation contract](spec.md). Bug reports are most useful with a minimal query, expected and actual results, and the ClickHouse version—without credentials or private data.
 
-Milestones 1–6 are v1 scope. Temporary-table materialization and the incremental
-engine (milestones 7–8) are deferred by the specification.
+[Report an issue](https://github.com/fhur/typedhouse/issues) · [Implementation notes](IMPLEMENTATION.md) · [Documentation development](apps/docs/README.md) · [Markdown index for AI coding tools](https://fhur.github.io/typedhouse/llms.txt)
