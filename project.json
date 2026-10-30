@@ -1,0 +1,107 @@
+{
+  "$schema": "./node_modules/nx/schemas/project-schema.json",
+  "name": "chql-checks",
+  "root": ".",
+  "targets": {
+    "check-testcontainers-port-patch": {
+      "executor": "nx:run-commands",
+      "dependsOn": [],
+      "outputs": [],
+      "options": { "command": "node scripts/test-testcontainers-port-patch.mjs" }
+    },
+    "check-testcontainers-smoke": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-testcontainers-port-patch"],
+      "outputs": [],
+      "options": { "command": "node scripts/smoke-testcontainers-port-patch.mjs" }
+    },
+    "check-typecheck": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["check-testcontainers-smoke"],
+      "outputs": [],
+      "options": { "command": "pnpm typecheck" }
+    },
+    "check-test": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-typecheck"],
+      "outputs": [],
+      "options": { "command": "pnpm test" }
+    },
+    "check-type-corpus": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-test"],
+      "outputs": [],
+      "options": { "command": "pnpm verify:type-corpus" }
+    },
+    "check-build": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["checkInputs", { "env": "SITE_URL" }, { "env": "BASE_PATH" }],
+      "dependsOn": ["check-type-corpus"],
+      "outputs": [
+        "{workspaceRoot}/packages/core/dist",
+        "{workspaceRoot}/packages/compiler/dist",
+        "{workspaceRoot}/packages/client/dist",
+        "{workspaceRoot}/packages/codegen/dist",
+        "{workspaceRoot}/apps/docs/dist",
+        "{workspaceRoot}/apps/docs/.astro",
+        "{workspaceRoot}/apps/docs/public/sandbox/worker.js"
+      ],
+      "options": { "command": "pnpm build" }
+    },
+    "check-core-package": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-build"],
+      "outputs": [],
+      "options": { "command": "pnpm verify:core-package" }
+    },
+    "check-query-package": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-core-package"],
+      "outputs": [],
+      "options": { "command": "pnpm verify:query-package" }
+    },
+    "check-expr-surface": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-query-package"],
+      "outputs": [],
+      "options": { "command": "pnpm verify:expr-surface" }
+    },
+    "check-codegen-integration": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-expr-surface"],
+      "outputs": [],
+      "options": { "command": "pnpm test:codegen-integration" }
+    },
+    "check-codegen-package": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-codegen-integration"],
+      "outputs": [],
+      "options": { "command": "pnpm verify:codegen-package" }
+    },
+    "check-fixture-seed": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["check-codegen-package"],
+      "outputs": [],
+      "options": { "command": "pnpm verify:fixture-seed" }
+    },
+    "check-compiler-integration": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-fixture-seed"],
+      "outputs": [],
+      "options": {
+        "command": "pnpm test:compiler-integration",
+        "env": { "FORCE_COLOR": "0" }
+      }
+    },
+    "check-all": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["check-compiler-integration"],
+      "outputs": [],
+      "options": { "command": "node -e \"console.log('All checks passed')\"" }
+    }
+  }
+}

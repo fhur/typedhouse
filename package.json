@@ -4,6 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@10.11.0",
   "engines": { "node": ">=20" },
+  "nx": { "includedScripts": [] },
   "scripts": {
     "capture:type-corpus": "tsup scripts/capture-type-corpus.ts --format esm --external testcontainers --out-dir node_modules/.cache/chql-capture && node node_modules/.cache/chql-capture/capture-type-corpus.js",
     "generate:fixture-seed": "tsup scripts/generate-fixture-seed.ts --format esm --out-dir node_modules/.cache/chql-seed && node node_modules/.cache/chql-seed/generate-fixture-seed.js",
@@ -24,12 +25,14 @@
     "verify:core-package": "node scripts/verify-core-package.mjs",
     "test:codegen-integration": "vitest run --config vitest.codegen.config.ts",
     "verify:codegen-package": "node scripts/verify-codegen-package.mjs",
-    "check:all": "node scripts/test-testcontainers-port-patch.mjs && node scripts/smoke-testcontainers-port-patch.mjs && pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm verify:query-package && pnpm verify:expr-surface && pnpm test:codegen-integration && pnpm verify:codegen-package && pnpm verify:fixture-seed && pnpm test:compiler-integration"
+    "check:all": "nx run chql-checks:check-all --outputStyle=static",
+    "check:all:uncached-baseline": "node scripts/test-testcontainers-port-patch.mjs && node scripts/smoke-testcontainers-port-patch.mjs && pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm verify:query-package && pnpm verify:expr-surface && pnpm test:codegen-integration && pnpm verify:codegen-package && pnpm verify:fixture-seed && pnpm test:compiler-integration"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "expect-type": "^1.2.1",
     "fast-check": "^4.1.1",
+    "nx": "^24.0.2",
     "testcontainers": "10.28.0",
     "tsup": "^8.4.0",
     "typescript": "^5.8.3",
