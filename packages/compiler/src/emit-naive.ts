@@ -2,6 +2,7 @@ import { print, scalarDescriptor, outputLeaves, expandedOutput, type CHType, typ
 import type { SqlPlan } from './plan-selects.js';
 import { parameterExpression, parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
+import { resolveRaw } from './resolve-raw.js';
 
 import { validateStructure } from './validate-structure.js';
 import { ValidationError } from './validation-error.js';
@@ -63,6 +64,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       if (!same(type, e.type)) throw new Error('invalid_expression_type');
       return type;
     }
+    if (e.kind === 'Raw') return resolveRaw(e, resolvedType);
     if (e.kind === 'Cast') return resolveCast(e, resolvedType);
     if (e.kind === 'Agg') return resolveAggregate(e, resolvedType).result;
     if (e.kind === 'Call') return resolveCall(e, resolvedType).result;
@@ -110,6 +112,13 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         try { resolvedType(e); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_subquery', e, path); }
         // Same allocator/active graph, but emit establishes a fresh inner column scope.
         return `(${emit(e.rel, `${path}.rel`)})`;
+      }
+      case 'Raw': {
+        if (scope !== 'row') return fail('invalid_expression_mode', e, path);
+        try { resolveRaw(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_raw_expression', e, path); }
+        let text = e.parts[0]!;
+        for (let i = 0; i < e.args.length; i++) text += `(${expression(e.args[i]!, input, `${path}.args[${i}]`, undefined, false, 'row', qualifier, binding)})${e.parts[i + 1]!}`;
+        return `(${text})`;
       }
       case 'Cast': {
         let target: CHType;

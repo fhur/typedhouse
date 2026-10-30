@@ -70,6 +70,19 @@ const graphNode = Symbol('chql.graphNode');
 const finalizedNodes = new WeakSet<object>();
 let counter = 0;
 
+/** Reject executable/inherited container fields before any owned-data reads.
+ * Finalized graph nodes may contain the private marker and defensive Date getters. */
+export function assertDataContainer(value: unknown): asserts value is object {
+  if (!value || typeof value !== 'object') throw new Error('IR: invalid_data_container');
+  if (finalizedNodes.has(value)) return;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null && !(Array.isArray(value) && prototype === Array.prototype)) throw new Error('IR: invalid_data_container');
+  if (Object.getOwnPropertySymbols(value).length) throw new Error('IR: invalid_data_container');
+  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+    if (!('value' in descriptor)) throw new Error('IR: invalid_data_container');
+  }
+}
+
 /** Copy owned containers, but retain references to already constructed graph nodes.
  * No id->node registry: unreachable graphs can be collected. Dates are copied on read
  * because Object.freeze(Date) cannot freeze its internal time slot.

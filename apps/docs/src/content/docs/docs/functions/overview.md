@@ -49,7 +49,7 @@ See [groupBy / aggregate](/docs/query-builder/aggregation/) for constructing agg
 
 [Expression helpers](/docs/functions/custom-functions/) shows how to share business rules across queries: flag inventory for replenishment, calculate gross margin, and compose a contactability predicate. Each example includes its generated SQL.
 
-The generated `functions.ts` also exposes known-function `fn` and `agg` calls; `.as(col.X)` declares their result descriptor without emitting a CAST. This is separate from custom function declarations, which were intentionally removed from scope along with custom aggregates and method extensions. Ordinary TypeScript expression helpers remain supported. SQL snippets are not implemented yet.
+The generated `functions.ts` also exposes known-function `fn` and `agg` calls; `.as(col.X)` declares their result descriptor without emitting a CAST. This is separate from custom function declarations, which were intentionally removed from scope along with custom aggregates and method extensions. Ordinary TypeScript expression helpers remain supported. Trusted scalar row SQL snippets require `.as(col.X)` for their runtime result descriptor. Interpolated values are parameters, not identifiers; authors are responsible for scalar, dependency-complete SQL and expression-position holes. No SQL lexer or sanitizer checks template text. Aggregate snippets and raw-query APIs remain unsupported.
 
 This section covers the supported typed catalog. Individual pages explain the accepted descriptors and behavior.
 

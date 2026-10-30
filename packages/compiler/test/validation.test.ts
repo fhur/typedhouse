@@ -115,7 +115,6 @@ it('unsupported but well-shaped variants stay semantic errors, with no hidden gr
   const bool = val(true).ir;
   const expressions = [
     { ...bool, kind: 'Literal' },
-    { ...bool, kind: 'Raw', opaque: true, resolution: 'declared', provenance: { origin: 'sql' }, parts: ['true'], args: [] },
     { ...bool, kind: 'Case', branches: [{ when: bool, then: bool }], otherwise: bool },
   ];
   for (const expr of expressions) {
@@ -123,6 +122,8 @@ it('unsupported but well-shaped variants stay semantic errors, with no hidden gr
     expect(() => structural.validateStructure(root)).not.toThrow();
     for (const emit of [compile, emitNaive]) expect(() => emit(root)).toThrowError(expect.objectContaining({ code: 'unsupported_expression', path: 'root.pred' }));
   }
+  const scalarRaw = { ...source.where(() => val(true)).ir, pred: { ...bool, kind: 'Raw', opaque: true, resolution: 'declared', provenance: { origin: 'sql' }, parts: ['true'], args: [] } } as unknown as Rel;
+  for (const emit of [compile, emitNaive]) expect(emit(scalarRaw).sql).toContain('(true)');
   const raw = { ...source.ir, kind: 'RawRel', opaque: true, provenance: { origin: 'sql.relation' }, parts: ['SELECT 1'], args: [] } as unknown as Rel;
   expect(() => structural.validateStructure(raw)).not.toThrow();
   for (const emit of [compile, emitNaive]) expect(() => emit(raw)).toThrowError(expect.objectContaining({ code: 'unsupported_node', path: 'root' }));

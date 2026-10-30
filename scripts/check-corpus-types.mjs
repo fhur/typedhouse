@@ -61,7 +61,7 @@ try {
   symlinkSync(join(root, 'packages/core'), join(directory, 'node_modules/@chql/core'), 'dir');
   symlinkSync(join(root, 'node_modules/expect-type'), join(directory, 'node_modules/expect-type'), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
-  const files = ['packages/compiler/test/fixtures/corpus/supported-types.ts', 'test/types/bench/queries.ts', 'packages/compiler/test/fixtures/corpus/components-latest.ts', 'packages/compiler/test/fixtures/corpus/projection-enrichment.ts', 'packages/compiler/test/fixtures/corpus/known-functions.ts'];
+  const files = ['packages/compiler/test/fixtures/corpus/supported-types.ts', 'test/types/bench/queries.ts', 'packages/compiler/test/fixtures/corpus/components-latest.ts', 'packages/compiler/test/fixtures/corpus/projection-enrichment.ts', 'packages/compiler/test/fixtures/corpus/known-functions.ts', 'packages/compiler/test/fixtures/corpus/sql-snippets.ts'];
   const config = { compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true, incremental: false, skipLibCheck: false, types: [], declaration: true, rootDir: root, outDir: join(directory, 'emit'), paths: { '@chql/core': [join(root, 'packages/core/dist/index.d.ts')] } }, files: files.map(f => join(root, f)) };
   const configPath = join(directory, 'tsconfig.json');
   writeFileSync(configPath, JSON.stringify(config));
@@ -111,11 +111,17 @@ try {
   sameOrRefresh(join(snapshots, 'known-functions-descriptors.json'), JSON.stringify(knownDescriptors, null, 2) + '\n');
   sameOrRefresh(join(root, 'test/types/known-functions-corpus.ts'), knownAssertions);
   declarations.push([`known-functions-${actualVersion}.d.ts`, readFileSync(join(directory, 'emit', files[4].replace(/\.ts$/, '.d.ts')), 'utf8')]);
+  const snippetModule = await import(pathToFileURL(join(directory, 'emit', files[5].replace(/\.ts$/, '.js'))).href);
+  const snippetOutput = snippetModule.snippetDistance.ir.output;
+  sameOrRefresh(join(snapshots, 'sql-snippets-row.d.ts'), `// Generated from runtime CHType output.\nexport type SnippetDistance = ${decoded(snippetOutput)};\n`);
+  sameOrRefresh(join(snapshots, 'sql-snippets-descriptors.json'), JSON.stringify(snippetOutput, null, 2) + '\n');
+  sameOrRefresh(join(root, 'test/types/sql-snippets-corpus.ts'), `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@chql/core';\nimport { snippetDistance } from '../../packages/compiler/test/fixtures/corpus/sql-snippets.js';\nimport type { SnippetDistance } from './snapshots/corpus/sql-snippets-row.js';\nexpectTypeOf<Infer<typeof snippetDistance>>().toEqualTypeOf<SnippetDistance>();\nexpectTypeOf<Infer<typeof snippetDistance>>().not.toBeAny();\n`);
+  declarations.push([`sql-snippets-${actualVersion}.d.ts`, readFileSync(join(directory, 'emit', files[5].replace(/\.ts$/, '.d.ts')), 'utf8')]);
   const coverage = JSON.parse(readFileSync(join(root, 'test/types/corpus-coverage.json'), 'utf8'));
   assert.equal(coverage.fullM3, false);
   assert.equal(new Set(coverage.entries.map(e => e.id)).size, coverage.entries.length, 'Duplicate coverage IDs');
   const covered = new Set(coverage.entries.flatMap(e => e.queries ?? []));
-  const supported = [...Object.keys(descriptors).filter(k => k.startsWith('supported_')).map(k => k.slice('supported_'.length)), 'componentsLatest', 'projectionEnrichment', ...Object.keys(knownModule)];
+  const supported = [...Object.keys(descriptors).filter(k => k.startsWith('supported_')).map(k => k.slice('supported_'.length)), 'componentsLatest', 'projectionEnrichment', ...Object.keys(knownModule), 'snippetDistance'];
   assert.deepEqual([...covered].sort(), supported.sort(), 'Coverage ledger must name every supported query, and no nonexistent query');
   const manifest = JSON.parse(readFileSync(join(root, 'test/types/bench/manifest.json'), 'utf8'));
   assert.deepEqual(manifest.queries.map(q => `bench_${q.name}`).sort(), Object.keys(descriptors).filter(k => k.startsWith('bench_')).sort());
@@ -127,7 +133,7 @@ try {
   console.log(`${Object.keys(descriptors).length} runtime-derived row snapshots; checking exact/not-any inference.`);
   // Compile exactly the checked-in correspondence assertions against published types.
   config.compilerOptions.noEmit = true;
-  config.files = [join(root, 'test/types/corpus-types.ts'), join(root, 'test/types/components-latest-corpus.ts'), join(root, 'test/types/greatest.ts'), join(root, 'test/types/projection-enrichment-corpus.ts'), join(root, 'test/types/projection-enrichment.ts'), join(root, 'test/types/known-functions-corpus.ts'), join(root, 'test/types/known-functions.ts')];
+  config.files = [join(root, 'test/types/corpus-types.ts'), join(root, 'test/types/components-latest-corpus.ts'), join(root, 'test/types/greatest.ts'), join(root, 'test/types/projection-enrichment-corpus.ts'), join(root, 'test/types/projection-enrichment.ts'), join(root, 'test/types/known-functions-corpus.ts'), join(root, 'test/types/known-functions.ts'), join(root, 'test/types/sql-snippets-corpus.ts'), join(root, 'test/types/sql-snippets.ts')];
   writeFileSync(configPath, JSON.stringify(config));
   run(['-p', configPath]);
   if (selfTest) {
@@ -182,5 +188,5 @@ try {
   // Preserve both actual outputs even if the readability contract fails; do not bless them as readable.
   for (const [name, text] of declarations) sameOrRefresh(join(snapshots, name), text);
   for (const [name, text] of declarations) readable(text, name);
-  console.log(`${Object.keys(descriptors).length + 2 + Object.keys(knownModule).length} exact/not-any runtime rows and emitted declarations passed (custom extensions removed by owner scope decision).`);
+  console.log(`${Object.keys(descriptors).length + 3 + Object.keys(knownModule).length} exact/not-any runtime rows and emitted declarations passed (custom extensions removed by owner scope decision).`);
 } finally { rmSync(directory, { recursive: true, force: true }); }
