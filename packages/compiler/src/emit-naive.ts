@@ -129,11 +129,12 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         try { resolved = resolveCall(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_call', e, path); }
         const args = e.args.map((arg, i) => {
           // Only the authoritative membership resolver grants this set position.
-          if ((e.fn.name === 'in' || e.fn.name === 'notIn') && i === 1 && arg.kind === 'Subquery') {
+          if (e.fn.origin === 'typed' && (e.fn.name === 'in' || e.fn.name === 'notIn') && i === 1 && arg.kind === 'Subquery') {
             return `(${emit(arg.rel, `${path}.args[${i}].rel`)})`;
           }
-          return expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope, qualifier, binding);
+          return expression(arg, input, `${path}.args[${i}]`, resolved.types[i], e.fn.origin === 'typed' && e.fn.name === 'arrayElement' && i === 1 && arg.kind === 'Param' && arg.type === null, scope, qualifier, binding);
         });
+        if (e.fn.origin === 'known') return `${resolved.sqlName}(${args.join(', ')})`;
         if (e.fn.name === 'in' || e.fn.name === 'notIn') {
           const receiver = resolved.types[0]!;
           const base = receiver.kind === 'Nullable' ? receiver.inner : receiver;
@@ -155,7 +156,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           const operator = operators[e.fn.name];
           if (operator) return args.map((sql, i) => {
             const child = e.args[i]!;
-            const inner = child.kind === 'Call' ? operators[child.fn.name] : undefined;
+            const inner = child.kind === 'Call' && child.fn.origin === 'typed' ? operators[child.fn.name] : undefined;
             // Preserve the expression tree, including floating point association.
             return inner && (inner[1] < operator[1] || inner[1] === operator[1] && (operator[1] === 3 || i > 0 && operator[1] >= 4)) ? `(${sql})` : sql;
           }).join(` ${operator[0]} `);
@@ -169,7 +170,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
   /** Clause-level AND has the same precedence as expression-level AND. Only
    * planned OR is non-atomic here; naive calls retain their permanent spelling. */
   function conjunction(predicates: readonly { expr: ExprNode; sql: string }[]): string {
-    return predicates.map(({ expr, sql }) => plan && predicates.length > 1 && expr.kind === 'Call' && expr.fn.name === 'or' ? `(${sql})` : sql).join(' AND ');
+    return predicates.map(({ expr, sql }) => plan && predicates.length > 1 && expr.kind === 'Call' && expr.fn.origin === 'typed' && expr.fn.name === 'or' ? `(${sql})` : sql).join(' AND ');
   }
   /** Physical occurrences retain source order and full child transport paths. */
   function joinSource(join: Extract<Rel, { kind: 'Join' }>, path: string, separator: string): string {
@@ -345,13 +346,13 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
             return fail('join_condition_arity', e, p);
           }
           function conjuncts(e: ExprNode, p: string): { e: ExprNode; path: string }[] {
-            if (e.kind !== 'Call' || e.fn.name !== 'and') return [{ e, path: p }];
+            if (e.kind !== 'Call' || e.fn.origin !== 'typed' || e.fn.name !== 'and') return [{ e, path: p }];
             // Validate the removed parent too, without assigning Params before SQL emission.
             try { resolvedType(e); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_call', e, p); }
             return e.args.flatMap((child, i) => conjuncts(child, `${p}.args[${i}]`));
           }
           for (const { e, path: p } of rel.on.flatMap((e, i) => conjuncts(e, `${path}.on[${i}]`))) {
-            if (e.kind !== 'Call' || e.fn.name !== 'eq') {
+            if (e.kind !== 'Call' || e.fn.origin !== 'typed' || e.fn.name !== 'eq') {
               const type = e.type && base(e.type);
               if (!type || type.kind !== 'scalar' || type.name !== 'Bool') return fail('invalid_predicate', e, p);
               residuals.push({ e, path: p });

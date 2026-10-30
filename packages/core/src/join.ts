@@ -38,7 +38,7 @@ export class JoinBuilder<I extends Record<string, Input>> {
     // ON keeps the reserved scope; residuals bind the output of each new Filter.
     const split = (e: ExprNode): readonly ExprNode[] => e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'and' ? e.args.flatMap(split) : [e];
     const conjuncts = predicates.flatMap(e => split(e.ir));
-    const equalities = conjuncts.filter(e => e.kind === 'Call' && e.fn.name === 'eq');
+    const equalities = conjuncts.filter(e => e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'eq');
     const ir = relNode({ kind: 'Join', joinKind: 'inner', inputs: this.inputs, on: equalities, output: scope.output, scope: scope.id });
     let resultRel: Rel = ir;
     for (const e of conjuncts.filter(e => !equalities.includes(e))) {

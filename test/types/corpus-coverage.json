@@ -65,7 +65,7 @@
     { "id": "ordering/bare", "status": "supported", "queries": ["orderedBare"] },
     { "id": "sets/distinct", "status": "supported", "queries": ["distinctManufacturer"] },
     { "id": "sets/union", "status": "supported", "queries": ["entityUnion"] },
-    { "id": "escape/known-function", "status": "API-blocked", "missing": ["generated fn.cityHash64 callable wrapper"], "source": "packages/codegen/src/render.ts renderFunctions", "remaining": "Metadata-only generated tier is not fn.cityHash64(...).as(col.UInt64); separate from typed catalog absence." },
+    { "id": "escape/known-function", "status": "supported bounded tier", "queries": ["knownHash", "knownUnique"], "source": "packages/compiler/test/fixtures/corpus/known-functions.ts", "remaining": "Explicit supported decoder declaration required; no signature inference, parametric aggregates, State/Merge/combinator derivation, lambdas or user-origin execution. Supplied catalog evidence is consistency metadata, not server authenticity." },
     { "id": "escape/expression", "status": "API-blocked", "missing": ["sql"], "source": "packages/core/src/index.ts", "remaining": "Typed interpolated raw expression plus runtime descriptor contract." },
     { "id": "escape/predicate", "status": "API-blocked", "missing": ["sql"], "source": "packages/core/src/index.ts", "remaining": "Raw predicate with parameter/column interpolation." },
     { "id": "escape/relation", "status": "API-blocked", "missing": ["sql.relation"], "source": "packages/core/src/index.ts", "remaining": "Declared raw relation descriptors, composition and execution." },

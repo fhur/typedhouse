@@ -1,0 +1,26 @@
+{
+  "knownHash": {
+    "shape": "flat",
+    "columns": {
+      "h": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "h"
+    ]
+  },
+  "knownUnique": {
+    "shape": "flat",
+    "columns": {
+      "n": {
+        "kind": "scalar",
+        "name": "UInt64"
+      }
+    },
+    "order": [
+      "n"
+    ]
+  }
+}

@@ -63,5 +63,5 @@ export function renderSchema(schema: DatabaseSchema): string {
   return artifact(`import { table, col, type Infer } from '@chql/core';\n\n// DateTime64 precision > 3 maps to string: Date would lose sub-millisecond precision.\n${body}\n\nexport const db = {\n${entries}\n} as const;\n`);
 }
 export function renderFunctions(schema: DatabaseSchema): string {
-  return artifact(`// M2 metadata; M3 attaches callable fn/agg wrappers over this catalog.\nexport const functions = ${object([...schema.functions].sort((a, b) => compare(a.name, b.name)).map(f => [f.name, JSON.stringify({ isAggregate: f.isAggregate, deterministic: f.deterministic, aliasTo: f.aliasTo })]))} as const;\n`);
+  return artifact(`import { createKnownFunctions } from '@chql/core';\n\nexport const functions = ${object([...schema.functions].sort((a, b) => compare(a.name, b.name)).map(f => [f.name, JSON.stringify({ isAggregate: f.isAggregate, deterministic: f.deterministic, aliasTo: f.aliasTo })]))} as const;\nexport const { fn, agg } = createKnownFunctions(functions);\n`);
 }

@@ -9,7 +9,19 @@ export type OutputSchema =
   | { readonly shape: 'nested'; readonly inputs: readonly (readonly [string, OutputSchema])[]; readonly fields?: Extract<OutputSchema, { shape: 'flat' }> }
   | { readonly shape: 'deferred'; readonly reason: 'raw'; readonly declaredNames: readonly string[] };
 export type ArgumentPolicy = 'set' | 'sibling' | 'arrayElement' | 'array' | 'numericIndex' | 'constantSelector' | 'dayUnit' | 'utcZone';
+export interface KnownFunctionEntry {
+  readonly isAggregate: boolean;
+  readonly deterministic: boolean | null;
+  readonly aliasTo: string;
+}
+export type KnownFunctionCatalog = Readonly<Record<string, KnownFunctionEntry>>;
+export interface KnownCallEvidence {
+  readonly catalog: KnownFunctionCatalog;
+  readonly name: string;
+  readonly declaration?: { readonly origin: 'as'; readonly type: CHType };
+}
 export interface FunctionMetadata {
+  readonly known?: KnownCallEvidence;
   readonly repeatedArgs?: 'temporalGreatest' | 'stringMultiIf';
   readonly argumentPolicies?: readonly ArgumentPolicy[];
   readonly name: string;

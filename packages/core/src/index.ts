@@ -12,6 +12,7 @@ export * from './output.js';
 export * from './canonical-key.js';
 export * from './type-mapping.js';
 export * from './expr.js';
+export * from './known-functions.js';
 export * from './catalog/index.js';
 export type { BetweenReceiver, ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 import { extendExpr } from './expr.js';

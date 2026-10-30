@@ -1,7 +1,7 @@
 import type { Rel } from '@chql/core';
 import { ValidationError } from './validation-error.js';
 
-type Role = 'rel' | 'expr' | 'output' | 'flatOutput' | 'nestedOutput' | 'type' | 'castType' | 'table' | 'fn' | 'aggregateFn' | 'sort' | 'branch' | 'tupleItem' | 'enumItem' | 'provenance';
+type Role = 'rel' | 'expr' | 'output' | 'flatOutput' | 'nestedOutput' | 'type' | 'castType' | 'table' | 'fn' | 'aggregateFn' | 'sort' | 'branch' | 'tupleItem' | 'enumItem' | 'provenance' | 'knownEvidence' | 'knownEntry' | 'knownDeclaration';
 type Shape = Role | 'string' | 'number' | 'boolean' | { array: Shape } | { record: Shape } | { pair: Shape };
 interface Visit { value: unknown; shape: Shape; path: string; exit?: boolean }
 const array = (shape: Shape): Shape => ({ array: shape });
@@ -129,8 +129,11 @@ export function validateStructure(root: Rel): void {
           }
           break;
         case 'table': field('name', 'string'); field('columns', record('type')); field('engine', 'string'); field('sortingKey', array('string')); field('partitionKey', array('string')); field('primaryKey', array('string'), true); break;
+        case 'knownEvidence': field('catalog', record('knownEntry')); field('name', 'string'); field('declaration', 'knownDeclaration', true); break;
+        case 'knownEntry': field('isAggregate', 'boolean'); if (object.deterministic !== null) field('deterministic', 'boolean'); field('aliasTo', 'string'); break;
+        case 'knownDeclaration': choice('origin', ['as']); field('type', 'type'); break;
         case 'aggregateFn': field('linear', 'boolean'); // falls through to shared metadata
-        case 'fn': field('name', 'string'); field('sqlName', 'string', true); field('origin', 'string'); if (object.deterministic !== null) field('deterministic', 'boolean'); field('argumentPolicies', array('string'), true); break;
+        case 'fn': field('known', 'knownEvidence', true); field('name', 'string'); field('sqlName', 'string', true); field('origin', 'string'); if (object.deterministic !== null) field('deterministic', 'boolean'); field('argumentPolicies', array('string'), true); break;
         case 'sort': field('expr', 'expr'); break;
         case 'branch': field('when', 'expr'); field('then', 'expr'); break;
         case 'tupleItem': field('name', 'string', true); field('type', 'type'); break;
