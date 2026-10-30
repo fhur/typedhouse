@@ -7,7 +7,7 @@ sidebar:
 
 Expression helpers give names to business rules you use across queries. They accept typed expressions and return an expression built from TypedHouse's methods. Import them like any other TypeScript function—no registration or database setup is required.
 
-Custom scalar/aggregate declarations (`defineFunction`, `defineAggregate`) and method extensions (`extendExpr`) were intentionally removed by owner scope decision. Use ordinary TypeScript helpers over builtin expressions, as below, or the generated known-function `fn`/`agg` tier with an explicit result descriptor. Typed SQL snippets are a next-step design decision, not an available API.
+Custom scalar/aggregate declarations (`defineFunction`, `defineAggregate`) and method extensions (`extendExpr`) were intentionally removed by owner scope decision. Use ordinary TypeScript helpers over builtin expressions, as below, or the generated known-function `fn`/`agg` tier with an explicit result descriptor. For an uncatalogued scalar expression, use a trusted SQL snippet with a mandatory runtime descriptor: ``sql`editDistance(${p.mpn}, ${'GRM155'})`.as(col.UInt64)``. This emits no CAST. Values are parameters; columns must be bound expressions. Authors must place holes in expression positions outside quotes, comments and identifier tokens, and expose every column dependency through holes. Template text is not parsed or sanitized. Aggregate snippets and raw queries are unsupported.
 
 The helper runs when you build the query. ClickHouse evaluates the resulting SQL against the rows; it does not call your JavaScript function.
 

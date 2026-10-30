@@ -1,0 +1,17 @@
+{
+  "shape": "flat",
+  "columns": {
+    "mpn": {
+      "kind": "scalar",
+      "name": "String"
+    },
+    "distance": {
+      "kind": "scalar",
+      "name": "UInt64"
+    }
+  },
+  "order": [
+    "mpn",
+    "distance"
+  ]
+}

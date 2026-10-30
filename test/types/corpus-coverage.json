@@ -12,6 +12,7 @@
     "6": "Existing standalone deterministic generated-surface verifier; incomplete catalog remains a separate contract."
   },
   "entries": [
+    { "id": "owner/sql-snippets", "status": "owner-approved adaptation", "queries": ["snippetDistance"], "evidence": "Mandatory runtime .as descriptor; trusted scalar row SQL only, no parser, aggregate or raw relation API." },
     { "id": "fixture/schema", "status": "supported", "evidence": "low-stock.ts db: six faithful descriptors; not M1 live provenance acceptance" },
     { "id": "fixture/inferred-rows", "status": "supported", "evidence": "low-stock.ts ComponentRow, ComponentIndicesRow; runtime snapshots cover component and part rows" },
     { "id": "helpers/daysAgo", "status": "supported", "evidence": "supported-types.ts fixed construction clock for deterministic snapshots" },
