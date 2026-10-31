@@ -60,7 +60,7 @@ export function renderSchema(schema: DatabaseSchema): string {
     return `const ${bindings[i]} = table(${str(t.name)}, {\n${columns.map(c => `  ${key(c.name)}: ${renderColumn(c.type)},`).join('\n')}\n}, ${metadata});\nexport type ${aliases[i]} = Infer<typeof ${bindings[i]}>;${shortcut ? `\nexport type ${shortcut[1]} = ${aliases[i]};` : ''}`;
   }).join('\n\n');
   const entries = tables.map((t, i) => `  ${t.name === bindings[i] && t.name !== '__proto__' ? t.name : `${key(t.name)}: ${bindings[i]}`},`).join('\n');
-  return artifact(`import { table, col, type Infer } from '@typedhouse/core';\n\n// DateTime64 precision > 3 maps to string: Date would lose sub-millisecond precision.\n${body}\n\nexport const db = {\n${entries}\n} as const;\n`);
+  return artifact(`import { table, col, type Infer } from '@typedhouse/core';\n\n// DateTime64 precision > 3 maps to string: Date would lose sub-millisecond precision.\n// Maps are Record<string, unknown>: driver wire values are not recursively converted.\n${body}\n\nexport const db = {\n${entries}\n} as const;\n`);
 }
 export function renderFunctions(schema: DatabaseSchema): string {
   return artifact(`import { createKnownFunctions } from '@typedhouse/core';\n\nexport const functions = ${object([...schema.functions].sort((a, b) => compare(a.name, b.name)).map(f => [f.name, JSON.stringify({ isAggregate: f.isAggregate, deterministic: f.deterministic, aliasTo: f.aliasTo })]))} as const;\nexport const { fn, agg } = createKnownFunctions(functions);\n`);

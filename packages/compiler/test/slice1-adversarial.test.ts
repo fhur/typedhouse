@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, createKnownFunctions, crossJoin, defineFunction, exprNode, from, join, now, scalar, stringLike, sum, table, unionAll, val, Query, type CHType, type Rel } from '@typedhouse/core';
+import { cast, col, count, createKnownFunctions, crossJoin, exprNode, from, join, now, scalar, sum, table, unionAll, val, Query, type CHType, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
@@ -14,8 +14,10 @@ const wide = table('adv', {
   e: col.Enum8({ a: 1, b: 2 }), flag: col.Bool, ids: col.Array(col.String),
 }, meta);
 const q = from(wide);
-const { fn } = createKnownFunctions({ cityHash64: { isAggregate: false, deterministic: true, aliasTo: '' } } as const);
-const editDistance = defineFunction({ name: 'editDistance', args: [stringLike, stringLike], returns: col.UInt64, deterministic: true });
+const { fn } = createKnownFunctions({
+  cityHash64: { isAggregate: false, deterministic: true, aliasTo: '' },
+  editDistance: { isAggregate: false, deterministic: true, aliasTo: '' },
+} as const);
 const selects = (sql: string) => sql.match(/SELECT /g)?.length ?? 0;
 const raw = (parts: string, type: CHType = col.UInt32.type) => exprNode({ kind: 'Raw', type, resolution: 'declared', opaque: true, provenance: { origin: 'sql' }, parts: [parts], args: [] });
 
@@ -48,7 +50,7 @@ it('admission audit: the wide fragment admits nothing fallible, volatile, raw, s
     ['raw predicate', raw('throwIf(1)', col.Bool.type)],
     ['subquery', scalar(q.aggregate(() => count())).ir],
     ['known origin', fn.cityHash64(r.id).as(col.UInt64).ir],
-    ['user origin', editDistance(r.text, 'x').ir],
+    ['deterministic known distance', fn.editDistance(r.text, val('x')).as(col.UInt64).ir],
     ['now', now().ir],
     ['now comparison', now().eq(now()).ir],
     ['float plus', r.f.plus(1).ir],
@@ -84,7 +86,7 @@ it('admission audit: the wide fragment admits nothing fallible, volatile, raw, s
   expect(totalPredicate(r.text.ifNull('x').eq('x').ir)).toBe(true);
 });
 
-it('fences: volatile, cast, divide, known/user-origin and raw projections neither push nor merge, referenced or not', () => {
+it('fences: volatile, cast, divide, known-origin and raw projections neither push nor merge, referenced or not', () => {
   const base = q.map(r => ({ id: r.id, raw: r.id })).ir;
   if (base.kind !== 'Project') throw new Error('shape');
   const withRaw = new Query<{ id: number; raw: number }>({ ...base, exprs: { ...base.exprs, raw: raw('rand()') } }, { live: false });
@@ -93,7 +95,7 @@ it('fences: volatile, cast, divide, known/user-origin and raw projections neithe
     q.map(r => ({ id: r.id.plus(1), c: cast(r.text, col.Nullable(col.UInt64)) })),
     q.map(r => ({ id: r.id.plus(1), ratio: r.n.divide(val(0n, col.Int64)) })),
     q.map(r => ({ id: r.id.plus(1), h: fn.cityHash64(r.id).as(col.UInt64) })),
-    q.map(r => ({ id: r.id.plus(1), u: editDistance(r.text, 'x') })),
+    q.map(r => ({ id: r.id.plus(1), u: fn.editDistance(r.text, val('x')).as(col.UInt64) })),
   ];
   // Raw with sql provenance cannot be emitted at all; check the rewrite alone. A Raw referenced once *moves* under
   // MergeProject (spec (c) only forbids duplication); it is never copied into WHERE nor dropped.

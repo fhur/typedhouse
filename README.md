@@ -207,7 +207,9 @@ There is no blanket performance claim. The compiler simplifies supported query s
 
 ### How are ClickHouse numeric types represented in TypeScript?
 
-The client uses descriptors to decode supported types. For example, UInt32 becomes `number`, while UInt64 and `count()` results become `bigint`. Matching JavaScript types do not necessarily mean two ClickHouse descriptors are interchangeable.
+The client trusts the official driver's parsed values, with a small adapter for 64-bit-and-larger integers (`bigint`), dates and timestamps up to milliseconds (`Date`), and non-finite floats. Arrays and tuples recurse; Maps do not. Decimals remain exact branded strings (execution enables quoted decimals); higher-precision timestamps remain strings. UUID/IP brands and Enum unions are compile-time declarations, not client-side validation.
+
+**Map migration:** every Map now returns `Record<string, unknown>`, including numeric-key Maps previously declared as pair arrays. Keys are stringified; values retain their wire representation, including Int64 and Date strings. Narrow values explicitly when consuming them. Matching JavaScript types do not necessarily mean two ClickHouse descriptors are interchangeable.
 
 ### Is TypedHouse an official ClickHouse project?
 

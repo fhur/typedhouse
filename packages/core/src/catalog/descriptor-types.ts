@@ -41,17 +41,11 @@ type TupleItem = { readonly name?: string; readonly type: CHType };
 type TupleDecoded<I extends readonly TupleItem[]> = I extends readonly [] ? readonly [] :
   I[number] extends { readonly name: string } ? { [E in I[number] as E['name'] & string]: DescriptorValue<E['type']> } :
   { readonly [K in keyof I]: DescriptorValue<I[K]['type']> };
-/** Classify the CH key, not its decoded value: Decimal and DateTime64(>3)
- * decode to strings but use pair arrays rather than string-key Records. */
-type StringKeyDescriptor<D> = CHType extends D ? boolean :
-  D extends { kind: 'LowCardinality'; inner: infer I } ? StringKeyDescriptor<I> :
-  D extends { kind: 'FixedString' | 'Enum' } | { kind: 'scalar'; name: 'String' | 'UUID' | 'IPv4' | 'IPv6' } ? true : false;
-type MapDecoded<K, V> = StringKeyDescriptor<K> extends true ? Record<DescriptorValue<K> & string, DescriptorValue<V>> : Array<[DescriptorValue<K>, DescriptorValue<V>]>;
 export type DescriptorValue<D> = CHType extends D ? unknown :
   D extends { kind: 'Nullable'; inner: infer I } ? DescriptorValue<I> | null :
   D extends { kind: 'LowCardinality' | 'SimpleAggregateFunction'; inner: infer I } ? DescriptorValue<I> :
   D extends { kind: 'Array'; inner: infer I } ? DescriptorValue<I>[] :
-  D extends { kind: 'Map'; key: infer K; value: infer V } ? MapDecoded<K, V> :
+  D extends { kind: 'Map' } ? Record<string, unknown> :
   D extends { kind: 'scalar'; name: infer N extends ScalarName } ? ScalarValue<N> :
   D extends { kind: 'Decimal'; precision: infer P extends number; scale: infer S extends number } ? Decimal<P, S> :
   D extends { kind: 'DateTime' } ? Date :

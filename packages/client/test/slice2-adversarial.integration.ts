@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { cast, col, count, crossJoin, defineFunction, from, join, table, unionAll, val, type Rel } from '@typedhouse/core';
+import { cast, col, count, crossJoin, createKnownFunctions, from, join, table, unionAll, val, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '@typedhouse/compiler';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 
@@ -16,7 +16,8 @@ const adv = table('adv_s2', {
 const rmt = table('adv_s2_rmt', { id: col.UInt32, ver: col.UInt32, ids: col.Array(col.String) }, { engine: 'ReplacingMergeTree', sortingKey: ['id'], partitionKey: [] });
 const other = table('adv_s2_other', { id: col.UInt32, v: col.UInt64 }, meta);
 const t = from(adv), r = from(rmt), u = from(other);
-const volatile = defineFunction({ name: 'rowNumberInAllBlocks', args: [], returns: col.UInt64, deterministic: false });
+const { fn } = createKnownFunctions({ rowNumberInAllBlocks: { isAggregate: false, deterministic: false, aliasTo: '' } } as const);
+const volatile = () => fn.rowNumberInAllBlocks().as(col.UInt64);
 let container: StartedTestContainer;
 let url: string;
 interface Result { meta: { name: string; type: string }[]; data: Record<string, unknown>[] }

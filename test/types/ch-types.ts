@@ -25,8 +25,8 @@ export const structured = table('structured', {
 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 expectTypeOf<Infer<typeof structured>>().toEqualTypeOf<{
   en: 'one' | 'two'; en16: 'low' | 'high'; nullable: bigint | null; nullOnly: null; lc: string | null;
-  arr: (bigint | null)[]; map: Record<string, bigint>; enumMap: Record<'one' | 'two', boolean>;
-  uuidMap: Record<UUID, number>; intMap: Array<[bigint, string[]]>; numberMap: Array<[number, boolean]>;
+  arr: (bigint | null)[]; map: Record<string, unknown>; enumMap: Record<string, unknown>;
+  uuidMap: Record<string, unknown>; intMap: Record<string, unknown>; numberMap: Record<string, unknown>;
   tuple: readonly [string, bigint]; named: { id: string; 'a.b': number | null }; empty: readonly []; emptyNamed: readonly [];
   agg: AggregateState<'sum'>; simple: bigint;
 }>();

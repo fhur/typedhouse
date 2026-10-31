@@ -31,6 +31,8 @@ const decimal: Equal<Coverage['amount'], Decimal<18, 4>> = true;
 const dotted: Equal<Coverage['nested.amount'], bigint[]> = true;
 type Hostile = Infer<typeof hostile['__proto__']>;
 const enumNames: Equal<Hostile['c11'], '__proto__' | '42'> = true;
+const map: Equal<Hostile['c13'], Record<string, unknown>> = true;
+void map;
 const aggregate: Equal<Hostile['c18'], AggregateState<'sum'>> = true;
 const orderedTuple: Equal<Hostile['c22'], { '42': string; '0': bigint; z: number }> = true;
 const nestedOrderedTuple: Equal<Hostile['c23'], { '42': string; '0': bigint; z: number }[]> = true;

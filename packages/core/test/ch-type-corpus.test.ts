@@ -13,11 +13,11 @@ const mappings = [
   'Decimal<9, 2>', 'Decimal<18, 4>', 'Decimal<38, 10>', 'Decimal<76, 20>',
   '"a b" | "comma,(paren)" | "quote\'slash\\\\"', '"low" | "high"',
   '(bigint) | null', 'string', '(string) | null', 'Array<string>', 'Array<(bigint) | null>', 'Array<Array<number>>',
-  'Record<string, bigint>', 'Array<[bigint, Array<string>]>', 'Record<UUID, (number) | null>',
+  'Record<string, unknown>', 'Record<string, unknown>', 'Record<string, unknown>',
   'readonly [string, bigint]', '{ "id": string; "mpn": (string) | null }',
   'Array<{ "id": string; "mpn": (string) | null; "manufacturer": (string) | null }>',
   '{ "a.b": string; "with space": number }', 'AggregateState<"sum">', 'AggregateState<"quantiles(0.5, 0.9)">', 'bigint', '(number) | null',
-  'Record<string, { "a": number; "b": Array<string> }>',
+  'Record<string, unknown>',
 ];
 it('has 200+ genuine captured records with verifiable provenance', () => {
   expect(records.length).toBeGreaterThanOrEqual(200); expect(records.length).toBe(provenance.count);

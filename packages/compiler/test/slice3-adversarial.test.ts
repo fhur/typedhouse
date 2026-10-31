@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import fc from 'fast-check';
-import { cast, col, count, defineFunction, from, join, print, scalar, table, val, type Rel } from '@typedhouse/core';
+import { cast, col, count, createKnownFunctions, from, join, print, scalar, table, val, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { rewriteRel } from '../src/rewrite-rel.js';
 import { entries } from './fixtures/corpus/explain-corpus.js';
@@ -17,7 +17,8 @@ const adv = table('adv_s3', {
 }, meta);
 const other = table('adv_s3_other', { id: col.UInt32, v: col.UInt32 }, meta);
 const t = from(adv), u = from(other);
-const volatile = defineFunction({ name: 'rowNumberInAllBlocks', args: [], returns: col.UInt64, deterministic: false });
+const { fn } = createKnownFunctions({ rowNumberInAllBlocks: { isAggregate: false, deterministic: false, aliasTo: '' } } as const);
+const volatile = () => fn.rowNumberInAllBlocks().as(col.UInt64);
 const selects = (sql: string) => sql.match(/SELECT /g)?.length ?? 0;
 const types = (q: ReturnType<typeof compile>) => Object.values(q.parameterTypes ?? {}).map(print).sort();
 /** Same SELECT count as expected, metadata equal to naive, Param set and wire-type multiset equal to naive. */
@@ -63,7 +64,7 @@ it('alias guard: self-reads fold, reads by WHERE / expansion / other items fence
   expect(check(t.orderBy(r => r.n).map(r => ({ n: cast(r.k, col.String) })).ir, 2)).toContain('ORDER BY `n` ASC) AS `__typedhouse_input`');
 });
 
-it('alias guard: subqueries, volatile and user calls, Params, expansion aliases and expansion inputs', () => {
+it('alias guard: subqueries, volatile and known calls, Params, expansion aliases and expansion inputs', () => {
   const total = u.aggregate(g => ({ m: count() }));
   // A scalar-subquery item beside a shadowing self-read: the Subquery is an opaque read, so the shadow fences.
   expect(check(t.map(r => ({ n: cast(r.k, col.Int64), m: scalar(total) })).ir, 3)).toContain(') AS `__typedhouse_input`');

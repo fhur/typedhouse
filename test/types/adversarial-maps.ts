@@ -1,6 +1,6 @@
 import { expectTypeOf } from 'expect-type';
-import { col, table, type Decimal, type Infer } from '@typedhouse/core';
-// Deliberately distinguish ClickHouse string-like keys from values decoded to TS strings.
+import { col, table, type Infer } from '@typedhouse/core';
+// Every key family has the same driver-first Map output contract.
 // The runtime-to-phantom bridge asserts the complete exact row type for these cases.
 export const adversarialMaps = table('adversarial_maps', {
   decimal: col.Map(col.Decimal(18, 4), col.UInt8),
@@ -11,12 +11,12 @@ export const adversarialMaps = table('adversarial_maps', {
   numericEnumMap: col.Map(col.Enum16({ 0: 1, 42: 2 }), col.UInt8),
 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 expectTypeOf<Infer<typeof adversarialMaps>>().toEqualTypeOf<{
-  decimal: Array<[Decimal<18, 4>, number]>;
-  preciseTime: Array<[string, number]>;
-  fixed: Record<string, number>;
-  lowCardinality: Record<string, number>;
+  decimal: Record<string, unknown>;
+  preciseTime: Record<string, unknown>;
+  fixed: Record<string, unknown>;
+  lowCardinality: Record<string, unknown>;
   numericEnum: '0' | '42' | 'ordinary';
-  numericEnumMap: Record<'0' | '42', number>;
+  numericEnumMap: Record<string, unknown>;
 }>();
 expectTypeOf<Infer<typeof adversarialMaps>>().not.toBeAny();
 const symbolKey = Symbol('not an enum label');
@@ -31,7 +31,7 @@ const wrapped = table('wrapped', {
   enum: col.Map(col.LowCardinality(col.Enum8({ a: 1, b: 2 })), col.UInt8),
 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 expectTypeOf<Infer<typeof wrapped>>().toEqualTypeOf<{
-  decimal: Array<[Decimal<18, 4>, string]>;
-  enum: Record<'a' | 'b', number>;
+  decimal: Record<string, unknown>;
+  enum: Record<string, unknown>;
 }>();
 expectTypeOf<Infer<typeof wrapped>>().not.toBeAny();
