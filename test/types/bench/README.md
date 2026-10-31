@@ -12,6 +12,60 @@ still blocked; no retry or test exclusion was applied. See the latest TODO secti
 and `/tmp/typedhouse-readable-*.log` for measurements and limitations. Full M3 and v1
 remain incomplete.
 
+## Host-class wall budgets (current policy, M4 slice 3c)
+
+`scripts/check-type-performance.mjs` enforces two kinds of ceiling from `budget.json`:
+
+- **Instantiations are hard on every host.** `baselines["<tsVersion>/<built|source>"].instantiations`
+  is hardware-independent and is always read from `budget.json`, whatever machine runs the check.
+- **Wall time is hard only for a host class that has a budget; otherwise it is advisory.** The host
+  class is `{ cpu: os.cpus()[0].model, platform, arch }` (the values `budget.json.host` records); on
+  GitHub Actions (`GITHUB_ACTIONS=true`) it also carries `runner: ImageOS ?? RUNNER_OS` so every runner
+  of one image/CPU model forms one class. The slug is lower-case with non-alphanumerics collapsed to
+  `-`, prefixed `github-` on Actions: `apple-m3-max-darwin-arm64`,
+  `github-amd-epyc-7763-64-core-processor-linux-x64`.
+
+Wall lookup order, per run:
+
+1. `test/types/bench/budget.<slug>.json` if it exists — wall is hard from that file (a key the file
+   lacks is advisory for that key only; it never falls back to another host's ceiling). The file's
+   `policy` and `inputHash` must match, exactly like `budget.json`'s, or the run fails.
+2. else `budget.json` when its `host` matches the running class exactly (today: the Apple M3 Max the
+   budget was recorded on) — wall is hard from `budget.json`.
+3. else no wall budget — wall is measured and printed per `<version>/<mode>` as
+   `ADVISORY wall <key> <measured>s (no wall budget for host class <slug>; Apple M3 Max ceiling <ceiling>s) — not enforced`
+   and does not affect the exit code.
+
+The JSON header line carries `hostClass`, `hostClassSlug`, `wallEnforced` and `wallBudget`.
+Exit codes: instantiations over ceiling → 1 on any host; wall over ceiling with a host budget → 1;
+wall over with no host budget → 0 plus the advisory line; `inputHash` or `policy` mismatch → 1 before
+any measurement; missing metric, unparsable `--extendedDiagnostics` output, non-zero `tsc` or an
+unknown `<version>/<mode>` baseline → 1 on any host (the advisory branch covers the wall comparison
+only). `--self-test` pins all of these without Docker or a compiler run.
+
+Recording a budget for a new host class (never for `budget.json` itself):
+
+```sh
+node scripts/check-type-performance.mjs --record-host-budget --all   # or without --all: the TYPEDHOUSE_TYPESCRIPT_VERSION selector only
+```
+
+runs three fresh sequential compiles per selected version/mode under the same policy (maximum × 1.5,
+instantiations rounded up — recorded for provenance, only wall is ever read from the file) and writes
+`budget.<slug>.json` with `policy`, `inputHash`, `hostClass`, `host`, `recordedAt`, `baselines`. It
+refuses to overwrite an existing file (exit 1, naming it); deleting or re-recording one is a reviewed
+human decision. For the GitHub runner class dispatch the manual workflow
+`.github/workflows/type-budget.yml` (install, `pnpm build`, `--record-host-budget --all`, upload
+`test/types/bench/budget.*.json` as an artifact); download the artifact, review the numbers and commit
+the file by hand. Once committed, wall becomes hard on that class through lookup step 1. A file
+recorded with one `TYPEDHOUSE_TYPESCRIPT_VERSION` selector covers that version's two keys only; CI
+jobs on other versions stay advisory for their keys until the file is re-recorded with `--all`.
+
+No-raise rule: ceilings in `budget.json` and in any `budget.<slug>.json` are never raised or
+rebaselined silently; a raise needs an explicit reviewed note, and a failed or over-ceiling compile is
+never a baseline. When a file in `budget.json.inputs` changes, recompute `inputHash` as the script does
+and append an `inputHashHistory` entry by hand; host-class files carry the same `inputHash` and must be
+re-recorded or deleted in the same review.
+
 ## Historical acceptance (after a2409ad, before readability repair)
 
 `queries.ts` contains **200 unannotated exports**: twenty domain input shapes

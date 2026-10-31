@@ -21,6 +21,7 @@ Type-safe ClickHouse query builder for TypeScript: typed builder → relational 
 - Docs: `pnpm docs:dev`, `pnpm docs:verify` (also regenerates/checks example SQL; `pnpm --filter @typedhouse/docs examples:*` to regenerate).
 - Expr surface is generated: edit the catalog, then `pnpm generate:expr-surface`; `verify:expr-surface` fails on drift.
 - CI runs `check:all` on TypeScript 5.5.4 and latest via `TYPEDHOUSE_TYPESCRIPT_VERSION`; type snapshots exist per version (5.5.4 / 5.8.3 / 7.0.2). Run the matrix locally when touching types.
+- Type-performance budget: `node scripts/check-type-performance.mjs [--all]` — instantiation ceilings (`test/types/bench/budget.json`) are hard on every host; wall ceilings are hard only for a host class with a budget (`budget.<slug>.json`, or `budget.json` on its own M3 Max host) and advisory elsewhere; record a runner budget with the manual `type-budget.yml` workflow (`--record-host-budget`), see `test/types/bench/README.md`.
 - Integration tests use Docker image `clickhouse/clickhouse-server:24.8` (`testcontainers` is patched via `patches/`; see `patches/README.md`).
 
 ## Conventions

@@ -1,0 +1,33 @@
+# Manual only: records a host-class wall budget for the GitHub runner class and uploads it as an artifact.
+# Nothing is committed here; a human reviews the artifact and commits test/types/bench/budget.<slug>.json,
+# after which scripts/check-type-performance.mjs enforces wall ceilings on that runner class (lookup step 1).
+# Instantiation ceilings stay in budget.json and are never recorded or changed by this workflow.
+name: Type budget (record host class)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The bench's built configuration resolves the packages' emitted declarations.
+      - run: pnpm build
+      - run: node scripts/check-type-performance.mjs --self-test
+      # Refuses to run if budget.<slug>.json already exists for this runner class: delete it in a reviewed commit first.
+      - run: node scripts/check-type-performance.mjs --record-host-budget --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: type-budget-${{ github.run_id }}
+          path: test/types/bench/budget.*.json
+          if-no-files-found: error
+          retention-days: 30
