@@ -61,12 +61,18 @@ export function native(recipe: Recipe): string {
 export function shape(recipe: Recipe): string {
   return `${recipe.left ? 'left' : 'inner'}:${recipe.source}:${recipe.before}:${recipe.after}:${recipe.fence}:${recipe.project ? 'project' : 'full'}`;
 }
-/** The expansion folds into the scan block when it is LEFT or no non-safe filter sits under an inner one. */
-export function expansionFolds(recipe: Recipe): boolean {
-  return recipe.left || recipe.before === 'none' || recipe.before === 'safe';
+/** Slice 3b: an `independent` filter pushed below the expansion lands above an `unsafe` (non-total) `before` filter and
+ * is never AND-ed into it, so that block closes under the expansion (`total` merges with it instead: both are total). */
+function pushedAboveUnsafe(recipe: Recipe): boolean {
+  return recipe.before === 'unsafe' && (recipe.after === 'independent' || recipe.after === 'both');
 }
-/** One SELECT exactly when the expansion folds, no second ORDER BY follows a LIMIT (the `sort` fence always
+/** The expansion folds into the scan block when it is LEFT over a single Filter block, or no non-safe filter sits under an inner one. */
+export function expansionFolds(recipe: Recipe): boolean {
+  return (recipe.left && !pushedAboveUnsafe(recipe)) || recipe.before === 'none' || recipe.before === 'safe';
+}
+/** One SELECT exactly when the expansion folds, no total filter sits above a folded non-total one (the `alias` filter
+ * over an `unsafe` LEFT block opens its own, slice 3b), no second ORDER BY follows a LIMIT (the `sort` fence always
  * re-sorts above its LIMIT) and no selection follows DISTINCT (it opens a block, and the ordering above it another). */
 export function foldsToOneSelect(recipe: Recipe): boolean {
-  return expansionFolds(recipe) && recipe.fence !== 'sort' && !(recipe.fence === 'distinct' && recipe.project);
+  return expansionFolds(recipe) && !(recipe.before === 'unsafe' && recipe.after !== 'none') && recipe.fence !== 'sort' && !(recipe.fence === 'distinct' && recipe.project);
 }

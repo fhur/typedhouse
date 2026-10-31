@@ -9,7 +9,8 @@ import { knownHash, knownUnique } from './known-functions.js';
 import { userEditDistance } from './user-functions.js';
 import { components, db, forTenant } from './low-stock.js';
 
-export type FenceKind = 'Aggregate' | 'Sort' | 'Limit' | 'Distinct' | 'Union' | 'Join' | 'ArrayJoin' | 'CTE' | 'Subquery' | 'RawRel' | 'Materialize';
+/** `Filter`: a filter outside the total fragment keeps its own SELECT over earlier filters (slice 3b), and so does a total one over it. */
+export type FenceKind = 'Aggregate' | 'Sort' | 'Limit' | 'Distinct' | 'Union' | 'Join' | 'ArrayJoin' | 'CTE' | 'Subquery' | 'RawRel' | 'Materialize' | 'Filter';
 export type CorpusRule = 'MergeFilter' | 'MergeProject' | 'PushFilterProject' | 'PushFilterJoin' | 'PushFilterArrayJoin' | 'PushFilterUnion' | 'PushFilterAggKey' | 'PruneColumns';
 export interface CorpusEntry {
   readonly id: string;
@@ -41,8 +42,9 @@ export const entries: readonly CorpusEntry[] = [
   { id: 'versioned/latest-totals', query: s.latestTotals, fences: ['CTE', 'Join', 'Aggregate'] },
   { id: 'versioned/argMax', query: s.argMaxIndices, fences: ['Aggregate'] },
   { id: 'versioned/weekly', query: s.weeklySeries, fences: [] },
-  { id: 'entities/componentsLatest', query: componentsLatest, fences: ['CTE', 'Join'] },
-  { id: 'entities/history', query: s.history, fences: ['Join', 'Sort'] },
+  // `startsWith` (known-origin) and `between` over DateTime64 are outside the total fragment: each keeps its own SELECT over the tenant filter.
+  { id: 'entities/componentsLatest', query: componentsLatest, fences: ['CTE', 'Join', 'Filter'] },
+  { id: 'entities/history', query: s.history, fences: ['Join', 'Sort', 'Filter'] },
   { id: 'entities/scopedLatest', query: s.scopedLatest, fences: ['CTE', 'Join'] },
   { id: 'entities/total', query: s.total, fences: ['CTE', 'Join', 'Aggregate'] },
   { id: 'entities/stockShare', query: s.stockShare, fences: ['CTE', 'Join', 'Subquery'] },

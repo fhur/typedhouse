@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest';
-import { col, from, print, table, unionAll } from '@typedhouse/core';
+import { cast, col, count, from, join, print, table, unionAll } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { rewriteRel } from '../src/rewrite-rel.js';
 import { entries, unfencedControl, type FenceKind } from './fixtures/corpus/explain-corpus.js';
+import { components, db, forTenant } from './fixtures/corpus/low-stock.js';
 import { columnName, flatten, headerColumns, parseExplainJson, parseExplainText, readTable, stepTypes, structure } from './explain-corpus-support.js';
 
 // Docker-free half of the EXPLAIN corpus (spec "Testing"): the fence clause on the planned emission, the per-rule
@@ -65,6 +66,35 @@ it('negative control: a hand-injected unfenced derived table is reported as such
   const s = structure(unfencedControl.ir);
   expect(s.selects.map(x => [x.role, x.rel.kind, x.fence])).toEqual([['root', 'Filter', 'root'], ['derived', 'Project', 'unfenced']]);
   expect(selects(compile(unfencedControl.ir).sql)).toBe(2);
+});
+it('Filter fence (slice 3b): justified only where the totality rule refused the fold; other derived tables under a Filter stay unfenced', () => {
+  const fences = (root: import('@typedhouse/core').Rel) => structure(root).selects.map(x => `${x.role}:${x.rel.kind}:${x.fence}`);
+  const fallible = (c: typeof components.row) => cast(c.countOfParts, col.String).eq('1');
+  // Fallible over total, total over fallible, fallible over fallible: each boundary is a Filter fence and one SELECT per block.
+  expect(fences(components.where(forTenant('acme')).where(fallible).ir)).toEqual(['root:Filter:root', 'derived:Filter:Filter']);
+  expect(fences(components.where(fallible).where(forTenant('acme')).ir)).toEqual(['root:Filter:root', 'derived:Filter:Filter']);
+  expect(fences(components.where(fallible).where(c => cast(c.countOfParts, col.String).ne('2')).ir)).toEqual(['root:Filter:root', 'derived:Filter:Filter']);
+  // Over a join block (the residual is its WHERE) and over an aggregate block's HAVING.
+  const j = join({ a: components, b: from(db.entity_ots_component) }).on(r => r.a.entityId.eq(r.b.entityId)).where(r => r.a.countOfParts.plus(r.b.countOfParts).gt(2n)).where(r => cast(r.a.countOfParts, col.String).eq('1')).map(r => ({ id: r.a.entityId }));
+  expect(fences(j.ir)).toEqual(['root:Project:root', 'derived:Filter:Filter', 'join-input:Scan:Join', 'join-input:Scan:Join']); // both inputs are pruned derived tables
+  expect(selects(compile(j.ir).sql)).toBe(4);
+  const having = components.groupBy(c => ({ tenantId: c.tenantId })).aggregate(() => ({ n: count() })).where(r => r.n.gt(1n)).where(r => cast(r.tenantId, col.UInt64).gt(1n));
+  expect(fences(having.ir)).toEqual(['root:Filter:root', 'derived:Filter:Filter']);
+  // Not a Filter fence: a Filter over a folded computed selection (the slice 3 control), over a plain scan block with no
+  // Filter clause (never a boundary; folds), and a fallible first HAVING (the pre-existing safe-HAVING gate, rel kind Aggregate).
+  expect(fences(unfencedControl.ir)).toEqual(['root:Filter:root', 'derived:Project:unfenced']);
+  expect(fences(components.where(fallible).ir)).toEqual(['root:Filter:root']);
+  expect(fences(components.groupBy(c => ({ tenantId: c.tenantId })).aggregate(() => ({ n: count() })).where(r => cast(r.tenantId, col.UInt64).gt(1n)).ir)).toEqual(['root:Filter:root', 'derived:Aggregate:Aggregate']);
+  // A total filter over a total WHERE never opens a boundary, so the fence is never claimed for one.
+  expect(fences(components.where(forTenant('acme')).where(c => c.countOfParts.gt(1n)).ir)).toEqual(['root:Filter:root']);
+  // Tester Finding 2: a computed selection over a join block whose held WHERE is non-total is an unfenced derived table
+  // (the consumer is a Project, not a Filter); only `filterFence`'s consumer-kind check keeps it from being misread as a
+  // Filter fence, since the inner block ends in a non-total Filter clause.
+  const computed = join({ a: components, b: from(db.entity_ots_component) }).on(r => r.a.entityId.eq(r.b.entityId)).where(r => cast(r.a.countOfParts, col.String).eq('1')).map(r => ({ next: r.a.countOfParts.plus(1n) }));
+  const over = structure(computed.ir).selects.filter(x => x.role === 'derived');
+  expect(over.map(x => `${x.role}:${x.consumer?.kind} over ${x.rel.kind}:${x.fence}`)).toEqual(['derived:Project over Filter:unfenced']);
+  expect(fences(computed.ir)).toContain('derived:Filter:unfenced');
+  expect(fences(computed.ir)).not.toContain('derived:Filter:Filter');
 });
 it('negative control: the structure walk sees through CTE references, union branches, join inputs and subqueries', () => {
   const w = table('w', { id: col.UInt64, k: col.String }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] }), t = from(w);

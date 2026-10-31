@@ -1,5 +1,5 @@
 import { outputLeaves, type ExprNode, type Rel } from '@typedhouse/core';
-import { deterministicExpression, safePredicate } from './rewrite-expressions.js';
+import { deterministicExpression, safePredicate, totalPredicate } from './rewrite-expressions.js';
 import { directSelection, type ColumnDemand } from './prune-columns.js';
 import type { CtePlan } from './plan-ctes.js';
 
@@ -40,7 +40,8 @@ function isColumnSelection(rel: Extract<Rel, { kind: 'Project' }>): boolean {
 }
 
 /** Lower validated IR into SELECT blocks without changing relational identities.
- * Every unhandled operator is a fence. Repeated filters share WHERE; repeated
+ * Every unhandled operator is a fence. Repeated total filters share WHERE; a filter
+ * outside the total fragment keeps its own block over earlier filters, and repeated
  * sorts/limits and earlier clauses start new blocks. Identity selections can
  * fold before sorting/limiting without changing expression scopes; any selection
  * folds over a scan or join block whose clauses are Filters. Distinct sets
@@ -57,9 +58,11 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
     } else if (rel.kind === 'Join' && (rel.joinKind === 'inner' || rel.joinKind === 'cross') && rel.on.every(e => e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'eq' && e.args.every(a => a.kind === 'ColumnRef'))) {
       block = { source: Object.freeze({ kind: 'join', rel }), clauses: Object.freeze([]) };
     } else if (rel.kind === 'Project' && rel.input.output.shape === 'nested' && directSelection(rel)) {
-      // A direct selection over a join block (or its folded WHERE clauses) is its select list.
+      // A direct selection over a join block (or its folded WHERE clauses) is its select list. Over a derived
+      // nested block with Filter-only clauses (a fallible filter above a join block) it folds the same way:
+      // its qualified references read the derived table's leaves by name, so no alias can capture them.
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
-      if (!child || child.source.kind !== 'join' || child.aggregate || child.project || child.distinct || child.clauses.some(n => n.kind !== 'Filter')) return undefined;
+      if (!child || (child.source.kind !== 'join' && child.source.kind !== 'derived') || child.aggregate || child.project || child.distinct || child.clauses.some(n => n.kind !== 'Filter')) return undefined;
       block = { ...child, project: rel };
     } else if (rel.kind === 'Project' && isColumnSelection(rel)) {
       // A CTE already provides a scope: select its columns directly rather than
@@ -127,8 +130,15 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
       const last = child?.clauses.at(-1);
       const safe = !child?.aggregate || (rel.kind === 'Filter' ? safePredicate(rel.pred) : rel.kind === 'Sort' ? rel.keys.every(k => k.expr.kind === 'ColumnRef') : true);
+      // Consecutive Filters share one WHERE (or HAVING) only when every predicate is total, exactly what
+      // MergeFilter merges: the server evaluates the conjuncts of one clause in its own order (multi-step
+      // PREWHERE, push-down below a join), so a predicate outside the total fragment must only ever see the
+      // rows the earlier filters pass, and a later total conjunct must not be AND-ed into it either. The
+      // first Filter of a block always folds; nothing can be reordered against it.
+      const together = rel.kind !== 'Filter' || last?.kind !== 'Filter'
+        || (totalPredicate(rel.pred) && child!.clauses.every(n => n.kind !== 'Filter' || totalPredicate(n.pred)));
       // WHERE precedes DISTINCT; a Filter above a folded Distinct opens a new block.
-      block = child && !child.project && safe && !(child.distinct && rel.kind === 'Filter') && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
+      block = child && !child.project && safe && together && !(child.distinct && rel.kind === 'Filter') && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
         ? { ...child, clauses: Object.freeze([...child.clauses, rel]) }
         : { source: Object.freeze({ kind: ctes?.names.has(rel.input) ? 'cte' : 'derived', rel: rel.input }), clauses: Object.freeze([rel]) };
     } else return undefined;

@@ -184,7 +184,8 @@ it('mixed conjuncts over a join and an expansion, merged total filters, HAVING w
   const r1 = await agree(joined.ir, 'SELECT a.id AS id, b.v AS v FROM adv_s2 a INNER JOIN adv_s2_other b ON a.id = b.id WHERE a.id > 1 AND a.n + 1 > -100 AND toUInt64(a.s) > 7 AND b.v < 5', { PushFilterJoin: 1 });
   expect(r1.data).toEqual([{ id: 3, v: '2' }, { id: 3, v: '2' }]);
   const expanded = t.arrayJoin(x => x.ids, 'x').where(x => x.id.gt(1).and(x.n.plus(k).gt(-100n)).and(cast(x.s, col.UInt64).gt(7n)).and(x.x.eq('q'))).map(x => ({ id: x.id, x: x.x }));
-  expect((await agree(expanded.ir, "SELECT id, x FROM adv_s2 ARRAY JOIN ids AS x WHERE id > 1 AND n + 1 > -100 AND toUInt64(s) > 7 AND x = 'q'", { PushFilterArrayJoin: 1 }, 1)).data).toEqual([{ id: 3, x: 'q' }]);
+  // Slice 3b (flipped from 1 SELECT): the residual carries a cast, so it keeps its own SELECT above the pushed safe WHERE.
+  expect((await agree(expanded.ir, "SELECT id, x FROM adv_s2 ARRAY JOIN ids AS x WHERE id > 1 AND n + 1 > -100 AND toUInt64(s) > 7 AND x = 'q'", { PushFilterArrayJoin: 1 }, 2)).data).toEqual([{ id: 3, x: 'q' }]);
   const merged = t.where(safe).where(x => x.n.plus(k).gt(-100n)).arrayJoin(x => x.ids, 'x').map(x => ({ id: x.id, x: x.x }));
   expect((await agree(merged.ir, 'SELECT id, x FROM (SELECT * FROM adv_s2 WHERE id > 1 AND n + 1 > -100) ARRAY JOIN ids AS x', { MergeFilter: 1 }, 3)).data).toEqual([{ id: 3, x: 'q' }, { id: 4, x: 'p' }]);
   const grouped = t.groupBy(x => ({ k: x.k })).aggregate(() => ({ c: count() })).where(x => x.c.gt(1n)).distinct().orderBy(x => x.c).limit(5);

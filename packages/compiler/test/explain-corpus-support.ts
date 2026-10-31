@@ -3,7 +3,7 @@ import { validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
 import { planSelects, type SelectBlock, type SqlPlan } from '../src/plan-selects.js';
 import { pruneColumns, type ColumnDemand } from '../src/prune-columns.js';
-import { mapExpression } from '../src/rewrite-expressions.js';
+import { mapExpression, totalPredicate } from '../src/rewrite-expressions.js';
 import { rewriteRel } from '../src/rewrite-rel.js';
 import type { FenceKind } from './fixtures/corpus/explain-corpus.js';
 
@@ -52,6 +52,19 @@ export function structure(root: Rel): Structure {
   const columns = pruneColumns(rewritten), ctes = planCtes(rewritten);
   const plan = planSelects(rewritten, Object.values(validateRel(rewritten).nodes), columns, ctes);
   const selects: EmittedSelect[] = [];
+  /** Slice 3b: the planner refuses to AND a Filter into a block's WHERE/HAVING unless it and every Filter clause held
+   * there are total. That boundary is justified only when the inner block ends in Filter clauses and the totality rule
+   * is what refused the fold; any other derived table under a Filter consumer stays unfenced. */
+  const filterFence = (rel: Rel, consumer: Rel): boolean => {
+    const inner = plan.blocks.get(rel);
+    // The consumer-kind check is the load-bearing one (a computed Project over a filtered join block must stay unfenced).
+    // "Last clause is a Filter" is defence in depth: a block root that is a Filter never ends in Sort/Limit, and a Sort/
+    // Limit root is already classified by the rel-kind rule that runs first (currently unreachable-false).
+    if (consumer.kind !== 'Filter' || !inner || inner.project || inner.distinct || inner.clauses.at(-1)?.kind !== 'Filter') return false;
+    // The totality disjunction is defence in depth too: a total Filter over a block of total Filters never opens a boundary
+    // (MergeFilter merges total pairs before planning, and the planner folds them), so this is currently never false here.
+    return !totalPredicate(consumer.pred) || inner.clauses.some(n => n.kind === 'Filter' && !totalPredicate(n.pred));
+  };
   const fenceOf = (rel: Rel, role: Role, consumer?: Rel): EmittedSelect['fence'] => {
     switch (role) {
       case 'root': return 'root';
@@ -59,7 +72,7 @@ export function structure(root: Rel): Structure {
       case 'subquery': return 'Subquery';
       case 'union-branch': case 'union-input': return 'Union';
       case 'join-input': return 'Join';
-      case 'derived': return fenceNodes.has(consumer!.kind) ? consumer!.kind as FenceKind : fenceNodes.has(rel.kind) ? rel.kind as FenceKind : 'unfenced';
+      case 'derived': return fenceNodes.has(consumer!.kind) ? consumer!.kind as FenceKind : fenceNodes.has(rel.kind) ? rel.kind as FenceKind : filterFence(rel, consumer!) ? 'Filter' : 'unfenced';
     }
   };
   const push = (rel: Rel, role: Role, consumer?: Rel) => selects.push({ rel, role, ...(consumer ? { consumer } : {}), fence: fenceOf(rel, role, consumer) });
@@ -134,7 +147,7 @@ export const stepTypes = Object.freeze({
   base: Object.freeze(['Expression', 'Filter', 'ReadFromMergeTree', 'ReadFromMemoryStorage', 'ReadFromStorage']),
   byFence: Object.freeze<Record<FenceKind, readonly string[]>>({
     Aggregate: ['Aggregating', 'MergingAggregated'], Sort: ['Sorting'], Limit: ['Limit', 'Offset'], Distinct: ['Distinct'], Union: ['Union'],
-    Join: ['Join'], ArrayJoin: ['ArrayJoin'], Subquery: ['CreatingSets', 'CreatingSet'], CTE: [], RawRel: [], Materialize: [],
+    Join: ['Join'], ArrayJoin: ['ArrayJoin'], Subquery: ['CreatingSets', 'CreatingSet'], CTE: [], RawRel: [], Materialize: [], Filter: [],
   }),
 });
 export interface PlanStep { readonly type: string; readonly description: string; readonly header: readonly string[]; readonly children: readonly PlanStep[] }

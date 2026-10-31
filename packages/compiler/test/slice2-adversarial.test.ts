@@ -228,8 +228,10 @@ it('(vi) a mixed conjunction (safe AND arithmetic AND cast) splits exactly at ea
     expect(conjuncts(af.pred).map(totalPredicate)).toEqual([true, false]);
     if (a.root.kind !== 'Filter' || a.root.input.kind !== 'ArrayJoin' || a.root.input.input.kind !== 'Filter') throw new Error('shape');
     expect(safePredicate(a.root.input.input.pred)).toBe(true);
-    // Planner: the pushed safe filter folds under the expansion, the residual above it folds as a later WHERE.
-    expect(a.compiled.sql).toBe(`SELECT \`id\`, \`k\`, \`n\`, \`small\`, \`nn\`, \`lcs\`, \`s\`, \`ids\`, \`nids\`, \`uids\`, \`parts\`, \`tup\`, \`x\` FROM \`adv\` ${left ? 'LEFT ' : ''}ARRAY JOIN \`ids\` AS \`x\` WHERE \`id\` > {p0:UInt32} AND \`n\` + {p1:Int64} > {p2:Int64} AND CAST(\`s\` AS UInt64) > {p3:UInt64}`);
+    // Planner: the pushed safe filter folds under the expansion. Slice 3b (flipped from one shared WHERE): the residual
+    // carries the cast, so it is not total and keeps its own SELECT above the safe WHERE instead of being AND-ed into it.
+    const columns = ['id', 'k', 'n', 'small', 'nn', 'lcs', 's', 'ids', 'nids', 'uids', 'parts', 'tup', 'x'];
+    expect(a.compiled.sql).toBe(`SELECT ${columns.map(c => `\`__typedhouse_input\`.\`${c}\``).join(', ')} FROM (SELECT ${columns.map(c => `\`${c}\``).join(', ')} FROM \`adv\` ${left ? 'LEFT ' : ''}ARRAY JOIN \`ids\` AS \`x\` WHERE \`id\` > {p0:UInt32}) AS \`__typedhouse_input\` WHERE \`__typedhouse_input\`.\`n\` + {p1:Int64} > {p2:Int64} AND CAST(\`__typedhouse_input\`.\`s\` AS UInt64) > {p3:UInt64}`);
   }
   // Aggregate: the safe key conjunct becomes WHERE below the aggregate; arithmetic over the key and a cast stay above
   // (never HAVING, since the planner also requires safePredicate for HAVING folding).
