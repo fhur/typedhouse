@@ -4797,3 +4797,100 @@ export declare const latestTotals: import("@typedhouse/core").Query<{
         kind: "Aggregate";
     }>;
 };
+export declare const leftLatest: import("@typedhouse/core").Query<{
+    entityId: string;
+    stock: number;
+}, import("@typedhouse/core").ExpressionCaps<{
+    readonly live: false;
+}>, {
+    readonly entityId: import("@typedhouse/core").Expr<string, "entityId", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
+            readonly type: {
+                kind: "scalar";
+                name: "String";
+            };
+        };
+    };
+    readonly stock: import("@typedhouse/core").Expr<number, "stock", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
+            readonly type: {
+                kind: "scalar";
+                name: "Float64";
+            };
+        };
+    };
+}, false>;
+export declare const optionalSnapshot: import("@typedhouse/core").Query<{
+    entityId: string;
+    category: string | null;
+    stockTotal: number | null;
+    stockP50: number | null;
+    leadDays: number | null;
+    stockIndex: number | null;
+}, import("@typedhouse/core").ExpressionCaps<{
+    readonly live: false;
+}>, {
+    readonly entityId: import("@typedhouse/core").Expr<string, "entityId", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
+            readonly type: {
+                kind: "scalar";
+                name: "String";
+            };
+        };
+    };
+    readonly category: import("@typedhouse/core").Expr<string | null, "category", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
+            readonly type: {
+                kind: "Nullable";
+                inner: {
+                    kind: "scalar";
+                    name: "String";
+                };
+            };
+        };
+    };
+    readonly stockTotal: import("@typedhouse/core").Expr<number | null, "stockTotal", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
+            readonly type: {
+                kind: "Nullable";
+                inner: {
+                    kind: "scalar";
+                    name: "Float64";
+                };
+            };
+        };
+    };
+    readonly stockP50: import("@typedhouse/core").Expr<number | null, "stockP50", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
+            readonly type: {
+                kind: "Nullable";
+                inner: {
+                    kind: "scalar";
+                    name: "Float64";
+                };
+            };
+        };
+    };
+    readonly leadDays: import("@typedhouse/core").Expr<number | null, "leadDays", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
+            readonly type: {
+                kind: "Nullable";
+                inner: {
+                    kind: "scalar";
+                    name: "Float64";
+                };
+            };
+        };
+    };
+    readonly stockIndex: import("@typedhouse/core").Expr<number | null, "stockIndex", "row"> & {
+        readonly ir: import("@typedhouse/core").ExprNode & {
+            readonly type: {
+                kind: "Nullable";
+                inner: {
+                    kind: "scalar";
+                    name: "Float64";
+                };
+            };
+        };
+    };
+}, false>;

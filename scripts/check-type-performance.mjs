@@ -63,6 +63,7 @@ function compare(measured, ceilings, wall) {
   for (const key of ['instantiations', 'wallSeconds']) assert.ok(Number.isFinite(measured[key]) && measured[key] > 0, `Missing metric ${key}`);
   assert.ok(Number.isFinite(ceilings.instantiations) && ceilings.instantiations > 0, 'Missing budget instantiations');
   assert.ok(measured.instantiations <= ceilings.instantiations, `instantiations ${measured.instantiations} exceeds budget ${ceilings.instantiations}`);
+  assert.ok(Number.isFinite(ceilings.wallSeconds) && ceilings.wallSeconds > 0, 'Missing budget wallSeconds in test/types/bench/budget.json');
   const entry = wall.enforced ? wall.baselines[wall.key] : undefined;
   if (entry !== undefined) {
     assert.ok(Number.isFinite(entry.wallSeconds) && entry.wallSeconds > 0, `Missing budget wallSeconds in ${wall.source}`);
@@ -70,7 +71,7 @@ function compare(measured, ceilings, wall) {
     return null;
   }
   const why = wall.enforced ? `no wall budget for ${wall.key} in ${wall.source}, host class ${wall.slug}` : `no wall budget for host class ${wall.slug}`;
-  return `ADVISORY wall ${wall.key} ${measured.wallSeconds.toFixed(2)}s (${why}; ${wall.reference} ceiling ${Number(ceilings.wallSeconds).toFixed(2)}s) — not enforced`;
+  return `ADVISORY wall ${wall.key} ${measured.wallSeconds.toFixed(2)}s (${why}; ${wall.reference} ceiling ${ceilings.wallSeconds.toFixed(2)}s) — not enforced`;
 }
 function invoke(args) {
   const result = spawnSync('pnpm', args, { cwd: root, encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
@@ -114,6 +115,8 @@ if (process.argv.includes('--self-test')) {
   assert.throws(() => compare({ instantiations: 10 }, measured, unknown), /Missing metric wallSeconds/);
   assert.throws(() => compare(measured, undefined, unknown), /Unknown/);
   assert.throws(() => compare(measured, { wallSeconds: 1 }, unknown), /Missing budget instantiations/);
+  // A budget.json baseline without wallSeconds is fatal on every path, never a NaN advisory ceiling.
+  for (const wall of [unknown, known]) assert.throws(() => compare(measured, { instantiations: 10 }, wall), /Missing budget wallSeconds in test\/types\/bench\/budget\.json/);
   assert.throws(() => parse('Instantiations: 42\n'), /Missing metric/);
   assert.throws(() => parse('garbage'), /Missing metric Instantiations/);
   assert.deepEqual(parse('Instantiations: 10\nCheck time: 1s\nTotal time: 2s\nMemory used: 300K\n'), { instantiations: 10, checkSeconds: 1, totalSeconds: 2, memoryKiB: 300 });
@@ -199,7 +202,7 @@ if (record) {
 }
 const wall = record ? { enforced: false, source: null, baselines: {} } : wallSource(budget, cls, hostBudgetPath, inputHash);
 if (wall.note) console.log(wall.note);
-console.log(JSON.stringify({ policy, inputHash, host: { cpu: cpus()[0]?.model, node: process.version, platform: platform(), arch: arch() }, hostClass: cls, hostClassSlug: slug, wallEnforced: wall.enforced, wallBudget: wall.source, mode: initialize ? 'initialize' : record ? 'record-host-budget' : 'check' }));
+console.log(JSON.stringify({ policy, inputHash, host: { cpu: cpus()[0]?.model, node: process.version, platform: platform(), arch: arch() }, hostClass: cls, hostClassSlug: slug, wallBudgetFile: wall.source, mode: initialize ? 'initialize' : record ? 'record-host-budget' : 'check' }));
 const selectors = initialize || process.argv.includes('--all') ? [undefined, '5.5.4', 'latest'] : [process.env.TYPEDHOUSE_TYPESCRIPT_VERSION];
 const seen = new Set();
 for (const selector of selectors) {

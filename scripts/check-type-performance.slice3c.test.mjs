@@ -106,8 +106,8 @@ test('1a unknown host, healthy compile: exit 0, advisory per key, header advisor
   const dir = tempBudgetDir();
   const r = run(dir);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(r.header.wallEnforced, false);
-  assert.equal(r.header.wallBudget, null);
+  assert.equal(r.header.wallBudgetFile, null);
+  assert.equal('wallEnforced' in r.header, false);
   assert.equal(r.header.hostClassSlug, localSlug);
   assert.deepEqual(r.header.hostClass, localClass);
   assert.equal(r.header.mode, 'check');
@@ -141,7 +141,7 @@ for (const [name, env, message] of [
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(r.stderr, message);
     assert.equal(r.advisory.length, 0, r.stdout);
-    assert.equal(r.header.wallEnforced, false);
+    assert.equal(r.header.wallBudgetFile, null);
     assert.doesNotMatch(r.stdout, /Passed unchanged/);
   });
 }
@@ -192,11 +192,13 @@ test('1h unknown host, budget.json baseline lacks instantiations: exit 1 (not ad
   assert.equal(r.advisory.length, 0);
 });
 
-test('1i (observation) unknown host, budget.json baseline lacks wallSeconds: exit 0, advisory prints the reference ceiling as NaN', () => {
+test('1i (m3, slice 4a) unknown host, budget.json baseline lacks wallSeconds: exit 1, never a NaN advisory ceiling', () => {
   const dir = tempBudgetDir(b => { delete b.baselines['5.8.3/built'].wallSeconds; return b; });
   const r = run(dir);
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.advisory[0], /Apple M3 Max ceiling NaNs\) — not enforced$/);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /Missing budget wallSeconds in test\/types\/bench\/budget\.json/);
+  assert.equal(r.advisory.length, 0);
+  assert.doesNotMatch(r.stdout, /NaN/);
 });
 
 // ---------------------------------------------------------------- (2) host-class matching and lookup order
@@ -206,8 +208,8 @@ test('2a host file for this class: wall hard from the file (tiny ceiling exits 1
   const tight = run(dir);
   assert.equal(tight.status, 1, tight.stdout + tight.stderr);
   assert.match(tight.stderr, new RegExp(`wallSeconds [0-9.]+ exceeds budget 0\\.000001 \\(${relative(root, file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`));
-  assert.equal(tight.header.wallEnforced, true);
-  assert.equal(tight.header.wallBudget, relative(root, file));
+  assert.notEqual(tight.header.wallBudgetFile, null);
+  assert.equal(tight.header.wallBudgetFile, relative(root, file));
   assert.equal(tight.advisory.length, 0);
   writeHost(dir, baseHost({ '5.8.3/built': wallEntry(1000), '5.8.3/source': wallEntry(1000) }));
   const ok = run(dir);
@@ -222,7 +224,7 @@ test('2b host file wins over a budget.json whose host matches this class (lookup
   const r = run(dir);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /exceeds budget 0\.000001 \(.*budget\.amd.*\.json\)|exceeds budget 0\.000001 \(.*budget\.[a-z0-9-]+\.json\)/);
-  assert.equal(r.header.wallBudget, relative(root, file));
+  assert.equal(r.header.wallBudgetFile, relative(root, file));
 });
 
 test('2c budget.json host matches this class exactly and no host file: wall hard from budget.json', () => {
@@ -230,8 +232,8 @@ test('2c budget.json host matches this class exactly and no host file: wall hard
   const r = run(tight);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /wallSeconds [0-9.]+ exceeds budget 0\.000001 \(.*case-\d+\/budget\.json\)/);
-  assert.equal(r.header.wallEnforced, true);
-  assert.match(r.header.wallBudget, /budget\.json$/);
+  assert.notEqual(r.header.wallBudgetFile, null);
+  assert.match(r.header.wallBudgetFile, /budget\.json$/);
   assert.equal(r.advisory.length, 0);
   const ok = tempBudgetDir(b => { b.host = { ...b.host, ...localClass }; return b; });
   const r2 = run(ok);
@@ -253,10 +255,10 @@ for (const [name, mutateHost, matches] of [
     if (matches) {
       assert.equal(r.status, 1, r.stdout + r.stderr);
       assert.match(r.stderr, /exceeds budget 0\.000001 \(.*budget\.json\)/);
-      assert.equal(r.header.wallEnforced, true);
+      assert.notEqual(r.header.wallBudgetFile, null);
     } else {
       assert.equal(r.status, 0, r.stdout + r.stderr);
-      assert.equal(r.header.wallEnforced, false);
+      assert.equal(r.header.wallBudgetFile, null);
       assert.equal(r.advisory.length, 2);
     }
   });
@@ -293,7 +295,7 @@ test('2f GitHub host file recorded on another image: one INFO line before the he
   assert.deepEqual(drift.info, [`INFO runner image differs from the recorded host-class budget ${relative(root, file)}: running on ubuntu24, recorded on ubuntu22 (same cpu/platform/arch; wall ceilings still enforced from that file)`]);
   assert.ok(drift.stdout.indexOf('INFO ') < drift.stdout.indexOf('{"policy"'), 'INFO must precede the header');
   assert.match(drift.stderr, /exceeds budget 0\.000001/);
-  assert.equal(drift.header.wallEnforced, true);
+  assert.notEqual(drift.header.wallBudgetFile, null);
   const same = run(dir, [], { GITHUB_ACTIONS: 'true', ImageOS: 'ubuntu22' });
   assert.equal(same.info.length, 0);
   assert.equal(same.status, 1);
@@ -309,7 +311,7 @@ test('2g host file lacks the running key: advisory for that key only, naming the
   const file = writeHost(dir, baseHost({ '5.8.3/built': wallEntry(1000) }));
   const r = run(dir);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(r.header.wallEnforced, true);
+  assert.notEqual(r.header.wallBudgetFile, null);
   assert.equal(r.advisory.length, 1);
   assert.match(r.advisory[0], advisoryRe('5.8.3/source', `no wall budget for 5\\.8\\.3\\/source in ${relative(root, file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, host class ${localSlug}`, '0\\.00'));
   assert.match(r.stdout, /wall hard from .*budget\.[a-z0-9-]+\.json\)\s*$/);
@@ -320,7 +322,7 @@ test('2g host file lacks the running key: advisory for that key only, naming the
   assert.match(tight.stderr, /wallSeconds [0-9.]+ exceeds budget 0\.000001 \(.*budget\.[a-z0-9-]+\.json\)/);
 });
 
-test('2h CI selector: TYPEDHOUSE_TYPESCRIPT_VERSION picks one selector; a file recorded for other versions is per-key advisory (header stays wallEnforced:true)', () => {
+test('2h CI selector: TYPEDHOUSE_TYPESCRIPT_VERSION picks one selector; a file recorded for other versions is per-key advisory (header names wallBudgetFile)', () => {
   const dir = tempBudgetDir(b => { b.baselines['5.5.4/built'].wallSeconds = 1e-6; b.baselines['5.5.4/source'].wallSeconds = 1e-6; return b; });
   const file = writeHost(dir, baseHost({ '5.8.3/built': wallEntry(1000), '5.8.3/source': wallEntry(1000) }));
   const r = run(dir, [], { TYPEDHOUSE_TYPESCRIPT_VERSION: '5.5.4' });
@@ -330,7 +332,8 @@ test('2h CI selector: TYPEDHOUSE_TYPESCRIPT_VERSION picks one selector; a file r
   assert.ok(r.runs.every(l => l.includes('"key":"5.5.4/')), r.runs.join('\n'));
   assert.equal(r.advisory.length, 2);
   assert.match(r.advisory[0], new RegExp(`no wall budget for 5\\.5\\.4\\/built in ${relative(root, file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, host class`));
-  assert.equal(r.header.wallEnforced, true); // file-level; the per-key fact is only on the ADVISORY lines
+  assert.equal(r.header.wallBudgetFile, relative(root, file)); // m2 (slice 4a): names the file consulted, not a file-level enforcement claim; the per-key fact is on the ADVISORY lines
+  assert.equal('wallEnforced' in r.header, false);
   const latest = run(dir, [], { TYPEDHOUSE_TYPESCRIPT_VERSION: 'latest' });
   assert.equal(latest.status, 0, latest.stdout + latest.stderr);
   assert.match(latest.stdout, /Selector latest resolved official CLI 7\.0\.2/);
@@ -406,7 +409,7 @@ test('3d record succeeds: file carries budget.json policy/inputHash, max×1.5 ce
   const r = run(dir, ['--record-host-budget'], { FAKE_TSC_INST: '1001', FAKE_TSC_SOURCE_INST: '1201', FAKE_TSC_SLEEP: '0.02' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(r.header.mode, 'record-host-budget');
-  assert.equal(r.header.wallEnforced, false);
+  assert.equal(r.header.wallBudgetFile, null);
   assert.match(r.stdout, new RegExp(`Recorded host-class wall budget .*budget\\.${localSlug}\\.json \\(${localSlug}\\); commit it after review`));
   const written = JSON.parse(readFileSync(hostFile(dir), 'utf8'));
   assert.equal(written.policy, real.policy);
@@ -429,8 +432,8 @@ test('3d record succeeds: file carries budget.json policy/inputHash, max×1.5 ce
   // Follow-up check run now takes the file (lookup 1) and enforces wall from it.
   const check = run(dir);
   assert.equal(check.status, 0, check.stdout + check.stderr);
-  assert.equal(check.header.wallEnforced, true);
-  assert.equal(check.header.wallBudget, relative(root, hostFile(dir)));
+  assert.notEqual(check.header.wallBudgetFile, null);
+  assert.equal(check.header.wallBudgetFile, relative(root, hostFile(dir)));
   assert.equal(check.advisory.length, 0);
   // Second record refuses.
   const again = run(dir, ['--record-host-budget']);

@@ -1,4 +1,4 @@
-import { print, scalarDescriptor, outputLeaves, expandedOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@typedhouse/core';
+import { print, scalarDescriptor, outputLeaves, expandedOutput, joinOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@typedhouse/core';
 import type { SqlPlan } from './plan-selects.js';
 import { parameterExpression, parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
@@ -15,6 +15,7 @@ function hasAggregate(e: ExprNode): boolean {
   return e.kind === 'Agg' || (e.kind === 'Call' && e.args.some(hasAggregate)) || (e.kind === 'Cast' && hasAggregate(e.expr));
 }
 function base(t: CHType): CHType { return t.kind === 'Nullable' || t.kind === 'LowCardinality' ? base(t.inner) : t; }
+const joinKeyword = { inner: 'INNER ALL JOIN', left: 'LEFT ALL JOIN', right: 'RIGHT ALL JOIN', full: 'FULL ALL JOIN', cross: 'CROSS JOIN' } as const;
 /** Permanent one-subquery-per-node reference backend. Unsupported IR is rejected. */
 export function emitNaive(root: Rel): CompiledQuery {
   return emitQuery(root);
@@ -44,6 +45,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
   let cteIndex = 0;
   let weekBucketing = false;
   let dateMembership = false;
+  let outerJoin = false;
   // Each derived input owns this local SQL scope; ColumnRefs never bind SELECT aliases.
   const inputAlias = quoteIdentifier(plan?.ctes?.inputAlias ?? '__typedhouse_input');
   const defined = new Set<Rel>();
@@ -174,6 +176,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
   }
   /** Physical occurrences retain source order and full child transport paths. */
   function joinSource(join: Extract<Rel, { kind: 'Join' }>, path: string, separator: string): string {
+    if (join.joinKind !== 'inner' && join.joinKind !== 'cross') outerJoin = true;
     const conditions = join.inputs.map(() => [] as ExprNode[]);
     for (const e of join.on) {
       if (e.kind !== 'Call') return fail('invalid_join_condition', e, path);
@@ -192,7 +195,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         : `(${emit(child, `${path}.inputs[${i}]`)})`;
       const hints = !cte && child.kind === 'Scan' && physical.length === full.length ? `${child.final ? ' FINAL' : ''}${child.sample === undefined ? '' : ` SAMPLE ${child.sample}`}` : '';
       const on = i && join.joinKind !== 'cross' ? ` ON ${conditions[i]!.map((e, j) => expression(e, join, `${path}.on[${j}]`, undefined, false, 'row', '')).join(' AND ')}` : '';
-      return `${i ? `${separator}${join.joinKind === 'cross' ? 'CROSS JOIN' : 'INNER ALL JOIN'} ` : ''}${source} AS ${joinAlias(join, alias)}${hints}${on}`;
+      return `${i ? `${separator}${joinKeyword[join.joinKind]} ` : ''}${source} AS ${joinAlias(join, alias)}${hints}${on}`;
     }).join('');
   }
   function renderBlock(rel: Rel, physicalOrder: readonly string[], path = 'root'): string {
@@ -342,12 +345,12 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           return branches.join(rel.all ? ' UNION ALL ' : ' UNION DISTINCT ');
         }
         case 'Join': {
-          if (rel.joinKind !== 'inner' && rel.joinKind !== 'cross') return fail('unsupported_join', rel, path);
+          if (!Object.hasOwn(joinKeyword, rel.joinKind)) return fail('unsupported_join', rel, path);
+          const outer = rel.joinKind !== 'inner' && rel.joinKind !== 'cross';
           if (!Array.isArray(rel.on)) return fail('invalid_join_condition', rel, `${path}.on`);
           if (rel.joinKind === 'cross' && rel.on.length) return fail('join_condition_arity', rel, `${path}.on`, 'CROSS JOIN has no ON condition');
           if (!Array.isArray(rel.inputs) || rel.inputs.length < 2 || new Set(rel.inputs.map(([a]) => a)).size !== rel.inputs.length) return fail('join_input_count', rel, `${path}.inputs`);
-          const expected = { shape: 'nested', inputs: rel.inputs.map(([a, r]) => [a, r.output]) };
-          if (JSON.stringify(expected) !== JSON.stringify(rel.output)) return fail('invalid_output', rel, path);
+          if (JSON.stringify(joinOutput(rel.joinKind, rel.inputs)) !== JSON.stringify(rel.output)) return fail('invalid_output', rel, path);
           const clauses = rel.inputs.map(() => [] as { e: ExprNode; path: string }[]);
           const residuals: { e: ExprNode; path: string }[] = [];
           const join = rel;
@@ -370,12 +373,14 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           }
           for (const { e, path: p } of rel.on.flatMap((e, i) => conjuncts(e, `${path}.on[${i}]`))) {
             if (e.kind !== 'Call' || e.fn.origin !== 'typed' || e.fn.name !== 'eq') {
+              // An outer join's ON only decides null extension: a residual cannot move above it.
+              if (outer) return fail('join_condition_not_equi', e, p);
               const type = e.type && base(e.type);
               if (!type || type.kind !== 'scalar' || type.name !== 'Bool') return fail('invalid_predicate', e, p);
               residuals.push({ e, path: p });
               continue;
             }
-            if (e.args.length !== 2) return fail('join_condition_arity', e, p);
+            if (e.args.length !== 2 || (outer && e.args.some(a => a.kind !== 'ColumnRef'))) return fail('join_condition_arity', e, p);
             const left = [...sides(e.args[0]!, `${p}.args[0]`)], right = [...sides(e.args[1]!, `${p}.args[1]`)];
             if (left.length !== 1 || right.length !== 1 || left[0] === right[0]) return fail('join_condition_arity', e, p);
             clauses[Math.max(left[0]!, right[0]!)]!.push({ e, path: p });
@@ -387,9 +392,10 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
             if (!child) return fail('missing_physical_column', rel, path, JSON.stringify(l.path));
             return `${joinAlias(rel, side[0])}.${quoteIdentifier(child.name)} AS ${quoteIdentifier(l.name)}`;
           });
+          if (outer) outerJoin = true;
           let source = '';
           for (const [i, [alias, child]] of rel.inputs.entries()) {
-            source += `${i ? (rel.joinKind === 'cross' ? ' CROSS JOIN ' : ' INNER ALL JOIN ') : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${joinAlias(rel, alias)}`;
+            source += `${i ? ` ${joinKeyword[rel.joinKind]} ` : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${joinAlias(rel, alias)}`;
             if (i && rel.joinKind !== 'cross') source += ` ON ${clauses[i]!.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}`;
           }
           return `SELECT ${items.join(', ')} FROM ${source}${residuals.length ? ` WHERE ${conjunction(residuals.map(c => ({ expr: c.e, sql: expression(c.e, rel, c.path, undefined, false, 'row', '') })))}` : ''}`;
@@ -515,8 +521,10 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
     ...(weekBucketing ? ['enable_extended_results_for_datetime_functions = 1'] : []),
     // Nullable membership's declared result requires the server's default NULL policy.
     ...(dateMembership ? ['transform_null_in = 0'] : []),
+    // Query-global: an outer join's unmatched columns are NULL, not type defaults (spec, Emission details).
+    ...(outerJoin ? ['join_use_nulls = 1'] : []),
   ];
-  const sql = body + (settings.length ? ` SETTINGS ${settings.join(', ')}` : '');
+  const sql = body + (settings.length ? ` SETTINGS ${settings.join(', ')}` : '') + (outerJoin ? ' /* join_use_nulls = 1: unmatched outer-join columns are NULL, not type defaults */' : '');
   const leaves = outputLeaves(root.output);
   return Object.freeze({ sql, params: Object.freeze(params), parameterTypes: Object.freeze(parameterTypes), columns: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, l.type]))), ...(root.output.shape === 'nested' ? { columnPaths: Object.freeze(Object.fromEntries(leaves.map(l => [l.name, Object.freeze(l.path)]))) } : {}), nodes: Object.freeze(nodes) });
 }

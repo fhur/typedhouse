@@ -99,3 +99,5 @@ Parameters:
 <!-- generated-sql:end -->
 
 The filter and join conditions must pass safety checks. This is not join reordering or an outer-join rewrite. Inner ALL join duplicates are preserved.
+
+A filter above a `leftJoin`, `rightJoin` or `fullJoin` stays above it. It still folds into the join block's `WHERE`, which ClickHouse evaluates over the joined, null-extended rows. Pushing it into an input would change which rows are null-extended, not only which rows survive, so outer joins are fences for this rule for now.

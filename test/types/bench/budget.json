@@ -1,12 +1,18 @@
 {
   "policy": "Three sequential fresh official CLI processes per version/input, no incremental state; maximum of three; initial ceilings = maximum * 1.5 (instantiations rounded up). Wall includes pnpm/CLI startup, excludes builds and version resolution. Warm OS caches, not cold machine.",
-  "inputHash": "deddcc4970c411b9a6938b0b642c0b093fe0fe2d04c9aaa67ccc1fa9c725cf5b",
+  "inputHash": "da42100bbfb597fdc2c517596245d51926e6441bd85b04c1c1e8bf45c3cc7831",
   "inputHashHistory": [
     {
       "previous": "e31f5753e8bd70b52ea569623ce9cb24e2601411dde32adace40764a57bb5a50",
       "current": "deddcc4970c411b9a6938b0b642c0b093fe0fe2d04c9aaa67ccc1fa9c725cf5b",
       "changedAt": "2026-10-30",
       "reason": "Mechanical rename of the package scope to @typedhouse/* and of the TYPEDHOUSE_TYPESCRIPT_VERSION selector in benchmark inputs; query shapes, literals and budgets unchanged, no rebaseline of ceilings."
+    },
+    {
+      "previous": "deddcc4970c411b9a6938b0b642c0b093fe0fe2d04c9aaa67ccc1fa9c725cf5b",
+      "current": "da42100bbfb597fdc2c517596245d51926e6441bd85b04c1c1e8bf45c3cc7831",
+      "changedAt": "2026-10-31",
+      "reason": "Slice 4a: test/types/snapshots/corpus/rows.d.ts gained the two outer-join corpus rows (supported_leftLatest, supported_optionalSnapshot) from supported-types.ts; bench queries, generators and ceilings unchanged, no rebaseline."
     }
   ],
   "inputs": [

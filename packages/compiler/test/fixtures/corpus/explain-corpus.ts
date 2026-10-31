@@ -63,6 +63,8 @@ export const entries: readonly CorpusEntry[] = [
   { id: 'joins/three-way', query: s.withPrice, fences: ['CTE', 'Join'] },
   { id: 'joins/self', query: s.sharedPart, fences: ['CTE'] },
   { id: 'joins/left-array', query: s.leftArray, fences: [] },
+  { id: 'joins/left', query: s.leftLatest, fences: ['CTE', 'Join'] },
+  { id: 'entities/optional-snapshot', query: s.optionalSnapshot, fences: ['CTE', 'Join'] },
   { id: 'composition/lowStock', query: s.lowStock, fences: ['CTE', 'Join'] },
   { id: 'ordering/page', query: s.orderedComponents, fences: [] },
   { id: 'ordering/nulls', query: s.orderedNullable, fences: [] },

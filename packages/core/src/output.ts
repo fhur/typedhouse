@@ -39,3 +39,43 @@ export function outputLeaves(output: OutputSchema): readonly OutputLeaf[] {
   while (leaves.some((_, i) => reserved.has(`${prefix}${i}`))) prefix += '_';
   return leaves.map((leaf, i) => ({ ...leaf, name: `${prefix}${i}` }));
 }
+
+export type JoinKind = 'inner' | 'left' | 'right' | 'full' | 'cross';
+/** The descriptor an outer join's null-extended side yields under join_use_nulls = 1 on 24.8:
+ * kinds ClickHouse can put inside Nullable are wrapped (SimpleAggregateFunction when its argument
+ * can be), LowCardinality(T) becomes LowCardinality(Nullable(T)), and so does
+ * SimpleAggregateFunction(f, LowCardinality(T)): the server drops that SAF wrapper. Nullable, Array,
+ * Map, Tuple, Variant, Dynamic, JSON, AggregateFunction and Unknown stay as declared (the server
+ * returns their defaults for unmatched rows). Idempotent; returns the argument when unchanged. */
+export function outerColumnType(t: CHType): CHType {
+  const lc = t.kind === 'SimpleAggregateFunction' && t.inner.kind === 'LowCardinality' ? t.inner : t;
+  if (lc.kind === 'LowCardinality') return insideNullable(lc.inner) ? { kind: 'LowCardinality', inner: { kind: 'Nullable', inner: lc.inner } } : t;
+  return insideNullable(t) ? { kind: 'Nullable', inner: t } : t;
+}
+function insideNullable(t: CHType): boolean {
+  switch (t.kind) {
+    case 'scalar': return t.name !== 'JSON';
+    case 'FixedString': case 'DateTime': case 'DateTime64': case 'Decimal': case 'Enum': return true;
+    case 'SimpleAggregateFunction': return insideNullable(t.inner);
+    default: return false;
+  }
+}
+/** Inputs whose columns are null-extended: left — every input after the first; right — every
+ * input before the last; full — all; inner and cross — none. */
+export function nullExtended(kind: JoinKind, index: number, count: number): boolean {
+  return kind === 'full' || (kind === 'left' && index > 0) || (kind === 'right' && index < count - 1);
+}
+function outerOutput(schema: OutputSchema): OutputSchema {
+  if (schema.shape === 'deferred') return schema;
+  if (schema.shape === 'nested') {
+    const inputs = schema.inputs.map(([alias, child]) => [alias, outerOutput(child)] as const);
+    const fields = schema.fields && outerOutput(schema.fields) as Extract<OutputSchema, { shape: 'flat' }>;
+    return inputs.every(([, child], i) => child === schema.inputs[i]![1]) && fields === schema.fields ? schema : { ...schema, inputs, ...(fields ? { fields } : {}) };
+  }
+  const types = schema.order.map(name => outerColumnType(schema.columns[name]!));
+  return types.every((t, i) => t === schema.columns[schema.order[i]!]) ? schema : flatOutput(schema.order.map((name, i) => [name, types[i]!] as const));
+}
+/** A Join's nested output: each input's schema, null-extended per the kind. */
+export function joinOutput(kind: JoinKind, inputs: readonly (readonly [string, { readonly output: OutputSchema }])[]): Extract<OutputSchema, { shape: 'nested' }> {
+  return { shape: 'nested', inputs: inputs.map(([alias, rel], i) => [alias, nullExtended(kind, i, inputs.length) ? outerOutput(rel.output) : rel.output] as const) };
+}

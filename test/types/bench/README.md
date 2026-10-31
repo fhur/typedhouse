@@ -28,15 +28,20 @@ remain incomplete.
 Wall lookup order, per run:
 
 1. `test/types/bench/budget.<slug>.json` if it exists — wall is hard from that file (a key the file
-   lacks is advisory for that key only; it never falls back to another host's ceiling). The file's
+   lacks is advisory for that key only, printed as
+   `ADVISORY wall <key> <measured>s (no wall budget for <key> in <file>, host class <slug>; <budget.host.cpu> ceiling <ceiling>s) — not enforced`;
+   it never falls back to another host's ceiling). The file's
    `policy` and `inputHash` must match, exactly like `budget.json`'s, or the run fails.
 2. else `budget.json` when its `host` matches the running class exactly (today: the Apple M3 Max the
    budget was recorded on) — wall is hard from `budget.json`.
 3. else no wall budget — wall is measured and printed per `<version>/<mode>` as
-   `ADVISORY wall <key> <measured>s (no wall budget for host class <slug>; Apple M3 Max ceiling <ceiling>s) — not enforced`
-   and does not affect the exit code.
+   `ADVISORY wall <key> <measured>s (no wall budget for host class <slug>; <budget.host.cpu> ceiling <ceiling>s) — not enforced`
+   and does not affect the exit code. The reference name and ceiling are `budget.json`'s `host.cpu`
+   (today `Apple M3 Max`) and its `wallSeconds` for that key, printed for comparison only.
 
-The JSON header line carries `hostClass`, `hostClassSlug`, `wallEnforced` and `wallBudget`.
+The JSON header line carries `hostClass`, `hostClassSlug` and `wallBudgetFile` (the host-class budget
+file consulted, or `null`); whether wall is enforced is decided per key and shown by the ADVISORY lines.
+A `budget.json` baseline without `wallSeconds` is fatal on every path, like a missing instantiation ceiling.
 Exit codes: instantiations over ceiling → 1 on any host; wall over ceiling with a host budget → 1;
 wall over with no host budget → 0 plus the advisory line; `inputHash` or `policy` mismatch → 1 before
 any measurement; missing metric, unparsable `--extendedDiagnostics` output, non-zero `tsc` or an

@@ -1,6 +1,6 @@
 // Bounded supported API corpus. Coverage and remaining contracts: test/types/corpus-coverage.json.
 // No query result annotations: declaration snapshots must observe actual inference.
-import { from, join, unionAll, val, col, max, argMax, avg, quantile, sum, scalar, count, countIf, uniqExact } from '@typedhouse/core';
+import { from, join, leftJoin, unionAll, val, col, max, argMax, avg, quantile, sum, scalar, count, countIf, uniqExact } from '@typedhouse/core';
 import { db, components, cIndices, forTenant, isActive, latest, categoryRollup, lowStockCategories } from './low-stock.js';
 import { stockHistory } from './stock-history.js';
 const parts = from(db.entity_off_the_shelf_part);
@@ -61,3 +61,6 @@ export const sampleOnly = components.sample(0.1);
 export const explicitCte = componentParts.cte();
 // Descriptor preservation through approved helper: UInt32 sum is bigint; Float64 is number.
 export const latestTotals = latestIndices.aggregate(g => ({ versions: sum(g.version), stock: sum(g.stock_index) }));
+// Outer joins are binary, kind({ left }, { right }): record key order is not visible to the type system.
+export const leftLatest = leftJoin({ c: components.where(forTenant('acme')) }, { a: latest(availability.final().where(forTenant('acme'))) }).on(r => r.c.entityId.eq(r.a.entityId)).map(r => ({ entityId: r.c.entityId, stock: r.a.market_stock_total.ifNull(0) }));
+export const optionalSnapshot = leftJoin({ ca: leftJoin({ c: components.where(forTenant('acme')).where(isActive) }, { a: latestAvailability }).on(r => r.c.entityId.eq(r.a.entityId)) }, { i: latestIndices }).on(r => r.ca.c.entityId.eq(r.i.entityId)).map(r => ({ entityId: r.ca.c.entityId, category: r.ca.c.category, stockTotal: r.ca.a.market_stock_total, stockP50: r.ca.a.market_stock_p50, leadDays: r.ca.a.market_lead_time_p50_days, stockIndex: r.i.stock_index }));

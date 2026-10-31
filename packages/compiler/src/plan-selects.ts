@@ -55,7 +55,10 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
     let block: SelectBlock;
     if (rel.kind === 'Scan') {
       block = { source: Object.freeze({ kind: 'table', scan: rel }), clauses: Object.freeze([]) };
-    } else if (rel.kind === 'Join' && (rel.joinKind === 'inner' || rel.joinKind === 'cross') && rel.on.every(e => e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'eq' && e.args.every(a => a.kind === 'ColumnRef'))) {
+    } else if (rel.kind === 'Join' && rel.on.every(
+      // Every kind: a WHERE, select list or GROUP BY folded into a join block is evaluated over the
+      // joined (null-extended) rows, exactly like the nested Filter/Project/Aggregate above the Join.
+      e => e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'eq' && e.args.every(a => a.kind === 'ColumnRef'))) {
       block = { source: Object.freeze({ kind: 'join', rel }), clauses: Object.freeze([]) };
     } else if (rel.kind === 'Project' && rel.input.output.shape === 'nested' && directSelection(rel)) {
       // A direct selection over a join block (or its folded WHERE clauses) is its select list. Over a derived
