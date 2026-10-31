@@ -63,7 +63,7 @@ it('alias guard: self-reads fold, reads by WHERE / expansion / other items fence
   expect(check(t.orderBy(r => r.n).map(r => ({ n: cast(r.k, col.String) })).ir, 2)).toContain('ORDER BY `n` ASC) AS `__typedhouse_input`');
 });
 
-it('alias guard: subqueries, volatile and user calls, Params, expansion aliases and expansion inputs', () => {
+it('alias guard: subqueries, volatile SQL snippets, Params, expansion aliases and expansion inputs', () => {
   const total = u.aggregate(g => ({ m: count() }));
   // A scalar-subquery item beside a shadowing self-read: the Subquery is an opaque read, so the shadow fences.
   expect(check(t.map(r => ({ n: cast(r.k, col.Int64), m: scalar(total) })).ir, 3)).toContain(') AS `__typedhouse_input`');

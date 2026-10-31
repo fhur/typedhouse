@@ -85,8 +85,10 @@ function typed(value: unknown, type: CHType): string {
     }
     case 'Map': {
       const pairs = mapPairs(value);
-      // Map order is immaterial; preserve duplicate pairs and duplicate-key values.
-      return frame('map', pairs.map(([k, v]) => frame('pair', [typed(k, type.key), typed(v, type.value)])).sort());
+      // Driver Map objects contain wire values, not recursively decoded cells.
+      // Legacy pair inputs remain supported by this comparison utility only.
+      return frame('map', pairs.map(([k, v]) => frame('pair', Array.isArray(value)
+        ? [typed(k, type.key), typed(v, type.value)] : [valueKey(k), valueKey(v)])).sort());
     }
     default: return valueKey(value);
   }

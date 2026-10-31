@@ -39,6 +39,23 @@ it('accepts arbitrary decoded-batch plugins with per-facade identity caching and
   await expect(client.run(q)).rejects.toBe(error);
 });
 for (const mode of ['clickhouse', 'clickhouse-naive'] as const) {
+  it(`${mode}: buffered and streamed Maps retain the driver's object identity`, async () => {
+    const map = { '42': '9223372036854775807', date: '2024-01-01', nested: ['7'] };
+    const decimal = '1234567890123456.123456789';
+    const row = { map, decimal };
+    driver.query.mockResolvedValue({ json: async () => [row], stream: () => Readable.from([[{ json: () => row }]]), close: vi.fn() });
+    const backend = createClickHouseBackend({}, mode);
+    const query = from(table('wire', { map: col.Map(col.UInt64, col.Int64), decimal: col.Decimal(38, 9) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    try {
+      const plan = backend.compile(query.ir);
+      const buffered = await backend.runBuffered(plan);
+      const streamed = (await collect(backend.run(plan))).flat();
+      for (const result of [buffered, streamed]) {
+        expect(result).toEqual([{ map, decimal }]);
+        expect((result[0] as Record<string, unknown>).map).toBe(map);
+      }
+    } finally { await backend.close(); }
+  });
   it(`${mode}: selects compiler, rejects foreign plans, retains Array transport and mandatory settings`, async () => {
     const backend = createClickHouseBackend({}, mode);
     const shared = val([1n, 2n], col.Array(col.UInt64));
@@ -55,7 +72,7 @@ for (const mode of ['clickhouse', 'clickhouse-naive'] as const) {
     response([]);
     expect(await collect(backend.run(plan))).toEqual([]);
     const request = driver.query.mock.calls[0]![0];
-    expect(request).toMatchObject({ format: 'JSONEachRow', clickhouse_settings: { date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1 } });
+    expect(request).toMatchObject({ format: 'JSONEachRow', clickhouse_settings: { date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1, output_format_json_quote_decimals: 1 } });
     for (const [name, value] of Object.entries(plan.compiled.params)) {
       expect(value === '[1,2]' ? request.clickhouse_settings[`param_${name}`] : request.query_params[name]).toBe(value);
       if (value === '[1,2]') expect(request.query_params).not.toHaveProperty(name);
@@ -90,7 +107,7 @@ for (const mode of ['clickhouse', 'clickhouse-naive'] as const) {
   });
   it(`${mode}: preparation stays outside QueryError; execution/read/creation/JSON failures clean up`, async () => {
     const backend = createClickHouseBackend({}, mode), client = createClientFromBackend(backend);
-    const unsupported = from(table('bad', { day: col.Date32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    const unsupported = from(table('bad', { state: col.AggregateFunction('sum', col.UInt64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
     await expect(client.run(unsupported)).rejects.not.toBeInstanceOf(QueryError);
     expect(driver.query).not.toHaveBeenCalled();
     const error = new Error('failure');

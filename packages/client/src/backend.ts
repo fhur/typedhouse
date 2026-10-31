@@ -54,7 +54,7 @@ export function createClickHouseBackend(options: ClickHouseClientConfigOptions =
     }
     return driver.query({ query: compiled.sql, query_params: params, format: 'JSONEachRow', clickhouse_settings: {
       ...containers,
-      date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1,
+      date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1, output_format_json_quote_decimals: 1,
     } });
   }
   return {

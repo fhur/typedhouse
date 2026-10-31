@@ -2,7 +2,7 @@ import { print, type CHType, type FlatColumns } from '@typedhouse/core';
 export function decoder(type: CHType): (value: unknown) => unknown {
   const invalid = (value: unknown): never => { throw new Error(`decode_invalid: ${print(type)}: ${String(value)}`); };
   if (type.kind === 'Nullable') { const inner = decoder(type.inner); return v => v === null ? null : inner(v); }
-  if (type.kind === 'LowCardinality') return decoder(type.inner);
+  if (type.kind === 'LowCardinality' || type.kind === 'SimpleAggregateFunction') return decoder(type.inner);
   if (type.kind === 'Array') {
     const inner = decoder(type.inner);
     return v => Array.isArray(v) ? v.map(inner) : invalid(v);
@@ -22,16 +22,15 @@ export function decoder(type: CHType): (value: unknown) => unknown {
       return items.map((item, i) => item.decode(v[i]));
     };
   }
-  if (type.kind === 'FixedString' || (type.kind === 'scalar' && type.name === 'String')) return v => typeof v === 'string' ? v : invalid(v);
   if (type.kind === 'scalar' && type.name === 'Bool') return v => v === true || v === 1 ? true : v === false || v === 0 ? false : invalid(v);
-  if (type.kind === 'scalar' && /^U?Int(8|16|32|64|128|256)$/.test(type.name)) {
+  if (type.kind === 'scalar' && /^U?Int(64|128|256)$/.test(type.name)) {
     const bits = Number(type.name.match(/\d+/)![0]);
     const unsigned = type.name.startsWith('U');
     const bound = 1n << BigInt(unsigned ? bits : bits - 1);
     return v => {
-      if (bits >= 64 ? typeof v !== 'string' || !/^-?\d+$/.test(v) : typeof v !== 'number' || !Number.isSafeInteger(v)) return invalid(v);
-      const n = BigInt(v as string | number);
-      return n >= (unsigned ? 0n : -bound) && n < bound ? bits >= 64 ? n : Number(n) : invalid(v);
+      if (typeof v !== 'string' || !/^-?\d+$/.test(v)) return invalid(v);
+      const n = BigInt(v);
+      return n >= (unsigned ? 0n : -bound) && n < bound ? n : invalid(v);
     };
   }
   if (type.kind === 'scalar' && (type.name === 'Float32' || type.name === 'Float64')) return v => {
@@ -42,8 +41,8 @@ export function decoder(type: CHType): (value: unknown) => unknown {
     if (v === '-inf') return -Infinity;
     return invalid(v);
   };
-  if (type.kind === 'scalar' && type.name === 'Date') return v => {
-    if (typeof v !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(v) || v < '1970-01-01' || v > '2149-06-06') return invalid(v);
+  if (type.kind === 'scalar' && (type.name === 'Date' || type.name === 'Date32')) return v => {
+    if (typeof v !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(v)) return invalid(v);
     const date = new Date(`${v}T00:00:00Z`);
     return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === v ? date : invalid(v);
   };
@@ -53,7 +52,10 @@ export function decoder(type: CHType): (value: unknown) => unknown {
     if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== v.slice(0, 10) || Number(v.slice(11, 13)) >= 24) return invalid(v);
     const date = new Date(v); return Number.isFinite(date.getTime()) ? date : invalid(v);
   };
-  throw new Error(`decode_unsupported: ${print(type)}`);
+  if (type.kind === 'AggregateFunction' || type.kind === 'scalar' && type.name === 'Nothing') throw new Error(`decode_unsupported: ${print(type)}`);
+  // Trust ClickHouse and the driver's JSON parser for all other families. In
+  // particular, Maps retain string keys and wire values, without walking them.
+  return v => v;
 }
 export function rowDecoder(columns: FlatColumns, paths?: Readonly<Record<string, readonly string[]>>): (row: unknown) => Record<string, unknown> {
   const entries = Object.entries(columns).map(([name, type]) => [name, decoder(type)] as const);

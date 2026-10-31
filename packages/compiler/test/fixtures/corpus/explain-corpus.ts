@@ -72,7 +72,7 @@ export const entries: readonly CorpusEntry[] = [
   { id: 'hints/final', query: s.cleanIndices, fences: [] },
   { id: 'hints/sample', query: s.sampleOnly, run: false, fences: [] },
   { id: 'hints/materialize', query: s.explicitCte, fences: ['CTE'] },
-  { id: 'extension/editDistance', query: snippetDistance, fences: [] },
+  { id: 'escape/sql-snippet', query: snippetDistance, fences: [] },
   // One minimal query per rewrite rule over the fixture tables.
   { id: 'rule/merge-filter', rule: 'MergeFilter', query: components.where(forTenant('acme')).where(c => c.countOfParts.gt(1n)), fences: [] },
   { id: 'rule/merge-project', rule: 'MergeProject', query: components.map(c => ({ entityId: c.entityId, parts: c.countOfParts })).map(r => ({ id: r.entityId, parts: r.parts })), fences: [] },

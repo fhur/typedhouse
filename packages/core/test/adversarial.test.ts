@@ -16,9 +16,9 @@ it('preserves prototype-shaped keys without mutating caller metadata', () => {
   expect(() => Object.assign(t.columns['__proto__']!, { name: 'UInt8' })).toThrow();
 });
 
-it('maps non-string-like CH keys to pairs even when their decoded value is a TS string', () => {
-  expect(toTypeScript(col.Map(col.Decimal(18, 4), col.UInt8).type)).toBe('Array<[Decimal<18, 4>, number]>');
-  expect(toTypeScript(col.Map(col.DateTime64(9), col.UInt8).type)).toBe('Array<[string, number]>');
+it('maps non-string-like CH keys to driver objects without claiming converted values', () => {
+  expect(toTypeScript(col.Map(col.Decimal(18, 4), col.UInt8).type)).toBe('Record<string, unknown>');
+  expect(toTypeScript(col.Map(col.DateTime64(9), col.UInt8).type)).toBe('Record<string, unknown>');
 });
 
 it('handles its exact nesting limit and preserves unsupported nested types as whole input', () => {

@@ -14,7 +14,10 @@ const wide = table('adv', {
   e: col.Enum8({ a: 1, b: 2 }), flag: col.Bool, ids: col.Array(col.String),
 }, meta);
 const q = from(wide);
-const { fn } = createKnownFunctions({ cityHash64: { isAggregate: false, deterministic: true, aliasTo: '' } } as const);
+const { fn } = createKnownFunctions({
+  cityHash64: { isAggregate: false, deterministic: true, aliasTo: '' },
+  editDistance: { isAggregate: false, deterministic: true, aliasTo: '' },
+} as const);
 const selects = (sql: string) => sql.match(/SELECT /g)?.length ?? 0;
 const raw = (parts: string, type: CHType = col.UInt32.type) => exprNode({ kind: 'Raw', type, resolution: 'declared', opaque: true, provenance: { origin: 'sql' }, parts: [parts], args: [] });
 
@@ -48,6 +51,7 @@ it('admission audit: the wide fragment admits nothing fallible, volatile, raw, s
     ['subquery', scalar(q.aggregate(() => count())).ir],
     ['known origin', fn.cityHash64(r.id).as(col.UInt64).ir],
     ['SQL snippet', sql`editDistance(${r.text}, ${'x'})`.as(col.UInt64).ir],
+    ['deterministic known distance', fn.editDistance(r.text, val('x')).as(col.UInt64).ir],
     ['now', now().ir],
     ['now comparison', now().eq(now()).ir],
     ['float plus', r.f.plus(1).ir],
@@ -93,6 +97,7 @@ it('fences: volatile, cast, divide, known-origin/SQL snippet and raw projections
     q.map(r => ({ id: r.id.plus(1), ratio: r.n.divide(val(0n, col.Int64)) })),
     q.map(r => ({ id: r.id.plus(1), h: fn.cityHash64(r.id).as(col.UInt64) })),
     q.map(r => ({ id: r.id.plus(1), u: sql`editDistance(${r.text}, ${'x'})`.as(col.UInt64) })),
+    q.map(r => ({ id: r.id.plus(1), u: fn.editDistance(r.text, val('x')).as(col.UInt64) })),
   ];
   // Check Raw rewrite behavior directly. A Raw referenced once *moves* under
   // MergeProject (spec (c) only forbids duplication); it is never copied into WHERE nor dropped.

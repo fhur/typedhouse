@@ -41,7 +41,8 @@ export type ScalarValue<N extends ScalarName> =
   N extends 'IPv4' ? IPv4 : N extends 'IPv6' ? IPv6 :
   N extends 'Date' | 'Date32' | 'DateTime' ? Date : N extends 'Nothing' ? never : unknown;
 export type ScalarStringKey<N extends ScalarName> = N extends 'String' | 'UUID' | 'IPv4' | 'IPv6' ? true : false;
-export type MapValue<K, V, StringKey extends boolean> = StringKey extends true ? Record<K & string, V> : Array<[K, V]>;
+/** JSONEachRow Maps keep stringified keys and unconverted driver values. */
+export type MapValue = Record<string, unknown>;
 export type TupleValue<C extends Readonly<Record<string, Column>> | readonly Column[]> =
   C extends readonly Column[] ? { readonly [K in keyof C]: Value<C[K]> } : keyof C extends never ? readonly [] : { -readonly [K in keyof C]: Value<C[K]> };
 /** Ordered entries retain SQL tuple positions while inferring a named decoded object. */

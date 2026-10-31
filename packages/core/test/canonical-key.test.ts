@@ -26,6 +26,11 @@ it('sorts map entries while retaining duplicate-pair multiplicity', () => {
   const stringMap = col.Map(col.String, col.UInt64).type;
   expect(key({ z: 1n, ['__proto__']: 2n }, stringMap)).toBe(key({ ['__proto__']: 2n, z: 1n }, stringMap));
 });
+it('compares driver Map values without applying child descriptors', () => {
+  const type = col.Map(col.UInt64, col.Tuple([col.Decimal64(2), col.Date, col.Int64])).type;
+  expect(key({ '42': ['1.20', '2024-01-01', '7'] }, type)).not.toBe(key({ '42': ['1.2', new Date('2024-01-01'), 7n] }, type));
+  expect(key({ '42': ['1.20', '2024-01-01', '7'], '9': [] }, type)).toBe(key({ '9': [], '42': ['1.20', '2024-01-01', '7'] }, type));
+});
 it('rejects holes, inherited indices and decorations in both map array levels', () => {
   const type = col.Map(col.String, col.UInt64).type;
   const inheritedPair = new Array(2);

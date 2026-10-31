@@ -20,12 +20,9 @@ export function toTypeScript(t: CHType): string {
     case 'Nullable': return `(${toTypeScript(t.inner)}) | null`;
     case 'LowCardinality': case 'SimpleAggregateFunction': return toTypeScript(t.inner);
     case 'Array': return `Array<${toTypeScript(t.inner)}>`;
-    case 'Map': return stringKey(t.key) ? `Record<${toTypeScript(t.key)}, ${toTypeScript(t.value)}>` : `Array<[${toTypeScript(t.key)}, ${toTypeScript(t.value)}]>`;
+    case 'Map': return 'Record<string, unknown>';
     case 'Tuple': return t.items.length && t.items.every(i => i.name !== undefined) ? `{ ${t.items.map(i => `${JSON.stringify(i.name)}: ${toTypeScript(i.type)}`).join('; ')} }` : `readonly [${t.items.map(i => toTypeScript(i.type)).join(', ')}]`;
     case 'AggregateFunction': return `AggregateState<${JSON.stringify(t.fn)}>`;
     default: return 'unknown';
   }
-}
-function stringKey(t: CHType): boolean {
-  return t.kind === 'FixedString' || t.kind === 'Enum' || (t.kind === 'scalar' && ['String', 'UUID', 'IPv4', 'IPv6'].includes(t.name)) || (t.kind === 'LowCardinality' && stringKey(t.inner));
 }

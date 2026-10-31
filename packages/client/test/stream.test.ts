@@ -64,11 +64,11 @@ it('wraps execution, stream creation, read, JSON and decode failures with contex
 });
 it('does not compile abandoned iterators and preserves lazy preparation errors', async () => {
   const client = createClient();
-  const unsupported = from(table('unsupported', { date: col.Date32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const unsupported = from(table('unsupported', { state: col.AggregateFunction('sum', col.UInt64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
   const abandoned = client.stream(unsupported);
   await abandoned.return();
   expect(driver.query).not.toHaveBeenCalled();
-  await expect(client.stream(unsupported).next()).rejects.toThrow('decode_unsupported: Date32');
+  await expect(client.stream(unsupported).next()).rejects.toThrow('aggregate_state_selection');
   await expect(client.stream(unsupported).next()).rejects.not.toBeInstanceOf(QueryError);
   expect(driver.query).not.toHaveBeenCalled();
 });
@@ -120,6 +120,6 @@ it('shares compilation/decoders with run and uses identical transport settings',
     expect(compile).toHaveBeenCalledTimes(1);
     expect(warn).not.toHaveBeenCalled();
     expect(driver.query.mock.calls[0]).toEqual(driver.query.mock.calls[1]);
-    expect(driver.query.mock.calls[0]![0]).toMatchObject({ format: 'JSONEachRow', query_params: {}, clickhouse_settings: { param_p0: '[1,2]', date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1 } });
+    expect(driver.query.mock.calls[0]![0]).toMatchObject({ format: 'JSONEachRow', query_params: {}, clickhouse_settings: { param_p0: '[1,2]', date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1, output_format_json_quote_decimals: 1 } });
   } finally { warn.mockRestore(); compile.mockRestore(); }
 });

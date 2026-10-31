@@ -48,6 +48,9 @@ const typeExact: Equal<typeof param.type, import('@typedhouse/core').CHType | nu
 void kindExact; void idExact; void typeExact;
 const exact: Equal<Infer<typeof t>, { id: bigint; d: Decimal<18, 4>; tuple: readonly [string, number] }> = true;
 void exact;
+const maps = table('maps', { n: col.Map(col.UInt64, col.Int64), d: col.Map(col.String, col.Date), nested: col.Array(col.Map(col.String, col.Array(col.UInt64))) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+const mapsExact: Equal<Infer<typeof maps>, { n: Record<string, unknown>; d: Record<string, unknown>; nested: Record<string, unknown>[] }> = true;
+void mapsExact;
 `);
   writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, types: [] }, include: ['consumer.ts'] }));
   run(process.execPath, ['smoke.mjs'], directory);
