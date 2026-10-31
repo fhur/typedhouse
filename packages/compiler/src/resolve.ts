@@ -14,7 +14,13 @@ function castDescriptor(type: CHType): CHType {
 export function resolveCast(e: Extract<ExprNode, { kind: 'Cast' }>, resolve: (e: ExprNode) => CHType): CHType {
   const target = castDescriptor(e.to);
   if (print(castDescriptor(e.type)) !== print(target)) throw new Error('invalid_expression_type');
-  const source = castDescriptor(resolve(e.expr));
+  const source = resolve(e.expr);
+  const sourceInner = source.kind === 'Nullable' ? source.inner : source;
+  // Decimal inputs can be converted to the supported scalar targets. This does
+  // not widen the target grammar (which is interpolated into CAST syntax).
+  if (sourceInner.kind !== 'Decimal') castDescriptor(source);
+  else if (!Number.isInteger(sourceInner.precision) || sourceInner.precision < 1 || sourceInner.precision > 76 ||
+    !Number.isInteger(sourceInner.scale) || sourceInner.scale < 0 || sourceInner.scale > sourceInner.precision) throw new Error('unsupported_cast_type');
   if (source.kind === 'Nullable' && target.kind !== 'Nullable') throw new Error('cast_nullable_removal');
   return target;
 }

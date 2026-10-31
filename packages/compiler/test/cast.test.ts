@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { Expr, cast, col, table, from, val, sum, count, scalar, unionAll, exprNode, relNode, flatOutput, type ExprNode, type CHType } from '@typedhouse/core';
-import { emitNaive, quoteIdentifier } from '../src/index.js';
+import { compile, emitNaive, quoteIdentifier } from '../src/index.js';
 const q = from(table('cast', { ['a.b`']: col.UInt32, text: col.String, n: col.Nullable(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 function project(e: ExprNode) { const output = flatOutput([['result', e.type!]]); return relNode({ kind: 'Project', input: q.ir, exprs: { result: e }, output, columns: output.columns }); }
 function node(expr: ExprNode, to: CHType, type = to) { return exprNode({ kind: 'Cast', expr, to, type }); }
@@ -56,6 +56,24 @@ it('adversarial cast aggregate operands cannot smuggle nested aggregates or row/
   const foreign = q.map(() => ({ value: cast(q.map(r => r.text).row.text, col.UInt64) }));
   const query = q.map(() => ({ value: cast(scalar(foreign.aggregate(g => sum(g.value))), col.Nullable(col.String)) }));
   expect(() => emitNaive(query.ir)).toThrow(/unbound_column.*\.expr/);
+});
+it('casts Decimal price fallbacks without removing nullability', () => {
+  for (const precision of [9, 18, 38, 76]) {
+    const source = from(table('prices', {
+      price: col.Nullable(col.Decimal(precision, 2)),
+      fallback: col.Nullable(col.Decimal(precision, 2)),
+      required: col.Decimal(precision, 2),
+    }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+    const query = source.map(r => ({
+      price: cast(r.price.ifNull(r.fallback), col.Nullable(col.Float64)),
+      required: cast(r.required, col.Float64),
+    }));
+    for (const emit of [compile, emitNaive]) {
+      expect(emit(query.ir).columns).toEqual({ price: col.Nullable(col.Float64).type, required: col.Float64.type });
+      expect(emit(query.ir).sql).toContain('AS Nullable(Float64)');
+      expect(() => emit(source.map(r => cast(r.price, col.Float64)).ir)).toThrow('cast_nullable_removal');
+    }
+  }
 });
 it('validates nullable targets and refuses configurable nullable removal', () => {
   expect(() => emitNaive(q.map(r => cast(r.n, col.Float64)).ir)).toThrow('cast_nullable_removal');

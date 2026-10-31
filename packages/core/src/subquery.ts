@@ -37,7 +37,7 @@ export function setDescriptor(rel: Rel): CHType {
 }
 export function membershipBase(type: CHType): CHType {
   const inner = type.kind === 'Nullable' ? type.inner : type;
-  if (inner.kind !== 'scalar' || !/^(U?Int(8|16|32|64|128|256)|Float(32|64)|String|Bool|Date)$/.test(inner.name)) throw new Error('unsupported_membership_type');
+  if (inner.kind !== 'scalar' || !/^(U?Int(8|16|32|64|128|256)|Float(32|64)|String|Bool|Date|UUID)$/.test(inner.name)) throw new Error('unsupported_membership_type');
   return inner;
 }
 export function setOperand(value: unknown): ExprNode {
@@ -62,7 +62,17 @@ export function scalarDescriptor(rel: Rel): CHType {
   return type.kind === 'Nullable' ? type : { kind: 'Nullable', inner: type };
 }
 
-/** Only a directly built, one-column keyless aggregate is supported in this increment. */
+/** Embed a directly built, one-column keyless aggregate as a scalar expression.
+ * The result is nullable, matching ClickHouse scalar-subquery semantics. Arbitrary
+ * zero-row or multi-row queries are not accepted: use `aggregate()` or `count()`
+ * directly, without a subsequent `map()`, `where()`, or `limit()` wrapper.
+ * Supported results are numeric, String, Bool, and Date scalars, optionally nullable.
+ * @example
+ * ```ts
+ * const total = scalar(from(components).count());
+ * from(components).map(c => ({ id: c.entityId, total }));
+ * ```
+ */
 export function scalar<R, P>(query: { readonly _rowType: R; readonly row: P; readonly ir: Extract<Rel, { kind: 'Aggregate' }> } & TemporalScalarEvidence<R, P> & ([OneKey<R>] extends [never] ? { readonly scalar_column_count: never } : unknown)): DescribedExpr<R[OneKey<R>] | null, OneKey<R>, 'row', Descriptor<P, OneKey<R>>> {
   const type = scalarDescriptor(query.ir);
   return new Expr(exprNode({ kind: 'Subquery', rel: query.ir, usage: 'scalar', type }), query.ir.output.order[0] as OneKey<R>, 'row') as DescribedExpr<R[OneKey<R>] | null, OneKey<R>, 'row', Descriptor<P, OneKey<R>>>;

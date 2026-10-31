@@ -785,6 +785,24 @@ it('executes explicit union alignment, grouping and aggregate casts through run 
   expect(convertedStream).toEqual(convertedDirect);
   expect(await client.run(source.limit(0).map(r => cast(r.n, col.Nullable(col.Float64))))).toEqual([]);
 });
+it('executes UUID membership and nullable subqueries', async () => {
+  await sql('CREATE TABLE uuid_membership (id UUID, maybe Nullable(UUID)) ENGINE=Memory');
+  const first = '00000000-0000-0000-0000-000000000001';
+  const second = '00000000-0000-0000-0000-000000000002';
+  await sql(`INSERT INTO uuid_membership VALUES ('${first}','${first}'),('${second}',NULL)`);
+  const source = from(table('uuid_membership', { id: col.UUID, maybe: col.Nullable(col.UUID) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const selected = source.orderBy(r => r.id).limit(1).map(r => r.id);
+  expect(await client.run(source.where(r => r.id.in(selected)).map(r => r.id))).toEqual([{ id: first }]);
+  expect(await client.run(source.where(r => r.maybe.in(selected)).map(r => r.id))).toEqual([{ id: first }]);
+  expect(await client.run(source.where(r => r.id.notIn(selected)).map(r => r.id))).toEqual([{ id: second }]);
+});
+it('converts nullable Decimal256 price fallbacks to Float64', async () => {
+  await sql('CREATE TABLE decimal_cast_prices (id UInt32, price Nullable(Decimal(76, 28)), fallback Nullable(Decimal(76, 28))) ENGINE=Memory');
+  await sql('INSERT INTO decimal_cast_prices VALUES (1,1.25,9),(2,NULL,2.5),(3,NULL,NULL),(4,0,9)');
+  const source = from(table('decimal_cast_prices', { id: col.UInt32, price: col.Nullable(col.Decimal(76, 28)), fallback: col.Nullable(col.Decimal(76, 28)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const query = source.map(r => ({ id: r.id, price: cast(r.price.ifNull(r.fallback), col.Nullable(col.Float64)) })).orderBy(r => r.id);
+  expect(await client.run(query)).toEqual([{ id: 1, price: 1.25 }, { id: 2, price: 2.5 }, { id: 3, price: null }, { id: 4, price: 0 }]);
+});
 it('matches cast descriptors and values under both cast_keep_nullable settings, including failures', async () => {
   const source = from(db.entity_ots_component).limit(1);
   const descriptors: Column[] = [col.UInt8, col.UInt16, col.UInt32, col.UInt64, col.UInt128, col.UInt256, col.Int8, col.Int16, col.Int32, col.Int64, col.Int128, col.Int256, col.Float32, col.Float64, col.String, col.Bool];

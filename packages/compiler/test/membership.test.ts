@@ -4,6 +4,17 @@ import { compile, emitNaive } from '../src/index.js';
 const q = from(table('membership', { id: col.String, n: col.Nullable(col.Int64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 function fields<T extends { readonly id: unknown }>(n: T): Omit<T, 'id'> { const { id: _id, ...f } = n; return f; }
 function project(e: ExprNode) { const output = flatOutput([['result', e.type!]]); return relNode({ kind: 'Project', input: q.ir, exprs: { result: e }, output, columns: output.columns }); }
+it('supports nullable UUID subqueries without coercing String sets', () => {
+  const ids = from(table('ids', { id: col.UUID, maybe: col.Nullable(col.UUID) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  for (const emit of [compile, emitNaive]) {
+    const plan = emit(ids.map(r => ({ member: r.id.in(ids.map(r => r.maybe)), set: r.maybe.notIn(ids.map(r => r.id).distinct()) })).ir);
+    expect(plan.columns).toEqual({ member: col.Bool.type, set: col.Nullable(col.Bool).type });
+    // @ts-expect-error UUID membership rejects unbranded String sets statically too.
+    expect(() => emit(ids.where(r => r.id.in(q.map(r => r.id))).ir)).toThrow('incompatible_operands');
+    // @ts-expect-error A plain string is not a UUID.
+    expect(() => emit(ids.where(r => r.id.in(['not-a-uuid'])).ir)).toThrow('param_incompatible');
+  }
+});
 it('adversarial Date lists reject hostile payloads and forged temporal array evidence in both emitters', () => {
   const dates = from(table('dates', { day: col.Date }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
   const member = dates.row.day.in([]).ir;
