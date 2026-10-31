@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { cast, col, count, crossJoin, defineFunction, from, join, table, unionAll, val, type Rel } from '@typedhouse/core';
+import { cast, col, count, crossJoin, sql, from, join, table, unionAll, val, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '@typedhouse/compiler';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 
@@ -16,7 +16,7 @@ const adv = table('adv_s2', {
 const rmt = table('adv_s2_rmt', { id: col.UInt32, ver: col.UInt32, ids: col.Array(col.String) }, { engine: 'ReplacingMergeTree', sortingKey: ['id'], partitionKey: [] });
 const other = table('adv_s2_other', { id: col.UInt32, v: col.UInt64 }, meta);
 const t = from(adv), r = from(rmt), u = from(other);
-const volatile = defineFunction({ name: 'rowNumberInAllBlocks', args: [], returns: col.UInt64, deterministic: false });
+const volatile = () => sql`rowNumberInAllBlocks()`.as(col.UInt64);
 let container: StartedTestContainer;
 let url: string;
 interface Result { meta: { name: string; type: string }[]; data: Record<string, unknown>[] }
@@ -167,7 +167,7 @@ it('volatile filter below a LEFT expansion keeps the nested emission (fix round 
   // Deterministic with max_threads = 1.
   const q = t.where(() => volatile().eq(0n)).leftArrayJoin(x => x.ids, 'x').map(x => ({ id: x.id, x: x.x }));
   const optimized = compile(q.ir), naive = emitNaive(q.ir);
-  expect(optimized.sql).toContain('WHERE rowNumberInAllBlocks() = {p0:UInt64}) AS `__typedhouse_input` LEFT ARRAY JOIN');
+  expect(optimized.sql).toContain('WHERE (rowNumberInAllBlocks()) = {p0:UInt64}) AS `__typedhouse_input` LEFT ARRAY JOIN');
   const n = await execute(naive.sql, naive.params, 0, false), o = await execute(optimized.sql, optimized.params, 0, false);
   console.info('volatile LEFT fold', { naive: n.data, optimized: o.data });
   expect(n.data).toEqual([{ id: 1, x: 'p' }, { id: 1, x: 'p' }, { id: 1, x: 'q' }]);

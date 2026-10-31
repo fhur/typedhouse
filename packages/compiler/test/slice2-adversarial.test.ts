@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, createKnownFunctions, crossJoin, defineFunction, exprNode, from, join, now, scalar, table, unionAll, val, type ExprNode, type Rel } from '@typedhouse/core';
+import { cast, col, count, createKnownFunctions, crossJoin, sql, exprNode, from, join, now, scalar, table, unionAll, val, type ExprNode, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { emitPlanned, validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
@@ -23,9 +23,9 @@ const distincts = (sql: string) => sql.match(/SELECT DISTINCT /g)?.length ?? 0;
 const safe = (r: typeof t.row) => r.id.gt(1);
 const arith = (r: typeof t.row) => r.n.plus(val(1n, col.Int64)).gt(2n);
 const unsafe = (r: typeof t.row) => cast(r.s, col.UInt64).gt(1n);
-// A bounded user scalar function may be volatile; rowNumberInAllBlocks() is stateful in ClickHouse (reproducible with max_threads = 1).
+// A SQL snippet may be volatile; rowNumberInAllBlocks() is stateful in ClickHouse (reproducible with max_threads = 1).
 const { fn } = createKnownFunctions({ arrayConcat: { isAggregate: false, deterministic: true, aliasTo: '' } } as const);
-const volatile = defineFunction({ name: 'rowNumberInAllBlocks', args: [], returns: col.UInt64, deterministic: false });
+const volatile = () => sql`rowNumberInAllBlocks()`.as(col.UInt64);
 function countKind(root: Rel, kind: Rel['kind']): number {
   const seen = new Set<Rel>();
   let n = 0;
@@ -306,7 +306,7 @@ it('(3) inner expansions fold only over safe filters; LEFT folds over any determ
   // emission, matching the rewrite rules, which never move volatile predicates.
   const vol = left(t.where(() => volatile().eq(0n)));
   expect(selects(compile(vol.ir).sql)).toBe(2);
-  expect(compile(vol.ir).sql).toContain('WHERE rowNumberInAllBlocks() = {p0:UInt64}) AS `__typedhouse_input` LEFT ARRAY JOIN `__typedhouse_input`.`ids` AS `__typedhouse_element`');
+  expect(compile(vol.ir).sql).toContain('WHERE (rowNumberInAllBlocks()) = {p0:UInt64}) AS `__typedhouse_input` LEFT ARRAY JOIN `__typedhouse_input`.`ids` AS `__typedhouse_element`');
   expect(selects(compile(inner(t.where(() => volatile().eq(0n))).ir).sql)).toBe(2);
   // FINAL and SAMPLE precede the expansion; a WHERE after it, DISTINCT, ORDER BY and LIMIT fold.
   const hinted = t.final().sample(0.25).arrayJoin(r => r.nids, 'x').where(r => r.x.isNotNull()).distinct().orderBy(r => r.x).limit(2);

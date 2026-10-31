@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { cast, col, count, defineFunction, from, join, table, type Rel } from '@typedhouse/core';
+import { cast, col, count, sql, from, join, table, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '@typedhouse/compiler';
 
 // Tester native probes for slice 3 on clickhouse/clickhouse-server:24.8. The optimizing and naive emissions must agree in
@@ -18,7 +18,7 @@ const other = table('adv_s3_other', { id: col.UInt32, v: col.UInt32 }, meta);
 const rmt = table('adv_s3_rmt', { id: col.UInt32, ver: col.UInt32, k: col.String, s: col.String, ids: col.Array(col.String) }, { engine: 'ReplacingMergeTree', sortingKey: ['id'], partitionKey: [] });
 const smp = table('adv_s3_smp', { id: col.UInt32, k: col.String, s: col.String, ids: col.Array(col.String) }, { engine: 'MergeTree', sortingKey: ['k', 'intHash32(id)'], partitionKey: [] });
 const t = from(adv), u = from(other), r = from(rmt), sm = from(smp);
-const rand = defineFunction({ name: 'rand', args: [], returns: col.UInt32, deterministic: false });
+const rand = () => sql`rand()`.as(col.UInt32);
 let container: StartedTestContainer;
 let url: string;
 type Settings = Readonly<Record<string, string | number>>;

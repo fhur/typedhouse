@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, defineFunction, from, join, outputLeaves, table, unionAll, type Rel } from '@typedhouse/core';
+import { cast, col, count, sql, from, join, outputLeaves, table, unionAll, type Rel } from '@typedhouse/core';
 import { compile } from '../src/index.js';
 import { emitPlanned, validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
@@ -14,7 +14,7 @@ const t = from(table('t', { id: col.UInt64, k: col.String, ids: col.Array(col.St
 const u = from(table('u', { id: col.UInt64, v: col.UInt64 }, meta));
 const safe = (r: typeof t.row) => r.id.gt(1n);
 const unsafe = (r: typeof t.row) => cast(r.k, col.UInt64).gt(1n);
-const volatile = defineFunction({ name: 'rowNumberInAllBlocks', args: [], returns: col.UInt64, deterministic: false });
+const volatile = () => sql`rowNumberInAllBlocks()`.as(col.UInt64);
 const grouped = t.groupBy(r => ({ k: r.k })).aggregate(() => ({ n: count() }));
 
 function layout(plan: SqlPlan, rel: Rel): string[][] {

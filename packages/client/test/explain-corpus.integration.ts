@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { cast, col, count, defineFunction, from, join, table, unwrap, type CompiledQuery, type Rel } from '@typedhouse/core';
+import { cast, col, count, sql, from, join, table, unwrap, type CompiledQuery, type Rel } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { compile, emitNaive } from '@typedhouse/compiler';
 import { collect } from './backend-harness.js';
@@ -170,7 +170,7 @@ it('fix round 1 (a): fallible, volatile and shadow-aliased selections fold over 
   const ordered = await agree(t.where(r => r.k.eq('a')).map(r => ({ id: r.id, v: cast(r.s, col.UInt64).plus(5n) })).ir, { rows: [{ id: 1, v: '6' }, { id: 3, v: '8' }] });
   expect(ordered.params).toEqual({ p0: '5', p1: 'a' });
   // A volatile selection folds: one row per filtered source row.
-  const rand = defineFunction({ name: 'rand', args: [], returns: col.UInt32, deterministic: false });
+  const rand = () => sql`rand()`.as(col.UInt32);
   for (const q of [t.where(r => r.k.eq('a')).map(r => ({ id: r.id, r: rand() })), t.where(r => r.k.eq('a')).map(r => ({ id: r.id, at: cast(r.n, col.String) }))]) {
     const optimized = compile(q.ir), naive = emitNaive(q.ir);
     expect(optimized.sql.match(/SELECT /g)).toHaveLength(1);

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, columnExpr, count, defineFunction, from, table, relNode, flatOutput, val, type Rel } from '@typedhouse/core';
+import { cast, col, columnExpr, count, sql, from, table, relNode, flatOutput, val, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { emitPlanned, validateRel, ValidationError } from '../src/emit-naive.js';
 import { planSelects } from '../src/plan-selects.js';
@@ -77,8 +77,8 @@ it('keeps one ARRAY JOIN per block and never folds over a CTE, a derived table, 
   expect(compile(unsafe.leftArrayJoin(r => r.a, 'v').ir).sql).toBe('SELECT `id`, `a`, `v` FROM `t\\`` LEFT ARRAY JOIN `a` AS `v` WHERE CAST(`id` AS String) != {p0:String}');
   expect(compile(from(t).where(r => r.id.plus(1).gt(2n)).arrayJoin(r => r.a, 'v').ir).sql).toContain(') AS `__typedhouse_input` ARRAY JOIN');
   // LEFT folds only over deterministic filters: a volatile call keeps the nested emission, as the rewrite rules never move it.
-  const volatile = defineFunction({ name: 'rowNumberInAllBlocks', args: [], returns: col.UInt64, deterministic: false });
-  expect(compile(from(t).where(() => volatile().eq(0n)).leftArrayJoin(r => r.a, 'v').ir).sql).toContain('WHERE rowNumberInAllBlocks() = {p0:UInt64}) AS `__typedhouse_input` LEFT ARRAY JOIN `__typedhouse_input`.`a` AS `__typedhouse_element`');
+  const volatile = () => sql`rowNumberInAllBlocks()`.as(col.UInt64);
+  expect(compile(from(t).where(() => volatile().eq(0n)).leftArrayJoin(r => r.a, 'v').ir).sql).toContain('WHERE (rowNumberInAllBlocks()) = {p0:UInt64}) AS `__typedhouse_input` LEFT ARRAY JOIN `__typedhouse_input`.`a` AS `__typedhouse_element`');
   // (vii) An aggregate folds over the expanded block; the block is emitted unqualified so the alias is a plain column.
   const grouped = from(t).arrayJoin(r => r.a, 'v').groupBy(r => ({ id: r.id })).aggregate(() => ({ n: count() }));
   expect(compile(grouped.ir).sql).toBe('SELECT `id`, count() AS `n` FROM `t\\`` ARRAY JOIN `a` AS `v` GROUP BY `id`');

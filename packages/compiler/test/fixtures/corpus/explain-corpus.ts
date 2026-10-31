@@ -6,7 +6,7 @@ import * as s from './supported-types.js';
 import { componentsLatest } from './components-latest.js';
 import { projectionEnrichment } from './projection-enrichment.js';
 import { knownHash, knownUnique } from './known-functions.js';
-import { userEditDistance } from './user-functions.js';
+import { snippetDistance } from './sql-snippets.js';
 import { components, db, forTenant } from './low-stock.js';
 
 export type FenceKind = 'Aggregate' | 'Sort' | 'Limit' | 'Distinct' | 'Union' | 'Join' | 'ArrayJoin' | 'CTE' | 'Subquery' | 'RawRel' | 'Materialize';
@@ -72,7 +72,7 @@ export const entries: readonly CorpusEntry[] = [
   { id: 'hints/final', query: s.cleanIndices, fences: [] },
   { id: 'hints/sample', query: s.sampleOnly, run: false, fences: [] },
   { id: 'hints/materialize', query: s.explicitCte, fences: ['CTE'] },
-  { id: 'extension/editDistance', query: userEditDistance, fences: [] },
+  { id: 'extension/editDistance', query: snippetDistance, fences: [] },
   // One minimal query per rewrite rule over the fixture tables.
   { id: 'rule/merge-filter', rule: 'MergeFilter', query: components.where(forTenant('acme')).where(c => c.countOfParts.gt(1n)), fences: [] },
   { id: 'rule/merge-project', rule: 'MergeProject', query: components.map(c => ({ entityId: c.entityId, parts: c.countOfParts })).map(r => ({ id: r.entityId, parts: r.parts })), fences: [] },
