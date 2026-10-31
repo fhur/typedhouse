@@ -3,6 +3,10 @@ on: [push, pull_request]
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      # One root program type-checks every source and test file; it needs more than
+      # Node's ~4 GB default heap (4.23 GB measured at da46b13). Runners have 16 GB.
+      NODE_OPTIONS: --max-old-space-size=8192
     strategy:
       fail-fast: false
       matrix:

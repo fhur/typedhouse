@@ -18,7 +18,7 @@
     "build": "pnpm -r build",
     "example:first-query": "pnpm build && node scripts/run-first-query.mjs",
     "verify:query-package": "node scripts/verify-query-package.mjs",
-    "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/typedhouse/typecheck.tsbuildinfo",
+    "typecheck": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/typedhouse/typecheck.tsbuildinfo",
     "test": "vitest run",
     "verify:type-corpus": "pnpm capture:type-corpus --check",
     "verify:core-package": "node scripts/verify-core-package.mjs",
