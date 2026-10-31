@@ -1,5 +1,5 @@
-import { outputLeaves, type CHType, type ExprNode, type Rel } from '@typedhouse/core';
-import { safePredicate } from './rewrite-expressions.js';
+import { outputLeaves, type ExprNode, type Rel } from '@typedhouse/core';
+import { deterministicExpression, safePredicate } from './rewrite-expressions.js';
 import { directSelection, type ColumnDemand } from './prune-columns.js';
 import type { CtePlan } from './plan-ctes.js';
 
@@ -14,6 +14,10 @@ export interface SelectBlock {
   readonly clauses: readonly SelectClause[];
   readonly aggregate?: Extract<Rel, { kind: 'Aggregate' }>;
   readonly where?: readonly SelectClause[];
+  /** DISTINCT flag; the select list is the node's full input leaf set. */
+  readonly distinct?: Extract<Rel, { kind: 'Distinct' }>;
+  /** One `[LEFT] ARRAY JOIN expr AS alias` directly after a single-scan FROM. */
+  readonly arrayJoin?: Extract<Rel, { kind: 'ArrayJoin' }>;
 }
 export interface SqlPlan {
   readonly root: Rel;
@@ -29,16 +33,6 @@ function referencesName(e: import('@typedhouse/core').ExprNode, name: string): b
   return e.kind !== 'Param'; // Unknown computations retain the fence.
 }
 
-/** Closed, total arithmetic fragment. In particular, casts, division, raw SQL
- * and subqueries retain their scope. Integer arithmetic wraps in ClickHouse. */
-function safeProjection(e: ExprNode): boolean {
-  const integer = (t: CHType | null): boolean => t !== null && (t.kind === 'Nullable' || t.kind === 'LowCardinality'
-    ? integer(t.inner) : t.kind === 'scalar' && /^U?Int(8|16|32|64|128|256)$/.test(t.name));
-  if (e.kind === 'ColumnRef' || e.kind === 'Param') return true;
-  return e.kind === 'Call' && e.fn.origin === 'typed' && ['plus', 'minus', 'multiply'].includes(e.fn.name) && integer(e.type)
-    && e.args.every(a => integer(a.type) && safeProjection(a));
-}
-
 /** Identity selections need no alias substitution and cannot duplicate evaluation. */
 function isColumnSelection(rel: Extract<Rel, { kind: 'Project' }>): boolean {
   return rel.input.output.shape === 'flat' && Object.entries(rel.exprs).every(([name, expr]) =>
@@ -48,7 +42,9 @@ function isColumnSelection(rel: Extract<Rel, { kind: 'Project' }>): boolean {
 /** Lower validated IR into SELECT blocks without changing relational identities.
  * Every unhandled operator is a fence. Repeated filters share WHERE; repeated
  * sorts/limits and earlier clauses start new blocks. Identity selections can
- * fold before sorting/limiting without changing expression scopes.
+ * fold before sorting/limiting without changing expression scopes; any selection
+ * folds over a scan or join block whose clauses are Filters. Distinct sets
+ * a flag before ORDER BY/LIMIT; one ArrayJoin folds directly after a scan FROM.
  */
 export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDemand, ctes?: CtePlan): SqlPlan {
   const blocks = new Map<Rel, SelectBlock>();
@@ -60,9 +56,10 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       block = { source: Object.freeze({ kind: 'table', scan: rel }), clauses: Object.freeze([]) };
     } else if (rel.kind === 'Join' && (rel.joinKind === 'inner' || rel.joinKind === 'cross') && rel.on.every(e => e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'eq' && e.args.every(a => a.kind === 'ColumnRef'))) {
       block = { source: Object.freeze({ kind: 'join', rel }), clauses: Object.freeze([]) };
-    } else if (rel.kind === 'Project' && directSelection(rel) && rel.input.kind === 'Join' && !ctes?.names.has(rel.input)) {
-      const child = plan(rel.input);
-      if (!child) return undefined;
+    } else if (rel.kind === 'Project' && rel.input.output.shape === 'nested' && directSelection(rel)) {
+      // A direct selection over a join block (or its folded WHERE clauses) is its select list.
+      const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
+      if (!child || child.source.kind !== 'join' || child.aggregate || child.project || child.distinct || child.clauses.some(n => n.kind !== 'Filter')) return undefined;
       block = { ...child, project: rel };
     } else if (rel.kind === 'Project' && isColumnSelection(rel)) {
       // A CTE already provides a scope: select its columns directly rather than
@@ -70,17 +67,48 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       const child: SelectBlock | undefined = ctes?.names.has(rel.input)
         ? { source: { kind: 'cte', rel: rel.input }, clauses: [] }
         : plan(rel.input);
-      if (!child || child.aggregate || child.project || child.clauses.some(node => node.kind !== 'Filter')) return undefined;
-      block = { source: Object.freeze(child.source), clauses: Object.freeze(child.clauses) };
-    } else if (rel.kind === 'Project' && rel.input.output.shape === 'flat' && Object.values(rel.exprs).every(safeProjection)) {
+      // Over a folded DISTINCT only a selection of the whole row folds: the DISTINCT list stays
+      // the Distinct node's full leaf set, which a narrower selection would change.
+      if (!child || child.aggregate || child.project || child.clauses.some(node => node.kind !== 'Filter')
+        || child.distinct && Object.getOwnPropertyNames(rel.exprs).length !== outputLeaves(rel.input.output).length) return undefined;
+      block = { ...child, source: Object.freeze(child.source), clauses: Object.freeze(child.clauses) };
+    } else if (rel.kind === 'Project' && rel.input.output.shape === 'flat') {
+      // Any selection folds over a scan block with Filter-only clauses: the select list is
+      // evaluated on exactly the rows WHERE passes in both forms, so fallible or volatile
+      // expressions keep their evaluation set (and their failures).
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
-      if (!child || child.source.kind !== 'table' || child.aggregate || child.project || child.clauses.some(n => n.kind !== 'Filter')) return undefined;
-      // Check the full physical schema, not the pruned/projected interface:
-      // ClickHouse aliases can shadow even columns used only in WHERE.
+      if (!child || child.source.kind !== 'table' || child.aggregate || child.project || child.distinct || child.clauses.some(n => n.kind !== 'Filter')) return undefined;
+      // Alias shadowing is checked against the full physical schema, not the pruned
+      // interface: under the default prefer_column_name_to_alias = 0 an output alias
+      // replaces that name in every other expression of the SELECT, so a computed alias
+      // equal to a column that a WHERE clause, the expansion or another select item reads
+      // keeps its own scope (an expression may read the column it is itself aliased as).
+      // The ARRAY JOIN alias is itself an alias: redefining it is always a fence.
       const names = new Set(outputLeaves(child.source.scan.output).map(l => l.name));
-      if (Object.entries(rel.exprs).some(([name, e]) => names.has(name)
-        && !(e.kind === 'ColumnRef' && e.path.length === 1 && e.path[0] === name))) return undefined;
+      const entries = Object.entries(rel.exprs);
+      const identity = (name: string, e: ExprNode) => e.kind === 'ColumnRef' && e.path.length === 1 && e.path[0] === name;
+      const others = [...child.clauses.map(n => n.kind === 'Filter' ? n.pred : undefined), child.arrayJoin?.expr].filter((e): e is ExprNode => !!e);
+      if (entries.some(([name, e]) => !identity(name, e) && (name === child.arrayJoin?.alias || names.has(name)
+        && [...others, ...entries.filter(([other]) => other !== name).map(([, expr]) => expr)].some(expr => referencesName(expr, name))))) return undefined;
       block = { ...child, project: rel };
+    } else if (rel.kind === 'Distinct') {
+      // The select list precedes ORDER BY/LIMIT, so DISTINCT folds over any block whose
+      // clauses are Filters (WHERE, or HAVING on an aggregate block) and that has no flag yet.
+      const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
+      block = child && !child.distinct && child.clauses.every(n => n.kind === 'Filter')
+        ? { ...child, distinct: rel }
+        : { source: Object.freeze({ kind: ctes?.names.has(rel.input) ? 'cte' : 'derived', rel: rel.input }), distinct: rel, clauses: Object.freeze([]) };
+    } else if (rel.kind === 'ArrayJoin') {
+      // ClickHouse allows one ARRAY JOIN per SELECT, written after the FROM item. A
+      // WHERE in the same block runs after expansion: that is the same row set only
+      // when every earlier Filter is total (an inner ARRAY JOIN drops empty-array rows
+      // first) or the expansion is LEFT (every input row survives) and the Filter is
+      // deterministic, since the text now evaluates it once per expanded row. A CTE
+      // reference and a derived table are not folded; they keep the nested emission.
+      const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
+      if (!child || child.source.kind !== 'table' || child.arrayJoin || child.aggregate || child.project || child.distinct
+        || !child.clauses.every(n => n.kind === 'Filter' && (rel.left ? deterministicExpression(n.pred) : safePredicate(n.pred)))) return undefined;
+      block = { ...child, arrayJoin: rel };
     } else if (rel.kind === 'Aggregate') {
       const sourceNames = new Set(outputLeaves(rel.input.output).map(l => l.name));
       // Alias substitution is server-setting-sensitive if an output shadows a
@@ -90,14 +118,17 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
         !(ctes?.names.has(rel.input) && e.kind === 'Agg' && e.args.length === 1 && e.args[0]?.kind === 'ColumnRef' && e.args[0].path.length === 1 && e.args[0].path[0] === name &&
           [...Object.entries(rel.keys), ...Object.entries(rel.aggs)].every(([other, expression]) => other === name || !referencesName(expression, name))))) return undefined;
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
-      const fold = child && !child.aggregate && !child.project && (child.source.kind === 'table' || child.source.kind === 'join') && child.clauses.every(n => n.kind === 'Filter');
+      // An expanded scan block folds too: that block is emitted unqualified, so the
+      // expansion alias and the source columns resolve alike in the aggregate clauses.
+      const fold = child && !child.aggregate && !child.project && !child.distinct && (child.source.kind === 'table' || child.source.kind === 'join') && child.clauses.every(n => n.kind === 'Filter');
       block = { source: fold ? child.source : Object.freeze({ kind: ctes?.names.has(rel.input) ? 'cte' : 'derived', rel: rel.input }),
-        aggregate: rel, where: fold ? child.clauses : Object.freeze([]), clauses: Object.freeze([]) };
+        aggregate: rel, where: fold ? child.clauses : Object.freeze([]), clauses: Object.freeze([]), ...(fold && child.arrayJoin ? { arrayJoin: child.arrayJoin } : {}) };
     } else if (rel.kind === 'Filter' || rel.kind === 'Sort' || rel.kind === 'Limit') {
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
       const last = child?.clauses.at(-1);
       const safe = !child?.aggregate || (rel.kind === 'Filter' ? safePredicate(rel.pred) : rel.kind === 'Sort' ? rel.keys.every(k => k.expr.kind === 'ColumnRef') : true);
-      block = child && !child.project && safe && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
+      // WHERE precedes DISTINCT; a Filter above a folded Distinct opens a new block.
+      block = child && !child.project && safe && !(child.distinct && rel.kind === 'Filter') && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
         ? { ...child, clauses: Object.freeze([...child.clauses, rel]) }
         : { source: Object.freeze({ kind: ctes?.names.has(rel.input) ? 'cte' : 'derived', rel: rel.input }), clauses: Object.freeze([rel]) };
     } else return undefined;

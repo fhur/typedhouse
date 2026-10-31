@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { crossJoin, join, type Query, type Infer } from '@typedhouse/core';
+import { cast, col, crossJoin, join, val, type Expr, type Query, type Infer } from '@typedhouse/core';
 import { components, parts } from './differential-arbitrary.js';
 export const seed = 20261101;
 export const recipeArbitrary = fc.record({
@@ -10,21 +10,29 @@ export const recipeArbitrary = fc.record({
   nullable: fc.boolean(),
   fence: fc.constantFrom('none' as const, 'distinct' as const, 'limit' as const),
   take: fc.integer({ min: 0, max: 9 }), offset: fc.integer({ min: 0, max: 3 }),
+  /** `constant` expands a Param array: any total array expression may now be filtered below. */
+  expansion: fc.constantFrom('column' as const, 'constant' as const),
+  /** Adds a total-arithmetic and a cast conjunct to the first filter: only the safe conjuncts may cross. */
+  mixed: fc.boolean(),
 });
 export type Recipe = typeof recipeArbitrary extends fc.Arbitrary<infer T> ? T : never;
 export function build(recipe: Recipe) {
   const { kind } = recipe;
   const base = components;
-  const expanded = kind === 'leftArray' ? base.leftArrayJoin(r => r.ids, 'part') : base.arrayJoin(r => r.ids, 'part');
+  const constant = val(['p', 'q'], col.Array(col.String));
+  const array = recipe.expansion === 'column' ? (r: typeof base.row) => r.ids : () => constant;
+  const expanded = kind === 'leftArray' ? base.leftArrayJoin(array, 'part') : base.arrayJoin(array, 'part');
+  const extra = (r: { amount: Expr<bigint, string, 'row'> }, pred: Expr<boolean, string, 'row'>) =>
+    recipe.mixed ? pred.and(r.amount.plus(1n).ge(BigInt(recipe.minimum + 1))).and(cast(r.amount, col.String).ne('x')) : pred;
   let query: Query<Infer<typeof components>> = kind === 'inner' ? join({ c: expanded, p: parts }).on(r => [r.c.tenant.eq(r.p.tenant), r.c.part.eq(r.p.id)])
-    .where(r => r.c.tenant.eq(recipe.tenant).and(r.p.tenant.eq(recipe.tenant)))
+    .where(r => extra(r.c, r.c.tenant.eq(recipe.tenant).and(r.p.tenant.eq(recipe.tenant))))
     .map(r => ({ ...r.c })).map(r => ({ tenant: r.tenant, id: r.id, category: r.category, ids: r.ids, at: r.at, amount: r.amount }))
-    : kind === 'cross' ? crossJoin({ c: base, p: parts }).where(r => r.c.tenant.eq(recipe.tenant).and(r.p.tenant.eq(recipe.tenant)))
+    : kind === 'cross' ? crossJoin({ c: base, p: parts }).where(r => extra(r.c, r.c.tenant.eq(recipe.tenant).and(r.p.tenant.eq(recipe.tenant))))
       .map(r => ({ ...r.c }))
     : kind === 'shared' ? join({ c: base, p: base }).on(r => r.c.tenant.eq(r.p.tenant))
-      .where(r => r.c.tenant.eq(recipe.tenant).and(r.p.amount.ge(BigInt(recipe.minimum))).and(r.c.id.eq('a')).and(r.p.id.eq('b')))
+      .where(r => extra(r.c, r.c.tenant.eq(recipe.tenant).and(r.p.amount.ge(BigInt(recipe.minimum))).and(r.c.id.eq('a')).and(r.p.id.eq('b'))))
       .map(r => ({ ...r.c }))
-    : expanded.where(r => r.tenant.eq(recipe.tenant)).map(r => ({ tenant: r.tenant, id: r.id, category: r.category, ids: r.ids, at: r.at, amount: r.amount }));
+    : expanded.where(r => extra(r, r.tenant.eq(recipe.tenant))).map(r => ({ tenant: r.tenant, id: r.id, category: r.category, ids: r.ids, at: r.at, amount: r.amount }));
   for (let i = 0; i < recipe.renames; i++) query = query.map(r => ({ tenant: r.tenant, renamed: r.id, category: r.category, ids: r.ids, at: r.at, amount: r.amount }))
     .map(r => ({ tenant: r.tenant, id: r.renamed, category: r.category, ids: r.ids, at: r.at, amount: r.amount }));
   if (recipe.fence === 'distinct') query = query.distinct();
@@ -39,12 +47,20 @@ export function native(recipe: Recipe): string {
   const table = 'differential_components';
   const fields = 'c.tenant,c.id,c.category,c.ids,c.at,c.amount';
   const t = `'${recipe.tenant}'`;
+  const expansion = recipe.expansion === 'column' ? 'ids' : "['p','q']";
+  const extra = (alias: string) => recipe.mixed ? ` AND ${alias}.amount+1>=${recipe.minimum + 1} AND toString(${alias}.amount)!='x'` : '';
   let sql: string;
-  if (recipe.kind === 'inner') sql = `SELECT ${fields} FROM (SELECT *, part FROM ${table} ARRAY JOIN ids AS part) c INNER ALL JOIN differential_parts p ON c.tenant=p.tenant AND c.part=p.id WHERE c.tenant=${t} AND p.tenant=${t}`;
-  else if (recipe.kind === 'cross') sql = `SELECT ${fields} FROM ${table} c CROSS JOIN differential_parts p WHERE c.tenant=${t} AND p.tenant=${t}`;
-  else if (recipe.kind === 'shared') sql = `SELECT ${fields} FROM ${table} c INNER ALL JOIN ${table} p ON c.tenant=p.tenant WHERE c.tenant=${t} AND p.amount>=${recipe.minimum} AND c.id='a' AND p.id='b'`;
-  else sql = `SELECT tenant,id,category,ids,at,amount FROM ${table} ${recipe.kind === 'leftArray' ? 'LEFT ' : ''}ARRAY JOIN ids AS part WHERE tenant=${t}`;
+  if (recipe.kind === 'inner') sql = `SELECT ${fields} FROM (SELECT *, part FROM ${table} ARRAY JOIN ${expansion} AS part) c INNER ALL JOIN differential_parts p ON c.tenant=p.tenant AND c.part=p.id WHERE c.tenant=${t} AND p.tenant=${t}${extra('c')}`;
+  else if (recipe.kind === 'cross') sql = `SELECT ${fields} FROM ${table} c CROSS JOIN differential_parts p WHERE c.tenant=${t} AND p.tenant=${t}${extra('c')}`;
+  else if (recipe.kind === 'shared') sql = `SELECT ${fields} FROM ${table} c INNER ALL JOIN ${table} p ON c.tenant=p.tenant WHERE c.tenant=${t} AND p.amount>=${recipe.minimum} AND c.id='a' AND p.id='b'${extra('c')}`;
+  else sql = `SELECT c.tenant,c.id,c.category,c.ids,c.at,c.amount FROM ${table} c ${recipe.kind === 'leftArray' ? 'LEFT ' : ''}ARRAY JOIN ${expansion} AS part WHERE c.tenant=${t}${extra('c')}`;
   if (recipe.fence === 'distinct') sql = `SELECT DISTINCT * FROM (${sql})`;
   if (recipe.fence === 'limit') sql = `SELECT * FROM (${sql}) ORDER BY tenant,id LIMIT ${recipe.take} OFFSET ${recipe.offset}`;
   return `SELECT * FROM (${sql}) WHERE amount>=${recipe.minimum} AND tenant=${t}${recipe.nullable ? ' AND isNotNull(category)' : ''} ORDER BY tenant,id`;
 }
+/** Expansion only matters where the recipe expands; cross/shared recipes never do. */
+export function shape(recipe: Recipe): string {
+  const expands = recipe.kind === 'inner' || recipe.kind === 'array' || recipe.kind === 'leftArray';
+  return `${recipe.kind}:${recipe.fence}:${expands ? recipe.expansion : '-'}:${recipe.mixed ? 'mixed' : 'plain'}`;
+}
+export const shapeCount = 3 * 3 * 2 * 2 + 2 * 3 * 2;

@@ -1,0 +1,1 @@
+SELECT `tenantId`, `entityId`, `category`, `state`, `part_specifications`, `matched_part_ids`, `countOfParts`, `updatedAt` FROM `entity_ots_component` ORDER BY `updatedAt` DESC, `entityId` ASC LIMIT 20 OFFSET 40

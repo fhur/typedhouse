@@ -48,17 +48,10 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  `__typedhouse_input`.`subtotal` - `__typedhouse_input`.`discount` AS `discountedTotal`
+  `id` AS `id`,
+  `subtotal` - `discount` AS `discountedTotal`
 FROM
-  (
-    SELECT
-      `id`,
-      `subtotal`,
-      `discount`
-    FROM
-      `orders`
-  ) AS `__typedhouse_input`
+  `orders`
 ```
 
 Parameters:

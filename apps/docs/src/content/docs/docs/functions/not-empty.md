@@ -49,18 +49,11 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  notEmpty(`__typedhouse_input`.`title`) AS `hasTitle`,
-  notEmpty(`__typedhouse_input`.`tags`) AS `hasTags`
+  `id` AS `id`,
+  notEmpty(`title`) AS `hasTitle`,
+  notEmpty(`tags`) AS `hasTags`
 FROM
-  (
-    SELECT
-      `id`,
-      `title`,
-      `tags`
-    FROM
-      `articles`
-  ) AS `__typedhouse_input`
+  `articles`
 ```
 
 Parameters:

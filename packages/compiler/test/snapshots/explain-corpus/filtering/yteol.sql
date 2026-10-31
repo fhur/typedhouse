@@ -1,0 +1,1 @@
+SELECT `tenantId`, `entityId`, `manufacturerId`, `manufacturerName`, `mpn`, `partCategoryId`, `partCategoryName`, `partCategoryPath`, `lifecycleStatus`, `lifecycleYteol`, `countryOfOrigin`, `ipns`, `supplier_ids`, `updatedAt` FROM `entity_off_the_shelf_part` WHERE `lifecycleYteol` < {p0:Float64} AND isNotNull(`lifecycleYteol`)

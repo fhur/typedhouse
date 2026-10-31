@@ -45,18 +45,16 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
+  `id` AS `id`,
   addDays(
-    toDate(
-      toStartOfWeek(toDate32(`__typedhouse_input`.`occurredAt`), 0)
-    ),
+    toDate(toStartOfWeek(toDate32(`occurredAt`), 0)),
     throwIf(
       ifNull(
         (
-          toStartOfWeek(toDate32(`__typedhouse_input`.`occurredAt`), 0) < toDate32('1970-01-01')
+          toStartOfWeek(toDate32(`occurredAt`), 0) < toDate32('1970-01-01')
         )
         OR (
-          toStartOfWeek(toDate32(`__typedhouse_input`.`occurredAt`), 0) > toDate32('2149-06-06')
+          toStartOfWeek(toDate32(`occurredAt`), 0) > toDate32('2149-06-06')
         ),
         0
       ),
@@ -64,13 +62,7 @@ SELECT
     )
   ) AS `week`
 FROM
-  (
-    SELECT
-      `id`,
-      `occurredAt`
-    FROM
-      `events`
-  ) AS `__typedhouse_input`
+  `events`
 SETTINGS
   enable_extended_results_for_datetime_functions = 1
 ```

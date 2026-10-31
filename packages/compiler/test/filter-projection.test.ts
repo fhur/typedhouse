@@ -34,7 +34,7 @@ it('folds repeated selections and filters while keeping parameter identities', (
   expect(plan.columns).toEqual({ id: col.UInt32.type });
 });
 
-it('pushes renames while keeping computed columns and sort/limit as fences', () => {
+it('pushes renames and computed selections while keeping sort/limit as fences', () => {
   const q = from(products);
   const cases = [
     q.map(r => ({ stock: r.id, id: r.stock })).where(r => r.id.gt(0)),
@@ -42,8 +42,10 @@ it('pushes renames while keeping computed columns and sort/limit as fences', () 
     q.orderBy(r => r.stock).map(r => ({ id: r.id })).limit(1),
     q.limit(1).map(r => ({ id: r.id })).where(r => r.id.gt(0)),
   ];
-  expect(cases.map(query => countSelects(compile(query.ir).sql))).toEqual([2, 3, 3, 2]);
+  expect(cases.map(query => countSelects(compile(query.ir).sql))).toEqual([2, 2, 3, 2]);
   expect(compile(cases[0]!.ir).sql).toContain('WHERE `stock` > {p0:UInt32}');
+  // The computed alias shadows a physical column: the pushed filter keeps its own scope.
+  expect(compile(cases[1]!.ir).sql).toContain('FROM (SELECT `stock` FROM `products` WHERE `stock` + {p0:UInt32} > {p1:UInt64}) AS `__typedhouse_input`');
   expect(compile(cases[3]!.ir).sql).toContain('LIMIT 1) AS `__typedhouse_input` WHERE `__typedhouse_input`.`id` > {p0:UInt32}');
 });
 

@@ -48,17 +48,11 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  exp(`__typedhouse_input`.`logWeight`) AS `methodWeight`,
-  exp(`__typedhouse_input`.`logWeight`) AS `functionWeight`
+  `id` AS `id`,
+  exp(`logWeight`) AS `methodWeight`,
+  exp(`logWeight`) AS `functionWeight`
 FROM
-  (
-    SELECT
-      `id`,
-      `logWeight`
-    FROM
-      `scores`
-  ) AS `__typedhouse_input`
+  `scores`
 ```
 
 Parameters:

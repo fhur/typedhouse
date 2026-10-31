@@ -1,0 +1,1 @@
+SELECT `tenantId`, `entityId`, `category`, `state`, `part_specifications`, `matched_part_ids`, `countOfParts`, `updatedAt` FROM `entity_ots_component` WHERE `updatedAt` > CAST({p0:DateTime64(3, 'UTC')} AS DateTime64(3))

@@ -48,23 +48,11 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  `__typedhouse_input`.`tag` AS `tag`
+  `id`,
+  `tag`
 FROM
-  (
-    SELECT
-      `__typedhouse_input`.`id` AS `id`,
-      `__typedhouse_element` AS `tag`
-    FROM
-      (
-        SELECT
-          `id`,
-          `tags`
-        FROM
-          `events`
-      ) AS `__typedhouse_input`
-      ARRAY JOIN `__typedhouse_input`.`tags` AS `__typedhouse_element`
-  ) AS `__typedhouse_input`
+  `events`
+  ARRAY JOIN `tags` AS `tag`
 ```
 
 Parameters:

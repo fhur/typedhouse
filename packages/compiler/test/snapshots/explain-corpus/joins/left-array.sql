@@ -1,0 +1,1 @@
+SELECT `tenantId`, `entityId`, `category`, `state`, `part_specifications`, `matched_part_ids`, `countOfParts`, `updatedAt`, `partId` FROM `entity_ots_component` LEFT ARRAY JOIN `matched_part_ids` AS `partId`
