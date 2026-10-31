@@ -47,16 +47,10 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  `__typedhouse_input`.`durationMs` / {p0:Float64} AS `durationSeconds`
+  `id` AS `id`,
+  `durationMs` / {p0:Float64} AS `durationSeconds`
 FROM
-  (
-    SELECT
-      `id`,
-      `durationMs`
-    FROM
-      `events`
-  ) AS `__typedhouse_input`
+  `events`
 ```
 
 Parameters:

@@ -1,0 +1,1 @@
+SELECT `tenantId`, `entityId`, `category`, `state`, `part_specifications`, `matched_part_ids`, `countOfParts`, `updatedAt` FROM `entity_ots_component` WHERE in(`entityId`, (SELECT `entityId` FROM `metric_group_ots_component_indices` WHERE `stock_index` < {p0:Float64}))

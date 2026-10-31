@@ -1,0 +1,1 @@
+SELECT `__typedhouse_input`.`category` AS `category`, count() AS `count` FROM `entity_ots_component` AS `__typedhouse_input` WHERE `__typedhouse_input`.`tenantId` = {p0:String} GROUP BY `__typedhouse_input`.`category`

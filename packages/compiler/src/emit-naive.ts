@@ -202,18 +202,24 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
     const select = block.distinct ? 'SELECT DISTINCT ' : 'SELECT ';
     // DISTINCT applies to the Distinct node's full leaf set: a clause folded above it may be
     // pruned narrower by its consumer, and that demand must never become the DISTINCT list.
-    const distinctLeaves = block.distinct ? plan!.columns?.get(block.distinct) ?? outputLeaves(block.distinct.output) : undefined;
+    // Every node folded above a Distinct keeps that set (a whole-row selection may reorder it).
+    const distinctLeaves = block.distinct ? outputLeaves(rel.output) : undefined;
     const order = distinctLeaves?.map(l => l.name) ?? physicalOrder;
     if (block.aggregate) {
       const aggregate = block.aggregate;
-      const qualifier = block.source.kind === 'cte' ? '' : inputAlias;
+      const expansion = block.arrayJoin;
+      // An expanded block has no input alias: the expansion alias is a plain column of the FROM item.
+      const qualifier = block.source.kind === 'cte' || expansion ? '' : inputAlias;
       // SELECT precedes even a derived FROM in final textual parameter order.
       // Qualify source references; HAVING/ORDER deliberately use output aliases.
       const keys = Object.entries(aggregate.keys).map(([name, e]) => [name, expression(e, aggregate.input, `${path}.keys.${name}`, undefined, false, 'row', qualifier, binding)] as const);
       const items = [...keys.map(([name, sql]) => sql === quoteIdentifier(name) ? sql : `${sql} AS ${quoteIdentifier(name)}`),
         ...Object.entries(aggregate.aggs).map(([name, e]) => `${expression(e, aggregate.input, `${path}.aggs.${name}`, undefined, false, 'aggregate', qualifier, binding)} AS ${quoteIdentifier(name)}`)];
+      const hints = block.source.kind === 'table' ? `${block.source.scan.final ? ' FINAL' : ''}${block.source.scan.sample === undefined ? '' : ` SAMPLE ${block.source.scan.sample}`}` : '';
       const source = block.source.kind === 'table'
-        ? `${quoteIdentifier(block.source.scan.table.name)} AS ${inputAlias}${block.source.scan.final ? ' FINAL' : ''}${block.source.scan.sample === undefined ? '' : ` SAMPLE ${block.source.scan.sample}`}`
+        ? expansion
+          ? `${quoteIdentifier(block.source.scan.table.name)}${hints} ${expansion.left ? 'LEFT ' : ''}ARRAY JOIN ${expression(expansion.expr, expansion.input, `${path}.expr`, undefined, false, 'row', '')} AS ${quoteIdentifier(expansion.alias)}`
+          : `${quoteIdentifier(block.source.scan.table.name)} AS ${inputAlias}${hints}`
         : block.source.kind === 'join' ? joinSource(block.source.rel, path, separator)
         : block.source.kind === 'cte' ? quoteIdentifier(plan!.ctes!.names.get(block.source.rel)!)
         : `(${emit(block.source.rel, `${path}.source`)}) AS ${inputAlias}`;

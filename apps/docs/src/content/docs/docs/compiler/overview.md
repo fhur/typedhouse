@@ -42,7 +42,7 @@ Rewrites retain parameter object identity. Placeholder allocation follows the em
 
 These transformations preserve query meaning, but do not promise faster execution for every query. ClickHouse still chooses the execution plan, and CTEs are not an execution cache.
 
-SELECT-block folding supports direct CTE references, safe integer arithmetic projections over scans and filters, a `DISTINCT` flag before sorting and limiting, and one `ARRAY JOIN` per scan block. Selection merging and filter pushdown substitute only expressions inside the compiler's closed total fragment; an expression that could fail or change value keeps its original evaluation set.
+SELECT-block folding supports direct CTE references, any projection over a scan and its filters (and direct selections over a filtered join), a `DISTINCT` flag before sorting and limiting (with whole-row selections folding over it), and one `ARRAY JOIN` per scan block, including an aggregate over that expansion. The EXPLAIN corpus (`packages/compiler/test/explain-corpus.test.ts` and its native twin) checks that every remaining SELECT boundary of every supported API example is a fence (aggregate, sort, limit, distinct, union, join, expansion, CTE or subquery), and on ClickHouse 24.8 that every MergeTree read stays inside the pruned column set. Selection merging and filter pushdown substitute only expressions inside the compiler's closed total fragment; an expression that could fail or change value keeps its original evaluation set.
 
 Currently absent: outer-join rewrites, join reordering, cost/statistics-based planning, explicit PREWHERE movement, limit/top-k pushdown through UNION, and real temporary-table materialization.
 

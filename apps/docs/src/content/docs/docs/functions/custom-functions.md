@@ -67,19 +67,12 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`sku` AS `sku`,
-  `__typedhouse_input`.`onHand` - `__typedhouse_input`.`reserved` AS `available`
+  `sku` AS `sku`,
+  `onHand` - `reserved` AS `available`
 FROM
-  (
-    SELECT
-      `sku`,
-      `onHand`,
-      `reserved`
-    FROM
-      `inventory`
-    WHERE
-      `onHand` - `reserved` < `reorderPoint`
-  ) AS `__typedhouse_input`
+  `inventory`
+WHERE
+  `onHand` - `reserved` < `reorderPoint`
 ```
 
 Parameters:
@@ -152,21 +145,12 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`product` AS `product`,
-  (
-    `__typedhouse_input`.`revenue` - `__typedhouse_input`.`cost`
-  ) / `__typedhouse_input`.`revenue` * {p0:Float64} AS `marginPercent`
+  `product` AS `product`,
+  (`revenue` - `cost`) / `revenue` * {p0:Float64} AS `marginPercent`
 FROM
-  (
-    SELECT
-      `product`,
-      `revenue`,
-      `cost`
-    FROM
-      `sales`
-    WHERE
-      `revenue` > {p1:Float64}
-  ) AS `__typedhouse_input`
+  `sales`
+WHERE
+  `revenue` > {p1:Float64}
 ```
 
 Parameters:

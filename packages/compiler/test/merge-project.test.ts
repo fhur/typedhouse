@@ -91,7 +91,8 @@ it('(d) drops unreferenced outputs only when they are total', () => {
     q.map(r => ({ id: r.id, hash: fn.cityHash64(r.id).as(col.UInt64) })),
     q.map(r => ({ id: r.id, at: now() })),
   ].map(inner => inner.map(r => ({ id: r.id })));
-  for (const query of dropped) { expect(rewrite(query.ir).root).toBe(query.ir); expect(selects(compile(query.ir).sql)).toBe(3); }
+  // No merge; the hazardous inner selection still folds over its scan (slice 3), the narrower outer one stays above it.
+  for (const query of dropped) { expect(rewrite(query.ir).root).toBe(query.ir); expect(selects(compile(query.ir).sql)).toBe(2); expect(compile(query.ir).sql).toContain(') AS `__typedhouse_input`'); }
   const total = q.map(r => ({ id: r.id, label: r.text.ifNull('x'), ids: r.ids, diff: r.n.minus(2n), flag: r.text.isNull().or(r.id.gt(1)) })).map(r => ({ id: r.id }));
   const result = rewrite(total.ir);
   expect(result.hits.MergeProject).toBe(1);
@@ -113,7 +114,7 @@ it('pushes conjuncts through computed selections, copying only total expressions
   expect(references(result.root.input.pred).every(r => r.rel === q.ir.id)).toBe(true);
   expect(safePredicate(result.root.input.pred)).toBe(false);
   expect(totalPredicate(result.root.input.pred)).toBe(true);
-  expect(compile(query.ir).sql).toContain('FROM (SELECT `id`, `text` FROM `merge` WHERE `id` + {p0:UInt32} > {p2:UInt64} AND ifNull(`text`, {p1:String}) = {p3:String}) AS `__typedhouse_input`');
+  expect(compile(query.ir).sql).toBe('SELECT `id` + {p0:UInt32} AS `eventId`, ifNull(`text`, {p1:String}) AS `label` FROM `merge` WHERE `id` + {p0:UInt32} > {p2:UInt64} AND ifNull(`text`, {p1:String}) = {p3:String}');
   const folded = q.map(r => ({ eventId: r.id.plus(val(1, col.UInt32)) })).where(r => r.eventId.gt(100n));
   expect(compile(folded.ir).sql).toBe('SELECT `id` + {p0:UInt32} AS `eventId` FROM `merge` WHERE `id` + {p0:UInt32} > {p1:UInt64}');
   const fences = [

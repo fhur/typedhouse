@@ -62,23 +62,25 @@ it('(v) folds integer arithmetic whose untyped Params resolve from an integer si
     from(events).map(e => ({ x: e.id.plus(val(1, col.UInt32)) })),
   ];
   for (const query of positives) expect(plan(query.ir).blocks.get(query.ir)?.project, compile(query.ir).sql).toBe(query.ir);
-  const negatives = [
+  // Slice 3 fix round 1: Float arithmetic folds too (any selection over a scan block with Filter-only clauses);
+  // the untyped Param still takes its sibling's type from the resolver, never a JS default.
+  const floats = [
     from(events).map(e => ({ x: e.f.plus(1) })), // untyped Param beside a Float sibling resolves to Float64
     from(events).map(e => ({ x: e.id.plus(val(1, col.Float64)) })), // typed Float Param widens the result
     from(events).map(e => ({ x: e.f.multiply(e.f) })),
   ];
-  for (const query of negatives) {
-    expect(plan(query.ir).blocks.get(query.ir), compile(query.ir).sql).toBeUndefined();
-    expect(compile(query.ir).sql).toContain(') AS `__typedhouse_input`');
+  for (const query of floats) {
+    expect(plan(query.ir).blocks.get(query.ir)?.project, compile(query.ir).sql).toBe(query.ir);
+    expect(compile(query.ir).parameterTypes).toEqual(emitNaive(query.ir).parameterTypes);
   }
+  expect(compile(floats[0]!.ir).sql).toBe('SELECT `f` + {p0:Float64} AS `x` FROM `events`');
   // Two untyped Params have no sibling evidence: no fold is planned, and both emitters reject the graph.
   // (The builder types bare numeric constants Float64 when no column is involved; that shape is fenced as Float.)
   const untyped = structuredClone(from(events).map(e => ({ x: e.id.plus(1) })).ir);
   if (untyped.kind !== 'Project' || untyped.exprs.x?.kind !== 'Call') throw new Error('shape');
   Object.assign(untyped.exprs.x, { args: [{ ...untyped.exprs.x.args[1]!, id: -1 }, untyped.exprs.x.args[1]!] });
-  expect(planSelects(untyped, nodesOf(untyped)).blocks.get(untyped)).toBeUndefined();
   for (const emitter of [compile, emitNaive]) expect(() => emitter(untyped)).toThrow('param_untyped');
-  expect(compile(from(events).map(() => ({ x: val(1).plus(val(2)) })).ir).sql).toContain(') AS `__typedhouse_input`');
+  expect(compile(from(events).map(() => ({ x: val(1).plus(val(2)) })).ir).sql).toBe('SELECT {p0:Float64} + {p1:Float64} AS `x` FROM `events`');
   // A value outside the sibling's range is rejected by both emitters before any folding question arises.
   const overflow = from(events).map(e => ({ x: e.small.plus(300) }));
   for (const emitter of [compile, emitNaive]) expect(() => emitter(overflow.ir)).toThrow('param_incompatible');
@@ -100,6 +102,24 @@ it('records Distinct as a flag and ArrayJoin as a FROM-level member of scan bloc
   if (filtered.ir.kind !== 'Filter') throw new Error('shape');
   expect(plan(filtered.ir).blocks.get(filtered.ir)?.source).toEqual({ kind: 'derived', rel: filtered.ir.input });
   expect(plan(filtered.ir).blocks.get(filtered.ir.input)?.distinct).toBe(filtered.ir.input);
+  // (vii) An Aggregate folds over the expanded scan block and keeps the expansion on the block.
   const grouped = expanded.groupBy(r => ({ id: r.id })).aggregate(() => ({ n: count() }));
-  expect(plan(grouped.ir).blocks.get(grouped.ir)?.source.kind).toBe('derived');
+  expect(plan(grouped.ir).blocks.get(grouped.ir)).toMatchObject({ source: { kind: 'table', scan: scan.ir }, arrayJoin: expanded.ir, aggregate: grouped.ir });
+  expect(compile(grouped.ir).sql).toBe('SELECT `id`, count() AS `n` FROM `s` ARRAY JOIN `ids` AS `one` WHERE `id` > {p0:UInt64} GROUP BY `id`');
+  const byAlias = expanded.groupBy(r => ({ one: r.one })).aggregate(() => ({ n: count() }));
+  expect(compile(byAlias.ir).sql).toBe('SELECT `one`, count() AS `n` FROM `s` ARRAY JOIN `ids` AS `one` WHERE `id` > {p0:UInt64} GROUP BY `one`');
+  const hinted = scan.final().sample(0.5).leftArrayJoin(r => r.ids, 'one').aggregate(() => ({ n: count() }));
+  expect(compile(hinted.ir).sql).toBe('SELECT count() AS `n` FROM `s` FINAL SAMPLE 0.5 LEFT ARRAY JOIN `ids` AS `one`');
+  for (const q of [grouped, byAlias, hinted]) { expect(compile(q.ir).columns).toEqual(emitNaive(q.ir).columns); expect(compile(q.ir).params).toEqual(emitNaive(q.ir).params); }
+  // (viii) A whole-row selection folds over a DISTINCT block (the list stays the Distinct node's full leaf set, in the
+  // selection's order); a narrower or renaming selection, or a consumer pruning the folded selection, never narrows it.
+  const whole = scan.distinct().map(r => ({ ids: r.ids, id: r.id })).orderBy(r => r.id);
+  expect(plan(whole.ir).blocks.get(whole.ir)?.distinct?.kind).toBe('Distinct');
+  expect(compile(whole.ir).sql).toBe('SELECT DISTINCT `ids`, `id` FROM `s` ORDER BY `id` ASC');
+  expect(compile(whole.ir).columns).toEqual(emitNaive(whole.ir).columns);
+  // Stacked selections merge first (MergeProject), so the merged narrower one opens a block over the Distinct block.
+  expect(compile(scan.distinct().map(r => ({ ids: r.ids, id: r.id })).map(r => ({ id: r.id })).ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id` FROM (SELECT DISTINCT `id`, `ids` FROM `s`) AS `__typedhouse_input`');
+  expect(compile(scan.distinct().map(r => ({ ids: r.ids, id: r.id })).orderBy(r => r.id).map(r => ({ id: r.id })).ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id` FROM (SELECT DISTINCT `ids`, `id` FROM `s` ORDER BY `id` ASC) AS `__typedhouse_input`');
+  expect(compile(scan.distinct().map(r => ({ id: r.id })).ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id` FROM (SELECT DISTINCT `id`, `ids` FROM `s`) AS `__typedhouse_input`');
+  expect(compile(scan.distinct().map(r => ({ id: r.id, other: r.ids })).ir).sql).toContain('FROM (SELECT DISTINCT `id`, `ids` FROM `s`) AS `__typedhouse_input`');
 });

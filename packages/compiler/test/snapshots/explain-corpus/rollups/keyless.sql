@@ -1,0 +1,1 @@
+SELECT count() AS `total`, countIf(empty(`__typedhouse_input`.`matched_part_ids`)) AS `unmatched`, uniqExact(`__typedhouse_input`.`category`) AS `categories` FROM `entity_ots_component` AS `__typedhouse_input` WHERE `__typedhouse_input`.`tenantId` = {p0:String}

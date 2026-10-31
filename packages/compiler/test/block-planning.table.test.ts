@@ -50,6 +50,14 @@ const rows: { readonly name: string; readonly build: () => Rel; readonly blocks:
   { name: 'filter after distinct opens a block', build: () => t.distinct().where(safe).ir, blocks: [['Filter'], ['Distinct', 'Scan']] },
   { name: 'distinct twice', build: () => t.distinct().distinct().ir, blocks: [['Distinct'], ['Distinct', 'Scan']] },
   { name: 'selection after distinct opens a block', build: () => t.distinct().map(r => ({ id: r.id })).ir, blocks: [['Project'], ['Distinct', 'Scan']] },
+  // (viii) A whole-row selection folds over a DISTINCT block; narrower, renaming or later-filtered ones do not.
+  { name: 'whole-row selection after distinct folds', build: () => t.distinct().map(r => ({ id: r.id, k: r.k, ids: r.ids })).ir, blocks: [['Project', 'Distinct', 'Scan']] },
+  { name: 'reordered whole-row selection after distinct folds', build: () => t.distinct().map(r => ({ ids: r.ids, k: r.k, id: r.id })).ir, blocks: [['Project', 'Distinct', 'Scan']] },
+  { name: 'whole-row selection after distinct, then sort and limit, is one block', build: () => t.distinct().map(r => ({ id: r.id, k: r.k, ids: r.ids })).orderBy(r => r.k).limit(2).ir, blocks: [['Limit', 'Sort', 'Project', 'Distinct', 'Scan']] },
+  { name: 'whole-row selection after a filtered distinct folds', build: () => t.where(safe).distinct().map(r => ({ id: r.id, k: r.k, ids: r.ids })).ir, blocks: [['Project', 'Distinct', 'Filter', 'Scan']] },
+  { name: 'renaming whole-row selection after distinct opens a block', build: () => t.distinct().map(r => ({ a: r.id, k: r.k, ids: r.ids })).ir, blocks: [['Project'], ['Distinct', 'Scan']] },
+  { name: 'filter after a folded whole-row selection over distinct opens a block', build: () => t.distinct().map(r => ({ id: r.id, k: r.k, ids: r.ids })).where(safe).ir, blocks: [['Filter'], ['Project', 'Distinct', 'Scan']] },
+  { name: 'whole-row selection after distinct over a sorted block opens a block', build: () => t.distinct().orderBy(r => r.id).map(r => ({ id: r.id, k: r.k, ids: r.ids })).ir, blocks: [['Project'], ['Sort', 'Distinct', 'Scan']] },
   { name: 'computed selection after distinct opens a block', build: () => t.distinct().map(r => ({ next: r.id.plus(1n) })).ir, blocks: [['Project'], ['Distinct', 'Scan']] },
   { name: 'distinct over a computed selection folds', build: () => t.map(r => ({ next: r.id.plus(1n) })).distinct().ir, blocks: [['Distinct', 'Project', 'Scan']] },
   { name: 'distinct over an aggregate block folds', build: () => grouped.where(r => r.n.gt(1n)).distinct().orderBy(r => r.k).ir, blocks: [['Sort', 'Distinct', 'Filter', 'Aggregate', 'Scan']] },
@@ -64,10 +72,41 @@ const rows: { readonly name: string; readonly build: () => Rel; readonly blocks:
   { name: 'limit().arrayJoin() is two blocks', build: () => t.limit(2).arrayJoin(r => r.ids, 'x').ir, blocks: [['ArrayJoin'], ['Limit', 'Scan']] },
   { name: 'one ARRAY JOIN per block', build: () => t.arrayJoin(r => r.ids, 'x').arrayJoin(r => r.ids, 'y').ir, blocks: [['ArrayJoin'], ['ArrayJoin', 'Scan']] },
   { name: 'distinct, sort and limit fold over an expansion', build: () => t.arrayJoin(r => r.ids, 'x').distinct().orderBy(r => r.x).limit(3).ir, blocks: [['Limit', 'Sort', 'Distinct', 'ArrayJoin', 'Scan']] },
-  { name: 'aggregate over an expansion opens a block', build: () => t.arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate'], ['ArrayJoin', 'Scan']] },
+  // (vii) An Aggregate folds over an expanded scan block: inner/left, with/without WHERE, key on the alias or a source column.
+  { name: 'aggregate keyed on the alias over an inner expansion folds', build: () => t.arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'ArrayJoin', 'Scan']] },
+  { name: 'aggregate keyed on a source column over an inner expansion folds', build: () => t.arrayJoin(r => r.ids, 'x').groupBy(r => ({ k: r.k })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'ArrayJoin', 'Scan']] },
+  { name: 'aggregate keyed on the alias over a left expansion folds', build: () => t.leftArrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'ArrayJoin', 'Scan']] },
+  { name: 'aggregate keyed on a source column over a left expansion folds', build: () => t.leftArrayJoin(r => r.ids, 'x').groupBy(r => ({ k: r.k })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'ArrayJoin', 'Scan']] },
+  { name: 'aggregate over an inner expansion of a safe where folds', build: () => t.where(safe).arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'ArrayJoin', 'Filter', 'Scan']] },
+  { name: 'aggregate over a where after an inner expansion folds', build: () => t.arrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).groupBy(r => ({ k: r.k })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'Filter', 'ArrayJoin', 'Scan']] },
+  { name: 'aggregate over a left expansion with wheres on both sides folds', build: () => t.where(unsafe).leftArrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'Filter', 'ArrayJoin', 'Filter', 'Scan']] },
+  { name: 'keyless aggregate over a left expansion folds', build: () => t.leftArrayJoin(r => r.ids, 'x').aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'ArrayJoin', 'Scan']] },
+  { name: 'having, sort and limit fold over an aggregated expansion', build: () => t.arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).where(r => r.n.gt(1n)).orderBy(r => r.x).limit(3).ir, blocks: [['Limit', 'Sort', 'Filter', 'Aggregate', 'ArrayJoin', 'Scan']] },
+  { name: 'aggregate over an inner expansion of an unsafe where keeps the derived table', build: () => t.where(unsafe).arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate'], ['ArrayJoin'], ['Filter', 'Scan']] },
+  { name: 'aggregate key shadowing the expansion alias keeps the explicit scope', build: () => t.arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.k })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate'], ['ArrayJoin', 'Scan']] },
+  { name: 'aggregate over a second expansion keeps the derived table', build: () => t.arrayJoin(r => r.ids, 'x').arrayJoin(r => r.ids, 'y').groupBy(r => ({ y: r.y })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate'], ['ArrayJoin'], ['ArrayJoin', 'Scan']] },
   { name: 'identity selection over an expansion folds', build: () => t.arrayJoin(r => r.ids, 'x').map(r => ({ id: r.id, x: r.x })).ir, blocks: [['Project', 'ArrayJoin', 'Scan']] },
   { name: 'computed selection over an expansion folds', build: () => t.arrayJoin(r => r.ids, 'x').map(r => ({ next: r.id.plus(1n), x: r.x })).ir, blocks: [['Project', 'ArrayJoin', 'Scan']] },
   { name: 'computed alias shadowing the expansion alias opens a block', build: () => t.arrayJoin(r => r.ids, 'x').map(r => ({ x: r.id.plus(1n) })).ir, blocks: [['Project'], ['ArrayJoin', 'Scan']] },
+  // Slice 3 fix round 1 (a): any selection folds over a scan block with Filter-only clauses; a computed alias equal to a
+  // column the block reads (WHERE, expansion, another item) or to the expansion alias keeps its own block.
+  { name: 'fallible selection over a filtered scan folds', build: () => t.where(safe).map(r => ({ n: cast(r.k, col.UInt64) })).ir, blocks: [['Project', 'Filter', 'Scan']] },
+  { name: 'volatile selection over a scan folds', build: () => t.map(r => ({ id: r.id, row: volatile() })).ir, blocks: [['Project', 'Scan']] },
+  { name: 'fallible selection over an expansion folds', build: () => t.arrayJoin(r => r.ids, 'x').map(r => ({ x: r.x, n: cast(r.k, col.UInt64) })).ir, blocks: [['Project', 'ArrayJoin', 'Scan']] },
+  { name: 'computed alias shadowing an unread column folds', build: () => t.where(safe).map(r => ({ k: cast(r.id, col.String) })).ir, blocks: [['Project', 'Filter', 'Scan']] },
+  { name: 'computed alias shadowing a column the where reads opens a block', build: () => t.where(r => r.k.eq('a')).map(r => ({ k: cast(r.id, col.String) })).ir, blocks: [['Project'], ['Filter', 'Scan']] },
+  { name: 'computed alias shadowing a column the expansion reads opens a block', build: () => t.arrayJoin(r => r.ids, 'x').map(r => ({ ids: cast(r.id, col.String), x: r.x })).ir, blocks: [['Project'], ['ArrayJoin', 'Scan']] },
+  { name: 'computed alias shadowing a column another item reads opens a block', build: () => t.map(r => ({ k: cast(r.id, col.String), n: r.k.eq('a') })).ir, blocks: [['Project'], ['Scan']] },
+  { name: 'fallible selection after limit opens a block', build: () => t.limit(1).map(r => ({ n: cast(r.k, col.UInt64) })).ir, blocks: [['Project'], ['Limit', 'Scan']] },
+  { name: 'fallible selection after sort opens a block', build: () => t.orderBy(r => r.id).map(r => ({ n: cast(r.k, col.UInt64) })).ir, blocks: [['Project'], ['Sort', 'Scan']] },
+  { name: 'fallible selection after an aggregate opens a block', build: () => grouped.map(r => ({ m: cast(r.n, col.String) })).ir, blocks: [['Project'], ['Aggregate', 'Scan']] },
+  { name: 'fallible selection after distinct opens a block', build: () => t.distinct().map(r => ({ n: cast(r.k, col.UInt64) })).ir, blocks: [['Project'], ['Distinct', 'Scan']] },
+  // Slice 3 fix round 1 (b): a direct selection folds over a join block with Filter-only clauses.
+  { name: 'direct selection over a filtered join block folds', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.v.gt(1n)).map(r => ({ id: r.a.id, v: r.b.v })).ir, blocks: [['Project', 'Filter', 'Join']] },
+  { name: 'direct selection over a join residual folds', build: () => join({ a: t, b: u }).on(r => [r.a.id.eq(r.b.id), r.a.id.lt(r.b.v)]).map(r => ({ id: r.a.id })).ir, blocks: [['Project', 'Filter', 'Join']] },
+  { name: 'computed selection over a filtered join block opens a block', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.v.gt(1n)).map(r => ({ next: r.a.id.plus(1n) })).ir, blocks: [['Project'], ['Filter', 'Join']] },
+  { name: 'direct selection over a sorted join block opens a block', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).orderBy(r => r.a.id).map(r => ({ id: r.a.id })).ir, blocks: [['Project'], ['Sort', 'Join']] },
+  { name: 'direct selection over a distinct join block opens a block', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).distinct().map(r => ({ id: r.a.id })).ir, blocks: [['Project'], ['Distinct', 'Join']] },
   { name: 'CTE input is never folded into an expansion', build: () => t.cte().arrayJoin(r => r.ids, 'x').ir, blocks: [['ArrayJoin'], ['CTE']] },
   { name: 'CTE reference takes filters and sorts directly', build: () => t.cte().where(safe).orderBy(r => r.id).ir, blocks: [['Sort', 'Filter', 'CTE']] },
   { name: 'distinct reads a CTE directly', build: () => t.cte().distinct().ir, blocks: [['Distinct', 'CTE']] },
@@ -86,6 +125,12 @@ it.each(rows)('$name', ({ build, blocks }) => {
   // Without joins, CTEs or unions every planned block is exactly one SELECT.
   if (!blocks.flat().some(k => k === 'Join' || k === 'CTE' || k === 'Union')) expect(sql.match(/SELECT /g)).toHaveLength(blocks.length);
   expect(sql.includes('DISTINCT')).toBe(blocks.flat().includes('Distinct'));
+  // Every emitted DISTINCT list set-equals its Distinct node's full output (slice 2 Finding 1, kept through slice 3).
+  const distincts: Rel[] = [];
+  for (let cur: Rel | undefined = root; cur; cur = 'input' in cur ? cur.input : undefined) if (cur.kind === 'Distinct') distincts.push(cur);
+  const lists = [...sql.matchAll(/SELECT DISTINCT ([\s\S]*?)\s+FROM/g)].map(m => m[1]!.split(', ').map(c => / AS /.test(c) ? c.replace(/^.* AS /, '') : c.replace(/^`[^`]+`\./, '')).sort());
+  expect(lists).toHaveLength(distincts.length);
+  for (const [i, node] of distincts.entries()) expect(lists[i]).toEqual(outputLeaves(node.output).map(l => '`' + l.name + '`').sort());
 });
 
 it('covers at least twenty shapes, including every fold arm', () => {
@@ -110,6 +155,12 @@ it('a folded DISTINCT block selects the Distinct node\'s full leaf set even when
     expect(sql.match(/SELECT DISTINCT /g), label).toHaveLength(1);
   }
   expect(compile(shapes[0]![1]).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id` FROM (SELECT DISTINCT `id`, `k`, `ids` FROM `t` ORDER BY `id` ASC) AS `__typedhouse_input`');
+  // (viii) A folded whole-row selection keeps the full list even when its consumer prunes it, and orders it as selected.
+  const folded = t.distinct().map(r => ({ ids: r.ids, k: r.k, id: r.id })).orderBy(r => r.k).map(r => ({ id: r.id })).ir;
+  expect(compile(folded).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id` FROM (SELECT DISTINCT `ids`, `k`, `id` FROM `t` ORDER BY `k` ASC) AS `__typedhouse_input`');
+  const ordered = t.distinct().map(r => ({ ids: r.ids, k: r.k, id: r.id })).orderBy(r => r.k).limit(2).ir;
+  expect(compile(ordered).sql).toBe('SELECT DISTINCT `ids`, `k`, `id` FROM `t` ORDER BY `k` ASC LIMIT 2');
+  expect(Object.keys(compile(ordered).columns)).toEqual(['ids', 'k', 'id']);
 });
 
 it('a Sort over a folded Distinct can only reference selected columns', () => {

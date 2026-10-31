@@ -1,0 +1,1 @@
+SELECT `tenantId`, `entityId`, `version`, `effectiveAt`, `insertedAt`, `price_change_log_sum`, `price_change_count`, `stock_index`, `stock_index_warnings`, `lead_time_index_part_days`, `lead_time_index_part_count`, `lead_time_max_days` FROM `metric_group_ots_component_indices` FINAL

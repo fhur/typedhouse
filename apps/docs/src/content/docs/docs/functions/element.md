@@ -49,17 +49,11 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  tupleElement(`__typedhouse_input`.`profile`, {p0:String}) AS `name`,
-  tupleElement(`__typedhouse_input`.`profile`, {p1:String}) AS `age`
+  `id` AS `id`,
+  tupleElement(`profile`, {p0:String}) AS `name`,
+  tupleElement(`profile`, {p1:String}) AS `age`
 FROM
-  (
-    SELECT
-      `id`,
-      `profile`
-    FROM
-      `users`
-  ) AS `__typedhouse_input`
+  `users`
 ```
 
 Parameters:

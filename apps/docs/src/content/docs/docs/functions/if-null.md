@@ -47,16 +47,10 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  ifNull(`__typedhouse_input`.`nickname`, {p0:String}) AS `displayName`
+  `id` AS `id`,
+  ifNull(`nickname`, {p0:String}) AS `displayName`
 FROM
-  (
-    SELECT
-      `id`,
-      `nickname`
-    FROM
-      `users`
-  ) AS `__typedhouse_input`
+  `users`
 ```
 
 Parameters:

@@ -22,15 +22,18 @@ it('allocates projection parameters before filter parameters', () => {
   expect(result.params).toEqual({ p0: '2', p1: 'sku' });
 });
 
-it('retains fences for alias collisions, fallible expressions and limits', () => {
+it('retains fences for alias collisions read by the block, limits and filters above fallible outputs; fallible selections fold', () => {
   const input = from(inventory).where(r => r.onHand.gt(0));
   const queries = [
-    input.map(r => ({ onHand: r.onHand.minus(r.reserved) })),
-    input.map(r => ({ available: r.onHand.divide(r.reserved) })),
+    input.map(r => ({ onHand: r.onHand.minus(r.reserved) })), // the WHERE reads `onHand`
     input.limit(1).map(r => ({ available: r.onHand.minus(r.reserved) })),
     input.map(r => ({ available: r.onHand.minus(r.reserved), ratio: r.onHand.divide(r.reserved) })).where(r => r.available.gt(0n)),
   ];
   for (const query of queries) expect(compile(query.ir).sql).toContain(') AS `__typedhouse_input`');
+  // Slice 3 fix round 1: a fallible selection over a filtered scan is evaluated on the same rows in both forms, so it folds.
+  expect(compile(input.map(r => ({ available: r.onHand.divide(r.reserved) })).ir).sql).toBe('SELECT `onHand` / `reserved` AS `available` FROM `inventory` WHERE `onHand` > {p0:UInt32}');
+  expect(compile(input.map(r => ({ reserved: r.onHand.divide(r.reserved), low: r.reserved.lt(1) })).ir).sql).toContain(') AS `__typedhouse_input`'); // another item reads the shadowed column
+  expect(compile(input.map(r => ({ reserved: r.onHand.divide(r.reserved) })).ir).sql).toBe('SELECT `onHand` / `reserved` AS `reserved` FROM `inventory` WHERE `onHand` > {p0:UInt32}'); // an item may read the column it is aliased as
 });
 
 it('pushes a filter on a total computed output below the selection and folds to one SELECT', () => {

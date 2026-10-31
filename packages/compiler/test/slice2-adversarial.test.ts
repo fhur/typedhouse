@@ -216,7 +216,8 @@ it('(vi) a mixed conjunction (safe AND arithmetic AND cast) splits exactly at ea
   expect(j.hits.PushFilterJoin).toBe(1);
   const jf = boundaryFilter(j.root, 'Join')!;
   expect(conjuncts(jf.pred).map(safePredicate)).toEqual([false, false]);
-  expect(j.compiled.sql).toContain('FROM (SELECT `id`, `n`, `s` FROM `adv` WHERE `id` > {p0:UInt32}) AS `a` INNER ALL JOIN (SELECT `id` FROM `adv2` WHERE `v` < {p1:UInt64}) AS `b` ON `a`.`id` = `b`.`id` WHERE (`a`.`n` + {p2:Int64} > {p3:Int64} AND CAST(`a`.`s` AS UInt64) > {p4:UInt64})');
+  // Slice 3 fix round 1: the direct selection folds over the filtered join block, which is now the root (newline separators).
+  expect(j.compiled.sql).toBe('SELECT `a`.`id` AS `id`\nFROM (SELECT `id`, `n`, `s` FROM `adv` WHERE `id` > {p0:UInt32}) AS `a`\nINNER ALL JOIN (SELECT `id` FROM `adv2` WHERE `v` < {p1:UInt64}) AS `b` ON `a`.`id` = `b`.`id`\nWHERE (`a`.`n` + {p2:Int64} > {p3:Int64} AND CAST(`a`.`s` AS UInt64) > {p4:UInt64})');
   // ArrayJoin (inner and left): only the safe conjunct moves below the expansion.
   for (const left of [false, true]) {
     const q = left ? t.leftArrayJoin(r => r.ids, 'x') : t.arrayJoin(r => r.ids, 'x');
@@ -314,9 +315,9 @@ it('(3) inner expansions fold only over safe filters; LEFT folds over any determ
   expect(selects(compile(t.arrayJoin(r => r.ids, 'x').arrayJoin(r => r.uids, 'y').ir).sql)).toBe(2);
   expect(selects(compile(t.limit(2).arrayJoin(r => r.ids, 'x').ir).sql)).toBe(2);
   expect(selects(compile(t.arrayJoin(r => r.ids, 'x').limit(2).ir).sql)).toBe(1);
-  // count() above an inner expansion keeps the expansion as a derived table (recorded non-fold).
+  // Slice 3 (vii): count() above an inner expansion folds into the expanded block (recording flipped).
   const counted = t.arrayJoin(r => r.ids, 'x').aggregate(() => ({ c: count() }));
-  expect(compile(counted.ir).sql).toBe('SELECT count() AS `c` FROM (SELECT `id` FROM `adv` ARRAY JOIN `ids` AS `x`) AS `__typedhouse_input`');
+  expect(compile(counted.ir).sql).toBe('SELECT count() AS `c` FROM `adv` ARRAY JOIN `ids` AS `x`');
   // Tuple, Nullable and UInt64 element types keep their descriptors on both emitters.
   for (const q of [t.arrayJoin(r => r.parts, 'p'), t.arrayJoin(r => r.nids, 'p'), t.leftArrayJoin(r => r.uids, 'p'), t.arrayJoin(r => r.parts.element('id'), 'p')]) {
     expect(compile(q.ir).columns).toEqual(emitNaive(q.ir).columns);
@@ -325,14 +326,16 @@ it('(3) inner expansions fold only over safe filters; LEFT folds over any determ
 it('(3) alias shadowing: expansion alias vs physical columns and computed aliases, under identity and renames', () => {
   const x = t.arrayJoin(r => r.ids, 'x');
   expect(() => (t.arrayJoin as Function)((r: typeof t.row) => r.ids, 'id')).toThrow(/duplicate_column/);
-  // Computed alias equal to the expansion alias: fence. Rename of the alias to a physical name: fence.
+  // Computed alias equal to the expansion alias: fence (two definitions of one alias). Slice 3 fix round 1: a rename of
+  // the alias to a physical name folds unless the block reads that column (`ids` is read by the expansion).
   expect(selects(compile(x.map(r => ({ x: r.id.plus(1) })).ir).sql)).toBe(2);
-  expect(selects(compile(x.map(r => ({ id: r.x })).ir).sql)).toBe(2);
+  expect(compile(x.map(r => ({ id: r.x })).ir).sql).toBe('SELECT `x` AS `id` FROM `adv` ARRAY JOIN `ids` AS `x`');
   expect(selects(compile(x.map(r => ({ ids: r.x })).ir).sql)).toBe(2);
-  // Rename of the alias to a fresh name folds; identity folds; computed alias equal to a pruned physical column fences.
+  // Rename of the alias to a fresh name folds; identity folds; a computed alias equal to an unread physical column folds too.
   expect(compile(x.map(r => ({ y: r.x })).ir).sql).toBe('SELECT `x` AS `y` FROM `adv` ARRAY JOIN `ids` AS `x`');
   expect(compile(x.map(r => ({ x: r.x, ids: r.ids })).ir).sql).toBe('SELECT `x`, `ids` FROM `adv` ARRAY JOIN `ids` AS `x`');
-  expect(selects(compile(x.map(r => ({ tup: r.id.plus(1), x: r.x })).ir).sql)).toBe(2);
+  expect(selects(compile(x.map(r => ({ tup: r.id.plus(1), x: r.x })).ir).sql)).toBe(1);
+  expect(selects(compile(x.where(r => r.tup.element('a').eq('q')).map(r => ({ tup: r.id.plus(1), x: r.x })).ir).sql)).toBe(2); // the WHERE reads `tup`
   // WHERE on the alias plus a computed projection with a fresh alias: one block, WHERE binds the expansion alias.
   expect(compile(x.where(r => r.x.eq('a')).map(r => ({ w: r.id.plus(1), x: r.x })).ir).sql).toBe('SELECT `id` + {p0:UInt32} AS `w`, `x` AS `x` FROM `adv` ARRAY JOIN `ids` AS `x` WHERE `x` = {p1:String}');
 });
@@ -358,10 +361,10 @@ it('(4) element with a constant selector is total only when the catalog resolves
   if (shape.kind !== 'Filter' || shape.input.kind !== 'ArrayJoin') throw new Error('shape');
   const bad: Rel = { ...shape, input: { ...shape.input, expr: forged } };
   for (const emit of [compile, emitNaive]) expect(() => emit(bad)).toThrow(/invalid_array_join_expression at root\.input\.expr/);
-  // A scalar named-tuple element pushes through a selection and keeps the selection as a derived table (not safeProjection).
+  // A scalar named-tuple element pushes through a selection; since slice 3 fix round 1 the selection folds over the scan too.
   const pushed = rewrite(t.map(r2 => ({ a: r2.tup.element('a'), id: r2.id })).where(r2 => r2.a.eq('x')).ir);
   expect(pushed.hits.PushFilterProject).toBe(1);
-  expect(pushed.compiled.sql).toBe('SELECT tupleElement(`__typedhouse_input`.`tup`, {p0:String}) AS `a`, `__typedhouse_input`.`id` AS `id` FROM (SELECT `id`, `tup` FROM `adv` WHERE tupleElement(`tup`, {p0:String}) = {p1:String}) AS `__typedhouse_input`');
+  expect(pushed.compiled.sql).toBe('SELECT tupleElement(`tup`, {p0:String}) AS `a`, `id` AS `id` FROM `adv` WHERE tupleElement(`tup`, {p0:String}) = {p1:String}');
   // Known-origin array expressions are fences for the expansion push.
   const fence = rewrite(t.arrayJoin(r2 => fn.arrayConcat(r2.ids, r2.ids).as(col.Array(col.String)), 'x').where(safe).ir);
   expect(fence.hits.PushFilterArrayJoin).toBe(0);
@@ -403,8 +406,9 @@ it('(v) untyped Params resolve from integer siblings only; out-of-range and mixe
   expect(one(t.map(r => ({ w: r.small.plus(1) })).where(r => r.w.gt(2)))).toBe(1);
   expect(compile(t.map(r => ({ w: r.small.plus(1) })).where(r => r.w.gt(2)).ir).sql).toBe('SELECT `small` + {p0:UInt8} AS `w` FROM `adv` WHERE `small` + {p0:UInt8} > {p1:UInt16}');
   expect(one(t.map(r => ({ w: r.n.plus(1n) })).where(r => r.w.gt(2n)))).toBe(1);
-  expect(one(t.map(r => ({ w: val(1).plus(val(2)) })).where(r => r.w.gt(2)))).toBe(3); // Float64 at the builder: fence, naive-emitted
-  expect(one(t.map(r => ({ w: r.id.plus(val(1, col.Float64)) })))).toBe(2);
+  // Slice 3 fix round 1: Float selections fold over the scan; a Float filter above one is not total, so it stays a second block.
+  expect(one(t.map(r => ({ w: val(1).plus(val(2)) })).where(r => r.w.gt(2)))).toBe(2);
+  expect(one(t.map(r => ({ w: r.id.plus(val(1, col.Float64)) })))).toBe(1);
   // Out of range, negative against unsigned, bigint against a 32-bit column, number against a 64-bit column, fraction:
   // every one is rejected by both emitters (serializeParameter runs before either emission).
   for (const bad of [t.map(r => ({ w: r.small.plus(300) })), t.map(r => ({ w: r.small.plus(-1) })), t.map(r => ({ w: r.id.plus(-1) })), t.map(r => ({ w: r.id.plus(1n as never) })), t.map(r => ({ w: r.n.plus(1 as never) })), t.map(r => ({ w: r.small.plus(1.5) })), t.map(r => ({ w: r.id.plus(1.5) }))]) {
@@ -413,7 +417,7 @@ it('(v) untyped Params resolve from integer siblings only; out-of-range and mixe
   // A standalone `val(1)` is a typed Float64 Param (fence, both emitters agree); a genuinely untyped Param is only
   // created by a literal operand, so sharing one needs a hand-built graph: two different siblings fail identically on
   // both emitters, equal siblings keep one name and fold into one SELECT.
-  expect(one(t.map(r => ({ a: r.small.plus(val(1) as never), b: r.n.plus(val(1) as never) })))).toBe(2);
+  expect(one(t.map(r => ({ a: r.small.plus(val(1) as never), b: r.n.plus(val(1) as never) })))).toBe(1);
   function sharing(build: (r: typeof t.row) => Record<'a' | 'b', unknown>): Rel {
     const ir = t.map(build as never).ir;
     if (ir.kind !== 'Project' || ir.exprs.a?.kind !== 'Call' || ir.exprs.b?.kind !== 'Call') throw new Error('shape');

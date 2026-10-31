@@ -106,7 +106,11 @@ it('shrinks and replays duplicate loss injected into real official-driver result
   expect(String(replay.errorInstance)).toContain('multiplicity diff');
 }, 120000);
 // Replay: TYPEDHOUSE_DIFF_SEED=20261027 TYPEDHOUSE_DIFF_PATH='...' pnpm test:compiler-integration packages/client/test/differential.integration.ts
-it('executes 60 shrinkable bounded query topologies through decoded Backend plugins', async () => {
+// Explicit nightly-sized local invocation (no hosted schedule claim):
+// TYPEDHOUSE_DIFF_RUNS=10000 pnpm test:compiler-integration packages/client/test/differential.integration.ts
+const runs = Number(process.env.TYPEDHOUSE_DIFF_RUNS ?? 500);
+if (runs !== 500 && runs !== 10000) throw new Error('TYPEDHOUSE_DIFF_RUNS must be 500 or 10000');
+it(`executes ${runs} shrinkable bounded query topologies through decoded Backend plugins`, async () => {
   const shapes = new Set<string>();
   const started = performance.now();
   const details = await fc.check(fc.asyncProperty(recipeArbitrary, async recipe => {
@@ -119,8 +123,9 @@ it('executes 60 shrinkable bounded query topologies through decoded Backend plug
       });
       throw new Error(`${String(cause)}\n${JSON.stringify(diagnostics)}`, { cause });
     }
-  }), { seed: Number(process.env.TYPEDHOUSE_DIFF_SEED ?? seed), numRuns: 60, ...(process.env.TYPEDHOUSE_DIFF_PATH ? { path: process.env.TYPEDHOUSE_DIFF_PATH } : {}) });
+  }), { seed: Number(process.env.TYPEDHOUSE_DIFF_SEED ?? seed), numRuns: runs, ...(process.env.TYPEDHOUSE_DIFF_PATH ? { path: process.env.TYPEDHOUSE_DIFF_PATH } : {}) });
   console.info('bounded differential', { runs: details.numRuns, topologies: shapes.size, milliseconds: Math.round(performance.now() - started), seed: details.seed });
   if (details.failed) throw new Error(`seed=${details.seed} path=${details.counterexamplePath} shrinks=${details.numShrinks}\nminimized recipe=${JSON.stringify(details.counterexample)}\n${details.errorInstance instanceof Error ? details.errorInstance.stack : String(details.errorInstance)}`);
-  expect(details.numRuns).toBe(60);
-}, 120000);
+  expect(details.numRuns).toBe(runs);
+  expect(shapes.size).toBeGreaterThan(50);
+}, runs === 10000 ? 3600000 : 120000);

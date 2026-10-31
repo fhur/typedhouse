@@ -108,13 +108,15 @@ it('fences: volatile, cast, divide, known/user-origin and raw projections neithe
   if (rawDropped.root.kind !== 'Project' || rawDropped.root.input.kind !== 'Project') throw new Error('shape');
   expect(rawDropped.root.input.exprs.raw?.kind).toBe('Raw');
   expect(rawDropped.root.input.input).toBe(q.ir);
-  for (const inner of stacks) {
+  for (const [i, inner] of stacks.entries()) {
     // Filter above: nothing moves (b)/(c). Outer map dropping the hazard: no merge (d).
     const filtered = inner.where(r => r.id.gt(1n));
     expect(rewrite(filtered.ir).root).toBe(filtered.ir);
     const dropped = inner.map(r => ({ id: r.id }));
     expect(rewrite(dropped.ir).root).toBe(dropped.ir);
-    expect(selects(compile(dropped.ir).sql)).toBe(selects(emitNaive(dropped.ir).sql));
+    // Slice 3 fix round 1: the hazardous selection folds over its scan (the hash stack's `h` reads the shadowed `id`,
+    // so that one keeps its scope); the narrower outer selection stays above it.
+    expect(selects(compile(dropped.ir).sql)).toBe(i === 3 ? 3 : 2);
   }
   // Filter referencing the hazard itself is also blocked by (b).
   const onCast = q.map(r => ({ c: cast(r.text, col.Nullable(col.UInt64)) })).where(r => r.c.gt(1n));
@@ -221,11 +223,11 @@ it('(a) same-pass staleness: an earlier arm rewriting one parent never under-cou
 });
 
 it('alias shadowing: a merged or pushed alias that equals any physical column (even a pruned one) keeps its own block', () => {
-  // `extra` is never read, only shadowed.
+  // `extra` is never read, only shadowed: since slice 3 fix round 1 an unread shadow folds (the native twin checks both alias settings).
   const pruned = q.map(r => ({ a: r.n.plus(val(1n, col.Int64)) })).map(r => ({ extra: r.a })).where(r => r.extra.gt(1n));
   let { compiled, hits } = rewrite(pruned.ir);
   expect(hits.MergeProject).toBe(1); expect(hits.PushFilterProject).toBe(1);
-  expect(compiled.sql).toBe('SELECT `__typedhouse_input`.`n` + {p0:Int64} AS `extra` FROM (SELECT `n` FROM `adv` WHERE `n` + {p0:Int64} > {p1:Int64}) AS `__typedhouse_input`');
+  expect(compiled.sql).toBe('SELECT `n` + {p0:Int64} AS `extra` FROM `adv` WHERE `n` + {p0:Int64} > {p1:Int64}');
   // Alias equals the column the pushed WHERE reads.
   const same = q.map(r => ({ n: r.n.plus(val(1n, col.Int64)) })).where(r => r.n.gt(1n));
   ({ compiled } = rewrite(same.ir));
@@ -404,7 +406,7 @@ it('a total-but-unsafe pushed filter stays sound over an Aggregate (new block, n
   const j = rewrite(overArray.ir);
   expect(j.hits.PushFilterProject).toBe(1); expect(j.hits.PushFilterArrayJoin).toBe(0);
   if (j.root.kind !== 'Project' || j.root.input.kind !== 'Filter' || j.root.input.input.kind !== 'ArrayJoin') throw new Error('shape');
-  // Slice 2 folds the ARRAY JOIN into the scan block (alias-dependent WHERE after it); the computed `id` alias shadows
-  // the physical column, so the selection alone keeps its derived table. Emission shape updated deliberately.
-  expect(j.compiled.sql).toContain('FROM (SELECT `id`, `one` FROM `adv` ARRAY JOIN `ids` AS `one` WHERE `one` = {p1:String}) AS `__typedhouse_input`');
+  // Slice 2 folds the ARRAY JOIN into the scan block (alias-dependent WHERE after it); slice 3 fix round 1 folds the
+  // selection too, since nothing in the block reads the shadowed `id`. Emission shape updated deliberately.
+  expect(j.compiled.sql).toBe('SELECT `one` AS `o`, `id` + {p0:Int64} AS `id` FROM `adv` ARRAY JOIN `ids` AS `one` WHERE `one` = {p1:String}');
 });

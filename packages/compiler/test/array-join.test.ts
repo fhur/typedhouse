@@ -79,9 +79,14 @@ it('keeps one ARRAY JOIN per block and never folds over a CTE, a derived table, 
   // LEFT folds only over deterministic filters: a volatile call keeps the nested emission, as the rewrite rules never move it.
   const volatile = defineFunction({ name: 'rowNumberInAllBlocks', args: [], returns: col.UInt64, deterministic: false });
   expect(compile(from(t).where(() => volatile().eq(0n)).leftArrayJoin(r => r.a, 'v').ir).sql).toContain('WHERE rowNumberInAllBlocks() = {p0:UInt64}) AS `__typedhouse_input` LEFT ARRAY JOIN `__typedhouse_input`.`a` AS `__typedhouse_element`');
-  // Aggregate blocks qualify source columns with the input alias, so an expanded block stays a derived table (recorded).
+  // (vii) An aggregate folds over the expanded block; the block is emitted unqualified so the alias is a plain column.
   const grouped = from(t).arrayJoin(r => r.a, 'v').groupBy(r => ({ id: r.id })).aggregate(() => ({ n: count() }));
-  expect(compile(grouped.ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id`, count() AS `n` FROM (SELECT `id` FROM `t\\`` ARRAY JOIN `a` AS `v`) AS `__typedhouse_input` GROUP BY `__typedhouse_input`.`id`');
+  expect(compile(grouped.ir).sql).toBe('SELECT `id`, count() AS `n` FROM `t\\`` ARRAY JOIN `a` AS `v` GROUP BY `id`');
+  const byAlias = from(t).arrayJoin(r => r.a.element('label'), 'v').where(r => r.v.ne('x')).groupBy(r => ({ v: r.v })).aggregate(() => ({ n: count() })).where(r => r.n.gt(1n));
+  expect(compile(byAlias.ir).sql).toBe('SELECT `v`, count() AS `n` FROM `t\\`` ARRAY JOIN tupleElement(`a`, {p0:String}) AS `v` WHERE `v` != {p1:String} GROUP BY `v` HAVING `n` > {p2:UInt64}');
+  expect(compile(byAlias.ir).params).toEqual(emitNaive(byAlias.ir).params);
+  // A key alias that shadows the expansion alias with another expression keeps the explicit scope.
+  expect(compile(from(t).arrayJoin(r => r.a, 'v').groupBy(r => ({ v: r.id })).aggregate(() => ({ n: count() })).ir).sql).toContain(') AS `__typedhouse_input` GROUP BY');
 });
 it('selects the alias as a plain column, shadow-checks it against computed aliases, and folds DISTINCT over the expansion', () => {
   const expanded = from(t).arrayJoin(r => r.a, 'v');

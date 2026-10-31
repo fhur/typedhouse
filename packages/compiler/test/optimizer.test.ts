@@ -35,15 +35,24 @@ it('folds above but not through projection and distinct fences', () => {
     .where(r => r.next.eq(2n)).orderBy(r => r.next).limit(1);
   expect(selects(compile(q.ir).sql)).toBe(2);
   expect(compile(q.ir).sql).toBe('SELECT `__typedhouse_input`.`next` FROM (SELECT DISTINCT `stock` + {p0:UInt64} AS `next` FROM `products`) AS `__typedhouse_input` WHERE `__typedhouse_input`.`next` = {p1:UInt64} ORDER BY `__typedhouse_input`.`next` ASC LIMIT 1');
-  // A computed alias shadowing a physical column keeps its own derived table, as before.
+  // A computed alias shadowing a physical column that nothing else in its block reads folds (slice 3); the filter
+  // after DISTINCT still opens the second block, which reads the alias from the derived table.
   const shadowed = from(products).map(r => ({ stock: r.stock.plus(1n) })).distinct()
     .where(r => r.stock.eq(2n)).orderBy(r => r.stock).limit(1);
-  expect(selects(compile(shadowed.ir).sql)).toBe(4);
+  expect(selects(compile(shadowed.ir).sql)).toBe(2);
+  expect(compile(shadowed.ir).sql).toContain('FROM (SELECT DISTINCT `stock` + {p0:UInt64} AS `stock` FROM `products`) AS `__typedhouse_input` WHERE');
+  expect(selects(compile(from(products).where(r => r.stock.gt(1n)).map(r => ({ stock: r.stock.plus(1n) })).ir).sql)).toBe(2); // the WHERE reads `stock`
   // Reversed: DISTINCT after ORDER BY still fences, and no DISTINCT is emitted where the IR has none.
   const reversed = from(products).where(r => r.stock.gt(1n)).orderBy(r => r.stock).distinct();
   expect(selects(compile(reversed.ir).sql)).toBe(2);
   expect(compile(reversed.ir).sql).toBe('SELECT DISTINCT `__typedhouse_input`.`id`, `__typedhouse_input`.`category`, `__typedhouse_input`.`stock` FROM (SELECT `id`, `category`, `stock` FROM `products` WHERE `stock` > {p0:UInt64} ORDER BY `stock` ASC) AS `__typedhouse_input`');
   expect(compile(from(products).where(r => r.stock.gt(1n)).orderBy(r => r.stock).ir).sql).not.toContain('DISTINCT');
+  // (viii) A whole-row selection after DISTINCT folds, so distinct().map(identity).orderBy() is one SELECT; a narrower one keeps two.
+  const whole = from(products).distinct().map(r => ({ id: r.id, category: r.category, stock: r.stock })).orderBy(r => r.id);
+  expect(selects(compile(whole.ir).sql)).toBe(1);
+  expect(compile(whole.ir).sql).toBe('SELECT DISTINCT `id`, `category`, `stock` FROM `products` ORDER BY `id` ASC');
+  // A narrower selection is still naive-emitted over the DISTINCT block, and the sort above it opens its own block.
+  expect(selects(compile(from(products).distinct().map(r => ({ id: r.id })).orderBy(r => r.id).ir).sql)).toBe(3);
 });
 
 it('preserves shared parameter identity and textual allocation order', () => {
