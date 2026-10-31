@@ -8,8 +8,18 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B 
 type Matching<F extends Input, I extends readonly Input[]> = { [K in keyof I]: Equal<F['_rowType'], I[K]['_rowType']> extends true ? unknown : { readonly union_row_mismatch: never } };
 type UnionCaps<I extends readonly Input[]> = { readonly live: false extends { [K in keyof I]: I[K]['caps']['live'] extends false ? false : never }[number] ? false : I[number]['caps']['live'] };
 
-/** Bag union, aligned by field path. Equal decoded rows still require identical SQL descriptors;
- * implicit ClickHouse common-type coercion is deliberately not supported. */
+/** Append rows from at least two queries, preserving duplicates.
+ * Columns align by field path, not object insertion order. Inputs must have the
+ * same row shape and identical ClickHouse descriptors; matching JavaScript types
+ * alone are insufficient, and implicit common-type coercion is not supported.
+ * Use `distinct()` on the result when duplicates should be removed.
+ * @example
+ * ```ts
+ * const matched = from(components).where(c => c.matched_part_ids.notEmpty());
+ * const unmatched = from(components).where(c => c.matched_part_ids.empty());
+ * unionAll(matched, unmatched).orderBy(c => c.entityId);
+ * ```
+ */
 export function unionAll<F extends Input, const I extends readonly [Input, ...Input[]]>(first: F, ...rest: I & Matching<NoInfer<F>, I>): Query<F['_rowType'], UnionCaps<readonly [F, ...I]>, F['row'], true> {
   const inputs = [first, ...rest];
   if (inputs.length < 2) throw new Error('union_input_count at Union.inputs');

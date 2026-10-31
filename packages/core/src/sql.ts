@@ -4,7 +4,14 @@ import { assertDataContainer, exprNode, type ExprNode } from './ir.js';
 import type { KnownResultDescriptor } from './known-functions.js';
 
 export type SqlValue = string | boolean | number | bigint | Date | readonly SqlValue[];
+/** Trusted scalar SQL awaiting a result-type declaration before use as an expression. */
 export interface SqlSnippet {
+  /** Declare the snippet's result type; this neither casts nor verifies the SQL result.
+   * @example
+   * ```ts
+   * sql`length(${val('abc')})`.as(col.UInt64);
+   * ```
+   */
   as<C extends Column>(descriptor: C & (C['type'] extends KnownResultDescriptor ? unknown : never)): DescribedExpr<Value<C>, never, 'row', C['type']>;
 }
 
@@ -60,8 +67,19 @@ function plainValue(value: unknown, active = new Set<object>()): void {
   } finally { active.delete(value); }
 }
 
-/** Trusted scalar SQL, not a SQL parser. Holes must occupy expression positions.
- * Values are parameters; only expression operands supply bound column references. */
+/** Build trusted scalar SQL and finish with `.as(descriptor)` to declare its result.
+ * Literal template text is trusted, not parsed or sanitized. Holes must occupy
+ * expression positions: plain values become parameters and row expressions bind
+ * column references. Holes cannot supply identifiers, keywords, or SQL fragments.
+ * Aggregate and grouped expressions are not accepted as operands.
+ * @example
+ * ```ts
+ * from(components).map(c => ({
+ *   id: c.entityId,
+ *   label: sql`concat(${c.entityId}, ${'-component'})`.as(col.String),
+ * }));
+ * ```
+ */
 export function sql(parts: TemplateStringsArray, ...values: readonly (ExprOperand<unknown, string, 'row'> | SqlValue)[]): SqlSnippet {
   assertDataContainer(parts);
   if (!Array.isArray(parts) || parts.length !== values.length + 1) throw new Error('invalid_sql_parts');

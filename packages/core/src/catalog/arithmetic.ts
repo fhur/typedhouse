@@ -22,6 +22,13 @@ const expDefinition = defineFunction({ name: 'exp', args: [Object.freeze({ match
   const base = t.kind === 'Nullable' ? t.inner : t;
   return base.kind === 'scalar' && /^(U?Int(8|16|32|64)|Float(32|64))$/.test(base.name);
 } })], returns: col.Float64, deterministic: true, origin: 'typed', surface: 'exp' }).definition;
+/** Compute e raised to a numeric expression, returning Float64 and propagating NULL.
+ * Supports integer descriptors up to 64 bits and floats, not Decimal. Equivalent to `.exp()`.
+ * @example
+ * ```ts
+ * exp(val(1));
+ * ```
+ */
 export function exp<E extends Expr<number | bigint | null, string, Mode>>(value: E & ExpReceiver<E['ir']['type']>): ExpResult<ExprValue<E>, E['name'], E['mode']>;
 export function exp(value: Expr<number | bigint | null, string, Mode>): Expr<unknown, string, Mode> { return invoke(expDefinition, [value]); }
 export const arithmetic = [

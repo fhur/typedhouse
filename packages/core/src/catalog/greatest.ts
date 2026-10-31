@@ -44,7 +44,17 @@ export const greatestDefinition = defineFunction({
   nullable: 'never', deterministic: true, origin: 'typed',
 }).definition;
 
-/** Non-null temporal slice. Descriptor-erased Dates and dynamically uncertain zones are not evidence. */
+/** Return the latest of at least two non-null DateTime64 expressions.
+ * Operands must have matching timezones and precision 0–3; the result keeps the
+ * highest precision. This bounded helper does not accept numeric or nullable values.
+ * @example
+ * ```ts
+ * greatest(
+ *   val(new Date('2025-01-01T00:00:00Z'), col.DateTime64(3, 'UTC')),
+ *   val(new Date('2025-02-01T00:00:00Z'), col.DateTime64(3, 'UTC')),
+ * );
+ * ```
+ */
 export function greatest<const A extends readonly [TemporalOperand, TemporalOperand, ...TemporalOperand[]]>(...args: A & Checked<A> & Fixed<A>): DescribedExpr<Date, A[0]['name'], A[0]['mode'], ResultDescriptor<A>>;
 export function greatest(...args: readonly Expr<Date, string, Mode>[]): Expr<unknown, string, Mode> {
   if (args.length < 2) throw new Error('invalid_argument_arity');

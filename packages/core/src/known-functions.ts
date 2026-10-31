@@ -18,6 +18,9 @@ export interface KnownScalar<F extends string> {
   (): KnownExpr<F>;
   <N extends string, M extends Mode>(first: ExprOperand<unknown, N, M>, ...rest: readonly (ExprOperand<unknown, string, NoInfer<M>> | ConstantOperand<unknown>)[]): KnownExpr<N, M>;
 }
+/** A catalogued aggregate accepting grouped expressions or `val()` constants.
+ * Declare its result with `.as()`; catalog membership does not check the server signature.
+ */
 export interface KnownAggregate<F extends string> {
   (): KnownExpr<F, 'agg'>;
   <N extends string>(first: ExprOperand<unknown, N, 'grouped'>, ...rest: readonly (ExprOperand<unknown, string, 'grouped'> | ConstantOperand<unknown>)[]): KnownExpr<N, 'agg'>;
@@ -28,6 +31,17 @@ export type KnownFunctions<C extends KnownFunctionCatalog> = {
   readonly agg: { readonly [K in keyof C as C[K]['isAggregate'] extends true ? K : never]: KnownAggregate<K & string> };
 };
 
+/** Create scalar `fn` and aggregate `agg` callables from a captured function catalog.
+ * Usually consumed through code-generated bindings. Arguments must be expressions
+ * (wrap literals with `val()`); nonconstant operands must share a mode. Results
+ * require `.as()` declarations. Catalog membership is not signature validation or
+ * a guarantee that the connected server supports a particular call.
+ * @example
+ * ```ts
+ * const { fn } = createKnownFunctions({ lower: { isAggregate: false, deterministic: true, aliasTo: '' } });
+ * from(parts).map(p => ({ mpn: fn.lower(p.mpn).as(col.String) }));
+ * ```
+ */
 export function createKnownFunctions<const C extends KnownFunctionCatalog>(catalog: C): KnownFunctions<C> {
   // Capture the whole provided catalog, not a mutable registry or an application
   // module import. The IR constructor snapshots this plain data on each call.

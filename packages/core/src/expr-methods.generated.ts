@@ -37,47 +37,869 @@ type ArithmeticResult<T, N extends string, M extends Mode, D, U, B, Op, S = Prom
   DecimalPromoted<D, B, Op> extends { precision: infer P extends number; scale: infer Scale extends number } ?
   Expr<NullResult<T | U, Decimal<P, Scale>>, N, M> & { readonly ir: Expr<T, N, M>['ir'] & { readonly type: null extends T | U ? { readonly kind: 'Nullable'; readonly inner: DecimalPromoted<D, B, Op> } : DecimalPromoted<D, B, Op> } } : never;
 export interface GeneratedExprMethods<T, N extends string = never, M extends Mode = 'row'> {
+  /**
+   * Compare for equality. NULL propagates; use isNull() to test for NULL, not eq(null).
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Accepts string, number, bigint, boolean or Date receivers (optionally null).
+   * Operands must match the decoded family; number and bigint are not interchangeable.
+   * Retained SQL descriptors still undergo compiler compatibility and parameter checks;
+   * a decoded string or Date alone does not prove a native overload is supported.
+   * Use Date or DateTime64(0–3) for serializable temporal parameters.
+   * @param other Plain value bound against the receiver descriptor, or a typed expression/
+   * constant retaining its own descriptor. NULL is not a null-safe comparison.
+   * @returns boolean, with null in the result type if either operand is nullable.
+   * @example
+   * ```ts
+   * from(parts).where(p => p.mpn.eq('ABC'));
+   * ```
+   */
   eq<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  /**
+   * Compare for inequality. NULL propagates, so NULL rows do not pass a where() filter.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Accepts string, number, bigint, boolean or Date receivers (optionally null).
+   * Operands must match the decoded family; number and bigint are not interchangeable.
+   * Retained SQL descriptors still undergo compiler compatibility and parameter checks;
+   * a decoded string or Date alone does not prove a native overload is supported.
+   * Use Date or DateTime64(0–3) for serializable temporal parameters.
+   * @param other Plain value bound against the receiver descriptor, or a typed expression/
+   * constant retaining its own descriptor. NULL is not a null-safe comparison.
+   * @returns boolean, with null in the result type if either operand is nullable.
+   * @example
+   * ```ts
+   * from(parts).where(p => p.mpn.ne('ABC'));
+   * ```
+   */
   ne<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  /**
+   * Test whether this value is strictly less than the operand. NULL propagates.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Accepts string, number, bigint, boolean or Date receivers (optionally null).
+   * Operands must match the decoded family; number and bigint are not interchangeable.
+   * Retained SQL descriptors still undergo compiler compatibility and parameter checks;
+   * a decoded string or Date alone does not prove a native overload is supported.
+   * Use Date or DateTime64(0–3) for serializable temporal parameters.
+   * @param other Plain value bound against the receiver descriptor, or a typed expression/
+   * constant retaining its own descriptor. NULL is not a null-safe comparison.
+   * @returns boolean, with null in the result type if either operand is nullable.
+   * @example
+   * ```ts
+   * val(2n).lt(3n);
+   * ```
+   */
   lt<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  /**
+   * Test whether this value is less than or equal to the operand. NULL propagates.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Accepts string, number, bigint, boolean or Date receivers (optionally null).
+   * Operands must match the decoded family; number and bigint are not interchangeable.
+   * Retained SQL descriptors still undergo compiler compatibility and parameter checks;
+   * a decoded string or Date alone does not prove a native overload is supported.
+   * Use Date or DateTime64(0–3) for serializable temporal parameters.
+   * @param other Plain value bound against the receiver descriptor, or a typed expression/
+   * constant retaining its own descriptor. NULL is not a null-safe comparison.
+   * @returns boolean, with null in the result type if either operand is nullable.
+   * @example
+   * ```ts
+   * val(2n).le(3n);
+   * ```
+   */
   le<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  /**
+   * Test whether this value is strictly greater than the operand. NULL propagates.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Accepts string, number, bigint, boolean or Date receivers (optionally null).
+   * Operands must match the decoded family; number and bigint are not interchangeable.
+   * Retained SQL descriptors still undergo compiler compatibility and parameter checks;
+   * a decoded string or Date alone does not prove a native overload is supported.
+   * Use Date or DateTime64(0–3) for serializable temporal parameters.
+   * @param other Plain value bound against the receiver descriptor, or a typed expression/
+   * constant retaining its own descriptor. NULL is not a null-safe comparison.
+   * @returns boolean, with null in the result type if either operand is nullable.
+   * @example
+   * ```ts
+   * val(3n).gt(2n);
+   * ```
+   */
   gt<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  /**
+   * Test whether this value is greater than or equal to the operand. NULL propagates.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Accepts string, number, bigint, boolean or Date receivers (optionally null).
+   * Operands must match the decoded family; number and bigint are not interchangeable.
+   * Retained SQL descriptors still undergo compiler compatibility and parameter checks;
+   * a decoded string or Date alone does not prove a native overload is supported.
+   * Use Date or DateTime64(0–3) for serializable temporal parameters.
+   * @param other Plain value bound against the receiver descriptor, or a typed expression/
+   * constant retaining its own descriptor. NULL is not a null-safe comparison.
+   * @returns boolean, with null in the result type if either operand is nullable.
+   * @example
+   * ```ts
+   * val(3n).ge(2n);
+   * ```
+   */
   ge<U extends NonNullable<T> | null>(this: Expr<string | number | bigint | boolean | Date | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  /**
+   * Test an inclusive range with SQL BETWEEN; both endpoints are included.
+   * Supports integer/float, String/FixedString, Date and DateTime64(0–3) descriptors,
+   * including Nullable/LowCardinality wrappers; not Bool, Decimal, Enum or address strings.
+   * Bounds must share the receiver’s decoded family (number and bigint are distinct).
+   * The compiler rejects opaque, scalar-subquery and volatile receivers because lowering
+   * may evaluate the receiver twice. Nullable operands give boolean | null; a NULL
+   * comparison can still combine with false under SQL three-valued AND.
+   * @param lower Inclusive lower bound; plain values bind using the receiver descriptor.
+   * @param upper Inclusive upper bound; expressions retain their own descriptor.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * @example
+   * ```ts
+   * const inside: Expr<boolean> = val(3n).between(1n, 5n);
+   * val(new Date('2025-01-08T12:00:00Z'), col.DateTime64(3)).between(
+   *   new Date('2025-01-08T00:00:00Z'), new Date('2025-01-09T00:00:00Z'),
+   * );
+   * ```
+   */
   between<D, L, H, U extends NonNullable<T> | null, V extends NonNullable<T> | null>(this: ExprOperand<string | number | bigint | Date | null, string, M> & { readonly ir: { readonly type: D } } & BetweenReceiver<D>, lower: U | ((ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>) & { readonly ir: { readonly type: L } } & BetweenReceiver<L>), upper: V | ((ExprOperand<V, string, NoInfer<M>> | ConstantOperand<V>) & { readonly ir: { readonly type: H } } & BetweenReceiver<H>)): Expr<NullResult<T | U | V, boolean>, N, M>;
+  /**
+   * Test membership in a value array or a one-column query. Empty arrays match nothing.
+   * A query operand is a set, not a scalar subquery; it may return many rows.
+   * Nullable receivers retain a nullable result type; do not use membership to test for NULL.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * This overload requires retained Date or Nullable(Date) evidence, not Date32,
+   * DateTime, DateTime64 or LowCardinality. Date values bind as UTC calendar dates.
+   * @param values Non-null values bound as one Array parameter against the receiver
+   * descriptor. Empty lists are supported; expressions inside the list are not.
+   * @returns boolean, conservatively boolean | null for a nullable receiver.
+   * Membership does not follow scalar comparison NULL propagation; NULL is not
+   * matched as an ordinary value. Use isNull() for an explicit NULL test.
+   * @example
+   * ```ts
+   * const day = val(new Date('2025-01-05T00:00:00Z'), col.Date);
+   * const member: Expr<boolean> = day.in([new Date('2025-01-05T00:00:00Z')]);
+   * ```
+   */
   in(this: Expr<Date | null, N, M> & { readonly ir: { readonly type: DateMembershipDescriptor } }, values: readonly Date[]): Expr<NullResult<T, boolean>, N, M>;
+  /**
+   * Test membership in a value array or a one-column query. Empty arrays match nothing.
+   * A query operand is a set, not a scalar subquery; it may return many rows.
+   * Nullable receivers retain a nullable result type; do not use membership to test for NULL.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * This overload requires retained Date or Nullable(Date) evidence, not Date32,
+   * DateTime, DateTime64 or LowCardinality. Date values bind as UTC calendar dates.
+   * @param query An independently scoped, flat one-column query of the compatible
+   * family, with any number of rows. Nullable set columns are allowed; outer-column
+   * captures are not. Do not wrap this set in scalar().
+   * @returns boolean, conservatively boolean | null for a nullable receiver.
+   * Membership does not follow scalar comparison NULL propagation; NULL is not
+   * matched as an ordinary value. Use isNull() for an explicit NULL test.
+   * @example
+   * ```ts
+   * const weeks = from(components).map(c => c.updatedAt.toStartOfWeek());
+   * val(new Date('2025-01-05T00:00:00Z'), col.Date).in(weeks);
+   * ```
+   */
   in<R>(this: Expr<Date | null, N, M> & { readonly ir: { readonly type: DateMembershipDescriptor } }, query: DateSetQuery<R>): Expr<NullResult<T, boolean>, N, M>;
+  /**
+   * Test membership in a value array or a one-column query. Empty arrays match nothing.
+   * A query operand is a set, not a scalar subquery; it may return many rows.
+   * Nullable receivers retain a nullable result type; do not use membership to test for NULL.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * This overload supports integer/float, String, Bool and UUID descriptors, optionally
+   * Nullable; not FixedString, Decimal, Enum, IP or LowCardinality. Matching decoded
+   * families are required; UUID remains distinct from String and number from bigint.
+   * UUID query sets are supported, but non-null UUID JS list parameters currently
+   * fail serialization; a branded string does not supply parameter support.
+   * @param values Non-null values bound as one Array parameter against the receiver
+   * descriptor. Empty lists are supported; expressions inside the list are not.
+   * @returns boolean, conservatively boolean | null for a nullable receiver.
+   * Membership does not follow scalar comparison NULL propagation; NULL is not
+   * matched as an ordinary value. Use isNull() for an explicit NULL test.
+   * @example
+   * ```ts
+   * from(parts).where(p => p.mpn.in(['ABC', 'DEF']));
+   * ```
+   */
   in(this: Expr<string | number | bigint | boolean | null, string, M>, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;
+  /**
+   * Test membership in a value array or a one-column query. Empty arrays match nothing.
+   * A query operand is a set, not a scalar subquery; it may return many rows.
+   * Nullable receivers retain a nullable result type; do not use membership to test for NULL.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * This overload supports integer/float, String, Bool and UUID descriptors, optionally
+   * Nullable; not FixedString, Decimal, Enum, IP or LowCardinality. Matching decoded
+   * families are required; UUID remains distinct from String and number from bigint.
+   * UUID query sets are supported, but non-null UUID JS list parameters currently
+   * fail serialization; a branded string does not supply parameter support.
+   * @param query An independently scoped, flat one-column query of the compatible
+   * family, with any number of rows. Nullable set columns are allowed; outer-column
+   * captures are not. Do not wrap this set in scalar().
+   * @returns boolean, conservatively boolean | null for a nullable receiver.
+   * Membership does not follow scalar comparison NULL propagation; NULL is not
+   * matched as an ordinary value. Use isNull() for an explicit NULL test.
+   * @example
+   * ```ts
+   * const selectedMpns = from(parts).where(p => p.mpn.startsWith('ABC')).map(p => p.mpn);
+   * from(parts).where(p => p.mpn.in(selectedMpns));
+   * ```
+   */
   in<R>(this: Expr<string | number | bigint | boolean | null, string, M>, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;
+  /**
+   * Test non-membership in a value array or a one-column query. Empty arrays exclude nothing.
+   * Nullable receivers retain a nullable result type; use isNull() for an explicit NULL test.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * This overload requires retained Date or Nullable(Date) evidence, not Date32,
+   * DateTime, DateTime64 or LowCardinality. Date values bind as UTC calendar dates.
+   * @param values Non-null values bound as one Array parameter against the receiver
+   * descriptor. Empty lists are supported; expressions inside the list are not.
+   * @returns boolean, conservatively boolean | null for a nullable receiver.
+   * Membership does not follow scalar comparison NULL propagation; NULL is not
+   * matched as an ordinary value. Use isNull() for an explicit NULL test.
+   * @example
+   * ```ts
+   * const day = val(new Date('2025-01-05T00:00:00Z'), col.Date);
+   * const member: Expr<boolean> = day.notIn([new Date('2025-01-05T00:00:00Z')]);
+   * ```
+   */
   notIn(this: Expr<Date | null, N, M> & { readonly ir: { readonly type: DateMembershipDescriptor } }, values: readonly Date[]): Expr<NullResult<T, boolean>, N, M>;
+  /**
+   * Test non-membership in a value array or a one-column query. Empty arrays exclude nothing.
+   * Nullable receivers retain a nullable result type; use isNull() for an explicit NULL test.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * This overload requires retained Date or Nullable(Date) evidence, not Date32,
+   * DateTime, DateTime64 or LowCardinality. Date values bind as UTC calendar dates.
+   * @param query An independently scoped, flat one-column query of the compatible
+   * family, with any number of rows. Nullable set columns are allowed; outer-column
+   * captures are not. Do not wrap this set in scalar().
+   * @returns boolean, conservatively boolean | null for a nullable receiver.
+   * Membership does not follow scalar comparison NULL propagation; NULL is not
+   * matched as an ordinary value. Use isNull() for an explicit NULL test.
+   * @example
+   * ```ts
+   * const weeks = from(components).map(c => c.updatedAt.toStartOfWeek());
+   * val(new Date('2025-01-05T00:00:00Z'), col.Date).notIn(weeks);
+   * ```
+   */
   notIn<R>(this: Expr<Date | null, N, M> & { readonly ir: { readonly type: DateMembershipDescriptor } }, query: DateSetQuery<R>): Expr<NullResult<T, boolean>, N, M>;
+  /**
+   * Test non-membership in a value array or a one-column query. Empty arrays exclude nothing.
+   * Nullable receivers retain a nullable result type; use isNull() for an explicit NULL test.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * This overload supports integer/float, String, Bool and UUID descriptors, optionally
+   * Nullable; not FixedString, Decimal, Enum, IP or LowCardinality. Matching decoded
+   * families are required; UUID remains distinct from String and number from bigint.
+   * UUID query sets are supported, but non-null UUID JS list parameters currently
+   * fail serialization; a branded string does not supply parameter support.
+   * @param values Non-null values bound as one Array parameter against the receiver
+   * descriptor. Empty lists are supported; expressions inside the list are not.
+   * @returns boolean, conservatively boolean | null for a nullable receiver.
+   * Membership does not follow scalar comparison NULL propagation; NULL is not
+   * matched as an ordinary value. Use isNull() for an explicit NULL test.
+   * @example
+   * ```ts
+   * from(parts).where(p => p.mpn.notIn(['obsolete']));
+   * ```
+   */
   notIn(this: Expr<string | number | bigint | boolean | null, string, M>, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;
+  /**
+   * Test non-membership in a value array or a one-column query. Empty arrays exclude nothing.
+   * Nullable receivers retain a nullable result type; use isNull() for an explicit NULL test.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * This overload supports integer/float, String, Bool and UUID descriptors, optionally
+   * Nullable; not FixedString, Decimal, Enum, IP or LowCardinality. Matching decoded
+   * families are required; UUID remains distinct from String and number from bigint.
+   * UUID query sets are supported, but non-null UUID JS list parameters currently
+   * fail serialization; a branded string does not supply parameter support.
+   * @param query An independently scoped, flat one-column query of the compatible
+   * family, with any number of rows. Nullable set columns are allowed; outer-column
+   * captures are not. Do not wrap this set in scalar().
+   * @returns boolean, conservatively boolean | null for a nullable receiver.
+   * Membership does not follow scalar comparison NULL propagation; NULL is not
+   * matched as an ordinary value. Use isNull() for an explicit NULL test.
+   * @example
+   * ```ts
+   * const selectedMpns = from(parts).where(p => p.mpn.startsWith('ABC')).map(p => p.mpn);
+   * from(parts).where(p => p.mpn.notIn(selectedMpns));
+   * ```
+   */
   notIn<R>(this: Expr<string | number | bigint | boolean | null, string, M>, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;
+  /**
+   * Combine boolean expressions using SQL three-valued AND, not JavaScript short-circuiting.
+   * A false operand makes the result false; otherwise NULL can propagate.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Only Bool expressions (optionally Nullable/LowCardinality), not numeric truthiness.
+   * @param other Boolean/null value bound as a parameter, or same-mode boolean expression.
+   * @returns boolean, conservatively boolean | null if either operand is nullable,
+   * even when a dominating true/false value makes a particular result non-null.
+   * Do not use SQL boolean composition as a JavaScript short-circuit guard against
+   * invalid arithmetic; evaluation order is not promised here.
+   * @example
+   * ```ts
+   * from(parts).where(p => p.mpn.notEmpty().and(p.mpn.startsWith('ABC')));
+   * ```
+   */
   and<U extends boolean | null>(this: Expr<boolean | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  /**
+   * Combine boolean expressions using SQL three-valued OR, not JavaScript short-circuiting.
+   * A true operand makes the result true; otherwise NULL can propagate.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Only Bool expressions (optionally Nullable/LowCardinality), not numeric truthiness.
+   * @param other Boolean/null value bound as a parameter, or same-mode boolean expression.
+   * @returns boolean, conservatively boolean | null if either operand is nullable,
+   * even when a dominating true/false value makes a particular result non-null.
+   * Do not use SQL boolean composition as a JavaScript short-circuit guard against
+   * invalid arithmetic; evaluation order is not promised here.
+   * @example
+   * ```ts
+   * from(parts).where(p => p.mpn.startsWith('ABC').or(p.mpn.startsWith('DEF')));
+   * ```
+   */
   or<U extends boolean | null>(this: Expr<boolean | null, string, M>, other: Operand<U, NoInfer<M>>): Expr<NullResult<T | U, boolean>, N, M>;
+  /**
+   * Negate a boolean expression; NULL remains NULL.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Only Bool expressions (optionally Nullable/LowCardinality), not numeric truthiness.
+   * @returns boolean, or boolean | null for a nullable receiver.
+   * Do not use SQL boolean composition as a JavaScript short-circuit guard against
+   * invalid arithmetic; evaluation order is not promised here.
+   * @example
+   * ```ts
+   * from(parts).where(p => p.mpn.empty().not());
+   * ```
+   */
   not(this: Expr<boolean | null, string, M>): Expr<NullResult<T, boolean>, N, M>;
+  /**
+   * Compute e raised to this value as Float64 (decoded number).
+   * Accepts Int/UInt8–64 and Float32/64, optionally Nullable; not Int128/256,
+   * Decimal or LowCardinality. Large inputs can produce Infinity; this is not a
+   * guarantee of finite output. NULL propagates and retains number | null.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * @example
+   * ```ts
+   * const growth: Expr<number> = val(1).exp();
+   * ```
+   */
   exp<D, V extends number | bigint | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & ExpReceiver<D>): ExpResult<V, N, M>;
+  /**
+   * Add SQL numeric operands, not JavaScript strings or coerced values.
+   * Integer promotion grows the widest operand one step through 64 bits; 64/128/256
+   * retain their width. Either signed operand makes the result signed. Float input
+   * promotes to Float64. Decimal addition uses the larger scale and storage class.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Receivers are integer/float or branded Decimal values, optionally nullable;
+   * Nullable/LowCardinality numeric descriptors are unwrapped for promotion.
+   * The typed operand family must match: no number/bigint or Decimal/number mixing,
+   * even where native ClickHouse has additional overloads. Decimal column/expression
+   * arithmetic is supported, but non-null Decimal JS parameters (including val()
+   * constants) are not serialized by the current compiler; use column expressions.
+   * @param other Descriptor-backed expression/constant; both descriptors determine
+   * width, signedness and Decimal precision/scale.
+   * @returns Promoted numeric expression, nullable if either operand is nullable.
+   * Integers through 32 bits and floats decode as number; 64/128/256-bit integers
+   * decode as bigint. Decimal results are branded strings, with storage precision
+   * 9/18/38/76. Erased descriptor evidence can leave number | bigint rather than
+   * an exact width. Inference describes output; it is not an overflow/scale safety check.
+   * @example
+   * ```ts
+   * const total: Expr<bigint> = val(3, col.UInt32).plus(2);
+   * const floating: Expr<number> = val(3, col.UInt32).plus(val(2));
+   * ```
+   */
   plus<D, B, U extends ArithmeticOperand<T> | null>(this: ExprOperand<number | bigint | Decimal | null, string, M> & { readonly ir: { readonly type: D } }, other: (ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>) & { readonly ir: { readonly type: B } }): ArithmeticResult<T, N, M, D, U, B, 'plus'>;
+  /**
+   * Add SQL numeric operands, not JavaScript strings or coerced values.
+   * Integer promotion grows the widest operand one step through 64 bits; 64/128/256
+   * retain their width. Either signed operand makes the result signed. Float input
+   * promotes to Float64. Decimal addition uses the larger scale and storage class.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Receivers are integer/float or branded Decimal values, optionally nullable;
+   * Nullable/LowCardinality numeric descriptors are unwrapped for promotion.
+   * The typed operand family must match: no number/bigint or Decimal/number mixing,
+   * even where native ClickHouse has additional overloads. Decimal column/expression
+   * arithmetic is supported, but non-null Decimal JS parameters (including val()
+   * constants) are not serialized by the current compiler; use column expressions.
+   * @param other Plain value bound using the receiver descriptor, or an expression/
+   * constant whose descriptor is not retained statically. Use val(value, descriptor)
+   * when a distinct serializable operand width must participate in inference.
+   * @returns Promoted numeric expression, nullable if either operand is nullable.
+   * Integers through 32 bits and floats decode as number; 64/128/256-bit integers
+   * decode as bigint. Decimal results are branded strings, with storage precision
+   * 9/18/38/76. Erased descriptor evidence can leave number | bigint rather than
+   * an exact width. Inference describes output; it is not an overflow/scale safety check.
+   * @example
+   * ```ts
+   * const total: Expr<bigint> = val(3, col.UInt32).plus(2);
+   * const floating: Expr<number> = val(3, col.UInt32).plus(val(2));
+   * ```
+   */
   plus<D, U extends ArithmeticOperand<T> | null>(this: ExprOperand<number | bigint | Decimal | null, string, M> & { readonly ir: { readonly type: D } }, other: U | ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>): ArithmeticResult<T, N, M, D, U, D, 'plus'>;
+  /**
+   * Subtract the operand; integer results are signed, even for unsigned inputs.
+   * The widest integer grows one step through 64 bits; 64/128/256 retain their width.
+   * Float input promotes to Float64. Decimal subtraction uses the larger scale
+   * and storage class; subtraction does not make a nullable operand non-null.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Receivers are integer/float or branded Decimal values, optionally nullable;
+   * Nullable/LowCardinality numeric descriptors are unwrapped for promotion.
+   * The typed operand family must match: no number/bigint or Decimal/number mixing,
+   * even where native ClickHouse has additional overloads. Decimal column/expression
+   * arithmetic is supported, but non-null Decimal JS parameters (including val()
+   * constants) are not serialized by the current compiler; use column expressions.
+   * @param other Descriptor-backed expression/constant; both descriptors determine
+   * width, signedness and Decimal precision/scale.
+   * @returns Promoted numeric expression, nullable if either operand is nullable.
+   * Integers through 32 bits and floats decode as number; 64/128/256-bit integers
+   * decode as bigint. Decimal results are branded strings, with storage precision
+   * 9/18/38/76. Erased descriptor evidence can leave number | bigint rather than
+   * an exact width. Inference describes output; it is not an overflow/scale safety check.
+   * @example
+   * ```ts
+   * const difference: Expr<bigint> = val(0, col.UInt32).minus(val(1, col.UInt32));
+   * ```
+   */
   minus<D, B, U extends ArithmeticOperand<T> | null>(this: ExprOperand<number | bigint | Decimal | null, string, M> & { readonly ir: { readonly type: D } }, other: (ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>) & { readonly ir: { readonly type: B } }): ArithmeticResult<T, N, M, D, U, B, 'minus'>;
+  /**
+   * Subtract the operand; integer results are signed, even for unsigned inputs.
+   * The widest integer grows one step through 64 bits; 64/128/256 retain their width.
+   * Float input promotes to Float64. Decimal subtraction uses the larger scale
+   * and storage class; subtraction does not make a nullable operand non-null.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Receivers are integer/float or branded Decimal values, optionally nullable;
+   * Nullable/LowCardinality numeric descriptors are unwrapped for promotion.
+   * The typed operand family must match: no number/bigint or Decimal/number mixing,
+   * even where native ClickHouse has additional overloads. Decimal column/expression
+   * arithmetic is supported, but non-null Decimal JS parameters (including val()
+   * constants) are not serialized by the current compiler; use column expressions.
+   * @param other Plain value bound using the receiver descriptor, or an expression/
+   * constant whose descriptor is not retained statically. Use val(value, descriptor)
+   * when a distinct serializable operand width must participate in inference.
+   * @returns Promoted numeric expression, nullable if either operand is nullable.
+   * Integers through 32 bits and floats decode as number; 64/128/256-bit integers
+   * decode as bigint. Decimal results are branded strings, with storage precision
+   * 9/18/38/76. Erased descriptor evidence can leave number | bigint rather than
+   * an exact width. Inference describes output; it is not an overflow/scale safety check.
+   * @example
+   * ```ts
+   * const difference: Expr<bigint> = val(0, col.UInt32).minus(val(1, col.UInt32));
+   * ```
+   */
   minus<D, U extends ArithmeticOperand<T> | null>(this: ExprOperand<number | bigint | Decimal | null, string, M> & { readonly ir: { readonly type: D } }, other: U | ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>): ArithmeticResult<T, N, M, D, U, D, 'minus'>;
+  /**
+   * Multiply SQL numeric operands, preserving NULL.
+   * Integers widen one step through 64 bits (64/128/256 stay unchanged); either signed
+   * operand makes the result signed. Float input promotes to Float64. Decimal
+   * scales add and the larger storage class wins; a scale exceeding that storage’s
+   * precision can fail in ClickHouse. Inferred output does not guarantee no overflow.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Receivers are integer/float or branded Decimal values, optionally nullable;
+   * Nullable/LowCardinality numeric descriptors are unwrapped for promotion.
+   * The typed operand family must match: no number/bigint or Decimal/number mixing,
+   * even where native ClickHouse has additional overloads. Decimal column/expression
+   * arithmetic is supported, but non-null Decimal JS parameters (including val()
+   * constants) are not serialized by the current compiler; use column expressions.
+   * @param other Descriptor-backed expression/constant; both descriptors determine
+   * width, signedness and Decimal precision/scale.
+   * @returns Promoted numeric expression, nullable if either operand is nullable.
+   * Integers through 32 bits and floats decode as number; 64/128/256-bit integers
+   * decode as bigint. Decimal results are branded strings, with storage precision
+   * 9/18/38/76. Erased descriptor evidence can leave number | bigint rather than
+   * an exact width. Inference describes output; it is not an overflow/scale safety check.
+   * @example
+   * ```ts
+   * const product: Expr<bigint> = val(3, col.UInt32).multiply(2);
+   * const floating: Expr<number> = val(1.25, col.Float32).multiply(val(2, col.Float32));
+   * ```
+   */
   multiply<D, B, U extends ArithmeticOperand<T> | null>(this: ExprOperand<number | bigint | Decimal | null, string, M> & { readonly ir: { readonly type: D } }, other: (ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>) & { readonly ir: { readonly type: B } }): ArithmeticResult<T, N, M, D, U, B, 'multiply'>;
+  /**
+   * Multiply SQL numeric operands, preserving NULL.
+   * Integers widen one step through 64 bits (64/128/256 stay unchanged); either signed
+   * operand makes the result signed. Float input promotes to Float64. Decimal
+   * scales add and the larger storage class wins; a scale exceeding that storage’s
+   * precision can fail in ClickHouse. Inferred output does not guarantee no overflow.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Receivers are integer/float or branded Decimal values, optionally nullable;
+   * Nullable/LowCardinality numeric descriptors are unwrapped for promotion.
+   * The typed operand family must match: no number/bigint or Decimal/number mixing,
+   * even where native ClickHouse has additional overloads. Decimal column/expression
+   * arithmetic is supported, but non-null Decimal JS parameters (including val()
+   * constants) are not serialized by the current compiler; use column expressions.
+   * @param other Plain value bound using the receiver descriptor, or an expression/
+   * constant whose descriptor is not retained statically. Use val(value, descriptor)
+   * when a distinct serializable operand width must participate in inference.
+   * @returns Promoted numeric expression, nullable if either operand is nullable.
+   * Integers through 32 bits and floats decode as number; 64/128/256-bit integers
+   * decode as bigint. Decimal results are branded strings, with storage precision
+   * 9/18/38/76. Erased descriptor evidence can leave number | bigint rather than
+   * an exact width. Inference describes output; it is not an overflow/scale safety check.
+   * @example
+   * ```ts
+   * const product: Expr<bigint> = val(3, col.UInt32).multiply(2);
+   * const floating: Expr<number> = val(1.25, col.Float32).multiply(val(2, col.Float32));
+   * ```
+   */
   multiply<D, U extends ArithmeticOperand<T> | null>(this: ExprOperand<number | bigint | Decimal | null, string, M> & { readonly ir: { readonly type: D } }, other: U | ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>): ArithmeticResult<T, N, M, D, U, D, 'multiply'>;
+  /**
+   * Divide by the operand; non-Decimal division returns Float64 (number), not
+   * truncated integer division. Division by zero can yield Infinity, -Infinity or
+   * NaN for Float64; Decimal division by zero fails in ClickHouse.
+   * Decimal results keep the numerator scale and larger storage class, truncating
+   * fractional excess rather than rounding. The numerator scale must be at least
+   * the denominator scale for native Decimal division; inferred types do not enforce
+   * that execution constraint. NULL propagates; there is no automatic safe-divide fallback.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Receivers are integer/float or branded Decimal values, optionally nullable;
+   * Nullable/LowCardinality numeric descriptors are unwrapped for promotion.
+   * The typed operand family must match: no number/bigint or Decimal/number mixing,
+   * even where native ClickHouse has additional overloads. Decimal column/expression
+   * arithmetic is supported, but non-null Decimal JS parameters (including val()
+   * constants) are not serialized by the current compiler; use column expressions.
+   * @param other Descriptor-backed expression/constant; both descriptors determine
+   * width, signedness and Decimal precision/scale.
+   * @returns Promoted numeric expression, nullable if either operand is nullable.
+   * Integers through 32 bits and floats decode as number; 64/128/256-bit integers
+   * decode as bigint. Decimal results are branded strings, with storage precision
+   * 9/18/38/76. Erased descriptor evidence can leave number | bigint rather than
+   * an exact width. Inference describes output; it is not an overflow/scale safety check.
+   * @example
+   * ```ts
+   * const ratio: Expr<number> = val(3n).divide(2n);
+   * const missing: Expr<number | null> = val(null, col.Nullable(col.Int64)).divide(2n);
+   * ```
+   */
   divide<D, B, U extends ArithmeticOperand<T> | null>(this: ExprOperand<number | bigint | Decimal | null, string, M> & { readonly ir: { readonly type: D } }, other: (ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>) & { readonly ir: { readonly type: B } }): ArithmeticResult<T, N, M, D, U, B, 'divide'>;
+  /**
+   * Divide by the operand; non-Decimal division returns Float64 (number), not
+   * truncated integer division. Division by zero can yield Infinity, -Infinity or
+   * NaN for Float64; Decimal division by zero fails in ClickHouse.
+   * Decimal results keep the numerator scale and larger storage class, truncating
+   * fractional excess rather than rounding. The numerator scale must be at least
+   * the denominator scale for native Decimal division; inferred types do not enforce
+   * that execution constraint. NULL propagates; there is no automatic safe-divide fallback.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Receivers are integer/float or branded Decimal values, optionally nullable;
+   * Nullable/LowCardinality numeric descriptors are unwrapped for promotion.
+   * The typed operand family must match: no number/bigint or Decimal/number mixing,
+   * even where native ClickHouse has additional overloads. Decimal column/expression
+   * arithmetic is supported, but non-null Decimal JS parameters (including val()
+   * constants) are not serialized by the current compiler; use column expressions.
+   * @param other Plain value bound using the receiver descriptor, or an expression/
+   * constant whose descriptor is not retained statically. Use val(value, descriptor)
+   * when a distinct serializable operand width must participate in inference.
+   * @returns Promoted numeric expression, nullable if either operand is nullable.
+   * Integers through 32 bits and floats decode as number; 64/128/256-bit integers
+   * decode as bigint. Decimal results are branded strings, with storage precision
+   * 9/18/38/76. Erased descriptor evidence can leave number | bigint rather than
+   * an exact width. Inference describes output; it is not an overflow/scale safety check.
+   * @example
+   * ```ts
+   * const ratio: Expr<number> = val(3n).divide(2n);
+   * const missing: Expr<number | null> = val(null, col.Nullable(col.Int64)).divide(2n);
+   * ```
+   */
   divide<D, U extends ArithmeticOperand<T> | null>(this: ExprOperand<number | bigint | Decimal | null, string, M> & { readonly ir: { readonly type: D } }, other: U | ExprOperand<U, string, NoInfer<M>> | ConstantOperand<U>): ArithmeticResult<T, N, M, D, U, D, 'divide'>;
+  /**
+   * Test for NULL, returning a non-null boolean. Use instead of eq(null).
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Available on any expression descriptor, not only Nullable. Tests the whole value,
+   * not NULL elements inside arrays or tuples. Always returns non-null boolean;
+   * this SQL predicate is not a TypeScript type guard and does not narrow later callbacks.
+   * @example
+   * ```ts
+   * val(null, col.Nullable(col.String)).isNull();
+   * ```
+   */
   isNull(): Expr<boolean, N, M>;
+  /**
+   * Test for a non-NULL value, returning a non-null boolean.
+   * Filtering with this predicate does not narrow the column descriptor in later callbacks.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Available on any expression descriptor, not only Nullable. Tests the whole value,
+   * not NULL elements inside arrays or tuples. Always returns non-null boolean;
+   * this SQL predicate is not a TypeScript type guard and does not narrow later callbacks.
+   * @example
+   * ```ts
+   * val(null, col.Nullable(col.String)).isNotNull();
+   * ```
+   */
   isNotNull(): Expr<boolean, N, M>;
+  /**
+   * Replace NULL with a compatible fallback, without narrowing the original expression.
+   * A non-null receiver keeps its descriptor. For a nullable receiver the result uses
+   * a common type, not arithmetic widening; a nullable fallback keeps the result nullable.
+   * Identical base descriptors and supported integer/float common types are resolved;
+   * unsupported combinations fail compilation rather than guessing a conversion.
+   * @param other Fallback in the receiver’s decoded family, or null.
+   * @returns The resolved common descriptor; e.g. Int32 plus UInt32 fallback becomes
+   * Int64 (bigint), while String fallback remains string.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * This overload retains both descriptors for precise common-type inference.
+   * @example
+   * ```ts
+   * const label: Expr<string> = val(null, col.Nullable(col.String)).ifNull('unknown');
+   * const widened: Expr<bigint> = val(null, col.Nullable(col.Int32)).ifNull(val(4294967295, col.UInt32));
+   * ```
+   */
   ifNull<D, B, U extends NonNullable<T> | null>(this: Expr<T, N, M> & { readonly ir: { readonly type: D } }, other: (Expr<U, string, NoInfer<M>> | Constant<U>) & { readonly ir: { readonly type: B } }): IfNullResult<T, N, M, D, U, B>;
+  /**
+   * Replace NULL with a compatible fallback, without narrowing the original expression.
+   * A non-null receiver keeps its descriptor. For a nullable receiver the result uses
+   * a common type, not arithmetic widening; a nullable fallback keeps the result nullable.
+   * Identical base descriptors and supported integer/float common types are resolved;
+   * unsupported combinations fail compilation rather than guessing a conversion.
+   * @param other Fallback in the receiver’s decoded family, or null.
+   * @returns The resolved common descriptor; e.g. Int32 plus UInt32 fallback becomes
+   * Int64 (bigint), while String fallback remains string.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Plain fallbacks bind against the receiver descriptor; erased descriptor evidence
+   * can make result inference less precise. A null fallback never removes nullability.
+   * @example
+   * ```ts
+   * const label: Expr<string> = val(null, col.Nullable(col.String)).ifNull('unknown');
+   * const widened: Expr<bigint> = val(null, col.Nullable(col.Int32)).ifNull(val(4294967295, col.UInt32));
+   * ```
+   */
   ifNull<D, U extends NonNullable<T> | null>(this: Expr<T, N, M> & { readonly ir: { readonly type: D } }, other: Operand<U, NoInfer<M>>): IfNullResult<T, N, M, D, U, FallbackDescriptor<D, U>>;
+  /**
+   * Count bytes of String/FixedString or elements of an Array as UInt64 (bigint).
+   * UTF-8 character count can differ: length of é😀 is 6 bytes. FixedString includes
+   * padding bytes. Nullable strings propagate NULL; array element nullability does not
+   * make the count nullable.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Retained descriptors must be String/FixedString or Array, with supported wrappers;
+   * Enum, UUID, IP, Decimal and high-precision time do not become byte strings merely
+   * because their decoded JavaScript value is a string.
+   * @example
+   * ```ts
+   * const bytes: Expr<bigint> = val('é😀', col.String).length();
+   * from(components).map(c => ({ partCount: c.matched_part_ids.length() }));
+   * ```
+   */
   length<D, V extends string | readonly unknown[] | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'either'>): StructuralResult<V, N, M, 'UInt64'>;
+  /**
+   * Test whether String/FixedString has zero bytes or Array has zero elements.
+   * This does not trim whitespace or ignore NULL elements: [null] is not empty.
+   * @returns boolean, or boolean | null for a nullable string receiver.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Retained descriptors must be String/FixedString or Array, with supported wrappers;
+   * Enum, UUID, IP, Decimal and high-precision time do not become byte strings merely
+   * because their decoded JavaScript value is a string.
+   * @example
+   * ```ts
+   * from(components).where(c => c.matched_part_ids.empty());
+   * ```
+   */
   empty<D, V extends string | readonly unknown[] | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'either'>): StructuralResult<V, N, M, 'Bool'>;
+  /**
+   * Test whether String/FixedString has bytes or Array has elements.
+   * Whitespace and NULL array elements count; this is not a non-NULL test.
+   * @returns boolean, or boolean | null for a nullable string receiver; use isNotNull()
+   * when presence rather than length is the intended condition.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * Retained descriptors must be String/FixedString or Array, with supported wrappers;
+   * Enum, UUID, IP, Decimal and high-precision time do not become byte strings merely
+   * because their decoded JavaScript value is a string.
+   * @example
+   * ```ts
+   * from(components).where(c => c.matched_part_ids.notEmpty());
+   * ```
+   */
   notEmpty<D, V extends string | readonly unknown[] | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'either'>): StructuralResult<V, N, M, 'Bool'>;
+  /**
+   * Test a case-sensitive byte prefix on String/FixedString, without locale folding.
+   * Both retained descriptors must be byte strings, optionally Nullable/LowCardinality;
+   * a decoded string from Enum, UUID, IP, Decimal or high-precision time is not enough.
+   * @param other Plain prefix bound against the receiver, or a byte-string expression/constant.
+   * @returns boolean; NULL in either operand gives NULL and boolean | null.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * @example
+   * ```ts
+   * from(parts).where(p => p.mpn.startsWith('ABC'));
+   * const missing: Expr<boolean | null> = val('ABC', col.String).startsWith(null);
+   * ```
+   */
   startsWith<D, B, V extends string | null, U extends string | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'string'>, other: U | ((Expr<U, string, NoInfer<M>> | Constant<U>) & { readonly ir: { readonly type: B } } & StructuralReceiver<B, 'string'>)): StructuralResult<V | U, N, M, 'Bool'>;
+  /**
+   * Test whether a descriptor-backed Array contains an element.
+   * @param other Value bound using the array’s element descriptor, or a compatible
+   * expression/constant of that decoded element type. NULL is searchable when the
+   * element descriptor is nullable; it does not make the result nullable.
+   * @returns Non-null boolean; an empty array contains nothing.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * @example
+   * ```ts
+   * from(components).where(c => c.matched_part_ids.has('part-1'));
+   * const found: Expr<boolean> = val([null, 7n], col.Array(col.Nullable(col.Int64))).has(null);
+   * ```
+   */
   has<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, other: Operand<NoInfer<V[number]>, NoInfer<M>>): StructuralResult<never, N, M, 'Bool'>;
+  /**
+   * Test whether descriptor-backed Arrays share an element, regardless of order
+   * or duplicates. Either array being empty gives false. NULL elements compare as
+   * values when admitted by the element descriptor, unlike scalar eq(null).
+   * @param other Array bound using the receiver descriptor, or a compatible Array expression.
+   * @returns Non-null boolean, including for arrays with nullable elements.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * @example
+   * ```ts
+   * from(components).where(c => c.matched_part_ids.hasAny(['part-1', 'part-2']));
+   * ```
+   */
   hasAny<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, other: Operand<NoInfer<V>, NoInfer<M>>): StructuralResult<never, N, M, 'Bool'>;
+  /**
+   * Read one element of a descriptor-backed Array using ClickHouse’s one-based
+   * index: 1 is first, -1 is last, not JavaScript’s zero-based indexing.
+   * Out-of-range access returns the element default (e.g. 0, empty string, or NULL
+   * for Nullable elements), never undefined. Zero is not a valid first-element index:
+   * ClickHouse may return a default for a constant array but reject a nonconstant one.
+   * @param index Integer number/bigint or integer-descriptor expression. Plain indexes
+   * bind as Int64; fractional and unsafe JS integer values fail parameter validation.
+   * @returns An expression retaining the exact element descriptor, including nested
+   * arrays, tuple fields and element nullability; out-of-range access adds no union.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * @example
+   * ```ts
+   * const missing: Expr<string | null> = val([], col.Array(col.Nullable(col.String))).arrayElement(9);
+   * from(components).map(c => ({ lastPart: c.matched_part_ids.arrayElement(-1) }));
+   * ```
+   */
   arrayElement<D, V extends readonly unknown[]>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & StructuralReceiver<D, 'array'>, index: Operand<number | bigint, NoInfer<M>>): ArrayElementResult<V, N, M, D>;
+  /**
+   * Select a field from a descriptor-backed named Tuple, or recursively from
+   * Arrays of named Tuples. Array layers are retained; this does not expand rows.
+   * @param key Literal declared field name, bound as a String parameter; not an
+   * expression, arbitrary string or positional tuple index. Dots are literal name
+   * characters, not a nested path; chain element() calls for nested named tuples.
+   * @returns The field’s decoded type and retained descriptor (including nullable
+   * fields), wrapped in the receiver’s array layers.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * @example
+   * ```ts
+   * from(components).map(c => ({
+   *   mpns: c.part_specifications.element('mpn'), // (string | null)[]
+   *   firstMpn: c.part_specifications.arrayElement(1).element('mpn'), // string | null
+   * }));
+   * ```
+   */
   element<D, V, const K extends ElementKeys<D>>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } }, key: K & (string extends K ? never : unknown)): ElementResult<N, M, D, K>;
+  /**
+   * Round Date or DateTime64(0–3) to the Sunday starting its week.
+   * This bounded method has no week-mode or timezone override; it uses the input’s
+   * ClickHouse temporal semantics. DateTime, Date32, higher precision and
+   * LowCardinality receivers are not supported, even when decoded as Date/string.
+   * @returns A Date descriptor decoded as JS Date; Nullable input gives Date | null.
+   * @remarks
+   * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
+   * Expression operands must use that mode; constants can be used in any mode.
+   * @example
+   * ```ts
+   * const sunday: Expr<Date> = val(new Date('2025-01-08T00:00:00Z'), col.Date).toStartOfWeek();
+   * ```
+   */
   toStartOfWeek<D, V extends Date | null>(this: Expr<V, N, M> & { readonly ir: { readonly type: D } } & WeekReceiver<D>): WeekResult<V, N, M>;
+  /**
+   * Create an ascending sort key for orderBy() or thenBy(), not a scalar expression.
+   * Chain nullsFirst() or nullsLast() to choose explicit NULL placement.
+   * @remarks
+   * Accepts an expression of any value type; server sortability still applies.
+   * @returns Ordering<M> retaining the receiver’s mode, not Expr and not sorted rows.
+   * Without nullsFirst()/nullsLast(), NULL placement is left to ClickHouse’s default.
+   * Return this key from orderBy()/thenBy(); it cannot be selected as a scalar value.
+   * @example
+   * ```ts
+   * from(parts).orderBy(p => p.mpn.asc());
+   * ```
+   */
   asc(): Ordering<M>;
+  /**
+   * Create a descending sort key for orderBy() or thenBy(), not a scalar expression.
+   * Chain nullsFirst() or nullsLast() to choose explicit NULL placement.
+   * @remarks
+   * Accepts an expression of any value type; server sortability still applies.
+   * @returns Ordering<M> retaining the receiver’s mode, not Expr and not sorted rows.
+   * Without nullsFirst()/nullsLast(), NULL placement is left to ClickHouse’s default.
+   * Return this key from orderBy()/thenBy(); it cannot be selected as a scalar value.
+   * @example
+   * ```ts
+   * from(parts).orderBy(p => p.mpn.desc());
+   * ```
+   */
   desc(): Ordering<M>;
 }
 export function installMethods(extend: (methods: Record<string, (this: Expr<unknown, string, Mode>, ...args: never[]) => unknown>) => void): void {

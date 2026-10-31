@@ -41,14 +41,30 @@ const multiDefinition = defineFunction({
 }).definition;
 export const projectionDefinitions = [nowDefinition, dayDefinition, multiDefinition] as const;
 
-/** Server clock; intentionally carries no invented timezone metadata. */
+/** Read ClickHouse's current query-time clock as a DateTime expression.
+ * This is server time, not JavaScript `new Date()`, and no timezone metadata is assumed.
+ * @example
+ * ```ts
+ * from(components).map(c => ({ id: c.entityId, queriedAt: now() }));
+ * ```
+ */
 export function now(): DescribedExpr<Date, 'now', 'row', { readonly kind: 'DateTime' }>;
 export function now(): Expr<unknown, string, Mode> {
   const expression = invoke(nowDefinition, []);
   return new Expr(expression.ir, 'now', 'row');
 }
 
-/** UTC calendar boundaries, not elapsed 24-hour periods. */
+/** Count UTC day boundaries from start to end as Int64 (`bigint`).
+ * This counts calendar boundaries, not elapsed 24-hour periods. Only the `day` unit
+ * and non-null Date, DateTime, or DateTime64 (precision 0–3) operands are supported.
+ * @example
+ * ```ts
+ * dateDiff('day',
+ *   val(new Date('2025-01-01T23:00:00Z'), col.DateTime64(3)),
+ *   val(new Date('2025-01-02T01:00:00Z'), col.DateTime64(3)),
+ * );
+ * ```
+ */
 export function dateDiff<const S extends Temporal, const E extends Temporal>(unit: 'day', start: S, end: E & ModeCheck<E, S['mode']> & Single<S['mode']>): DescribedExpr<bigint, S['name'], S['mode'], { readonly kind: 'scalar'; readonly name: 'Int64' }>;
 export function dateDiff(unit: 'day', start: Expr<Date, string, Mode>, end: Expr<Date, string, Mode>): Expr<unknown, string, Mode> {
   if (unit !== 'day' || !(start instanceof Expr) || !(end instanceof Expr) || !start.ir.type || !end.ir.type || !isDayDescriptor(start.ir.type) || !isDayDescriptor(end.ir.type)) throw new Error('incompatible_operands');
@@ -57,7 +73,14 @@ export function dateDiff(unit: 'day', start: Expr<Date, string, Mode>, end: Expr
   return new Expr(result.ir, start.name, start.mode);
 }
 
-/** Closed string-only conditional family; nullable conditions are skipped by SQL. */
+/** Choose the String value of the first true condition, or the final fallback.
+ * Pass `[condition, value]` pairs followed by a fallback; NULL conditions act as false.
+ * Branch values must be non-null Strings, and nonconstant expressions must share a mode.
+ * @example
+ * ```ts
+ * from(components).map(c => ({ status: multiIf([c.matched_part_ids.notEmpty(), 'matched'], 'unmatched') }));
+ * ```
+ */
 export function multiIf<const A extends readonly [Pair, ...Pair[], Branch]>(...args: A & Fixed<A> & Checked<A> & Single<FirstMode<A>>): DescribedExpr<string, A[0][0]['name'], FirstMode<A>, StringDescriptor>;
 export function multiIf(...args: readonly unknown[]): Expr<unknown, string, Mode> {
   if (args.length < 2) throw new Error('invalid_argument_arity');

@@ -100,37 +100,176 @@ function deriveAggregate(def: AggregateDefinition, rootName?: 'first') {
 }
 // Selector aggregates name from the value operand, not a later version/predicate.
 const derived = aggregateDefinitions.map(def => deriveAggregate(def, def.name === 'argMax' || def.name === 'uniqExact' || def.name === 'uniq' ? 'first' : undefined));
+/** Count all input rows as UInt64 (`bigint`), including rows containing NULL.
+ * Empty input returns `0n`. Use inside an `aggregate()` callback, or call the query's `.count()` shortcut.
+ * @example
+ * ```ts
+ * from(components).aggregate(() => ({ total: count() }));
+ * ```
+ */
 export const count = derived[0]!.base as Count;
+/** Count rows whose grouped predicate is true; false and NULL do not count.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ matched: countIf(c.matched_part_ids.notEmpty()) }));
+ * ```
+ */
 export const countIf = derived[0]!.If as CountIf;
+/** Build an opaque count aggregate state, not a finalized bigint.
+ * Combine states in a later aggregation with `countMerge()`.
+ * @example
+ * ```ts
+ * from(components).aggregate(() => ({ state: countState() })).aggregate(r => ({ total: countMerge(r.state) }));
+ * ```
+ */
 export const countState = derived[0]!.State as () => Expr<AggregateState<'count'>, 'count', 'agg'>;
+/** Merge count aggregate states and finalize their total as UInt64 (`bigint`).
+ * The argument must be a grouped AggregateFunction(count) state, not a numeric count.
+ * @example
+ * ```ts
+ * from(components).aggregate(() => ({ state: countState() })).aggregate(r => ({ total: countMerge(r.state) }));
+ * ```
+ */
 export const countMerge = derived[0]!.Merge as Merge<'count', bigint>;
+/** Sum grouped numeric values, skipping NULL. Integer sums decode as bigint;
+ * floats produce Float64 and Decimal sums retain their scale with widened precision.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ totalParts: sum(c.matched_part_ids.length()) }));
+ * ```
+ */
 export const sum = derived[1]!.base as Sum;
+/** Sum numeric values only where the grouped predicate is true; NULL values are skipped.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ total: sumIf(c.matched_part_ids.length(), c.entityId.notEmpty()) }));
+ * ```
+ */
 export const sumIf = derived[1]!.If as SumIf;
+/** Build an opaque numeric sum state for later `sumMerge()` aggregation.
+ * This is not the finalized numeric sum.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: sumState(c.matched_part_ids.length()) }));
+ * ```
+ */
 export const sumState = derived[1]!.State as SumState;
+/** Combine sum states and return the finalized sum, using the state's input descriptor.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: sumState(c.matched_part_ids.length()) }))
+ *   .aggregate(r => ({ total: sumMerge(r.state) }));
+ * ```
+ */
 export const sumMerge = derived[1]!.Merge as Merge<'sum', Numeric | null>;
+/** Return the maximum grouped value, skipping NULL and retaining the value descriptor.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ mostParts: max(c.matched_part_ids.length()) }));
+ * ```
+ */
 export const max = derived[2]!.base as Max;
+/** Return the maximum among rows whose grouped predicate is true; NULL values are skipped.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ mostParts: maxIf(c.matched_part_ids.length(), c.entityId.notEmpty()) }));
+ * ```
+ */
 export const maxIf = derived[2]!.If as MaxIf;
+/** Build an opaque maximum state rather than a finalized value; consume it with `maxMerge()`.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: maxState(c.matched_part_ids.length()) }));
+ * ```
+ */
 export const maxState = derived[2]!.State as State<'max'>;
+/** Merge maximum states and finalize the greatest value using the state's value descriptor.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: maxState(c.matched_part_ids.length()) }))
+ *   .aggregate(r => ({ mostParts: maxMerge(r.state) }));
+ * ```
+ */
 export const maxMerge = derived[2]!.Merge as Merge<'max', unknown>;
-/** NULL values are skipped; equal maximal versions have no stable tie breaker. */
+/** Select the value associated with the greatest non-null numeric version.
+ * NULL values are skipped; equal maximal versions have no stable tie breaker.
+ * Values are limited to numeric, String, or Bool scalars, optionally nullable.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ id: argMax(c.entityId, c.matched_part_ids.length()) }));
+ * ```
+ */
 export const argMax = derived[3]!.base as ArgMax;
+/** Select the value at the greatest version among rows where the predicate is true.
+ * As with `argMax()`, NULL values are skipped and tied versions do not pick a stable winner.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ id: argMaxIf(c.entityId, c.matched_part_ids.length(), c.entityId.notEmpty()) }));
+ * ```
+ */
 export const argMaxIf = derived[3]!.If as ArgMaxIf;
 // Binary State/Merge signatures and execution are deliberately not exposed.
-/** Float64 mean; NULL inputs are skipped, empty non-null inputs produce NaN. */
+/** Compute the Float64 mean of grouped integer or floating-point values (not Decimal).
+ * NULL inputs are skipped; empty non-null inputs produce NaN.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ meanParts: avg(c.matched_part_ids.length()) }));
+ * ```
+ */
 export const avg = derived[4]!.base as Avg;
+/** Compute the Float64 mean only for rows whose predicate is true.
+ * NULL values are skipped; with non-null inputs and no qualifying rows, the result is NaN.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ meanParts: avgIf(c.matched_part_ids.length(), c.entityId.notEmpty()) }));
+ * ```
+ */
 export const avgIf = derived[4]!.If as AvgIf;
 // avg State/Merge execution is deliberately not exposed.
-/** Exact String cardinality, skipping NULL; empty/all-null input returns 0n. */
+/** Count distinct String values exactly as UInt64 (`bigint`), skipping NULL.
+ * Empty or all-null input returns `0n`; other descriptor families are not supported here.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ ids: uniqExact(c.entityId) }));
+ * ```
+ */
 export const uniqExact = derived[6]!.base as UniqExact;
-/** Approximate String cardinality, skipping NULL; not countDistinct/uniqExact. */
+/** Estimate distinct String cardinality as UInt64 (`bigint`), skipping NULL.
+ * Use `uniqExact()` when an exact result matters; this is ClickHouse's approximate `uniq`.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ estimatedIds: uniq(c.entityId) }));
+ * ```
+ */
 export const uniq = derived[7]!.base as Uniq;
+/** Count distinct non-null Strings exactly among rows whose predicate is true.
+ * Empty or all-null qualifying input returns `0n`.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ matchedIds: uniqExactIf(c.entityId, c.matched_part_ids.notEmpty()) }));
+ * ```
+ */
 export const uniqExactIf = derived[6]!.If as UniqExactIf;
 // Exact distinct State/Merge and non-String operands are deliberately not exposed.
-/** Approximate reservoir quantile. Each application creates a fresh level Param;
- * reusing the resulting expression shares it, reusing the curry does not. */
+/** Choose a quantile level, then apply the returned aggregate to grouped numeric values.
+ * Uses ClickHouse's approximate reservoir quantile, not an exact percentile; NULLs are skipped.
+ * @param level Quantile fraction from 0 to 1 inclusive, for example 0.5 for the median.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ medianParts: quantile(0.5)(c.matched_part_ids.length()) }));
+ * ```
+ */
 export function quantile(level: number): Quantile {
   return ((...args: readonly unknown[]) => aggregateCall(aggregateDefinitions[5]!, args, [level], [], 'first')) as Quantile;
 }
+/** Choose a quantile level, then aggregate values only where the predicate is true.
+ * Like `quantile()`, the result is approximate and NULL values are skipped.
+ * @param level Quantile fraction from 0 to 1 inclusive.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ medianParts: quantileIf(0.5)(c.matched_part_ids.length(), c.entityId.notEmpty()) }));
+ * ```
+ */
 export function quantileIf(level: number): QuantileIf {
   return ((...args: readonly unknown[]) => aggregateCall(aggregateDefinitions[5]!, args, [level], ['If'], 'first')) as QuantileIf;
 }
