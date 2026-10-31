@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   resolve: {
-    alias: Object.fromEntries(['core', 'compiler', 'client', 'codegen'].map(name => [
+    alias: Object.fromEntries(['core', 'compiler', 'client', 'codegen', 'devtools'].map(name => [
       `@typedhouse/${name}`,
       fileURLToPath(new URL(`./packages/${name}/src/index.ts`, import.meta.url)),
     ])),

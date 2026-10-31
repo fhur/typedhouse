@@ -57,13 +57,12 @@ for (const name of names) {
     updated += introduction + output;
     previousEnd = match.index + match[0].length;
   }
-  // Explicit typecheck-only blocks extend the first complete example. They may
-  // use server APIs but are never bundled or executed by this documentation test.
+  // Explicit typecheck-only blocks extend the first complete example when present,
+  // or provide a self-contained example. They are never bundled or executed.
   const typecheckOnly = [...markdown.matchAll(/```ts typecheck-only\n([\s\S]*?)\n```/g)];
   if (typecheckOnly.length) {
-    assert.ok(firstExampleSource, `${name}: typecheck-only blocks require a compiled example`);
     const sourcePath = new URL(name.replaceAll('/', '-').replace(/\.md$/, '-typecheck.ts'), cache);
-    await writeFile(sourcePath, [firstExampleSource, ...typecheckOnly.map(match => match[1])].join('\n\n'));
+    await writeFile(sourcePath, [firstExampleSource ?? '', ...typecheckOnly.map(match => match[1])].join('\n\n'));
     files.push(fileURLToPath(sourcePath));
   }
   if (section === 'guides' || section === 'readme') assert.ok(exampleIndex, `${name}: must contain an executable checkpoint`);
@@ -83,6 +82,7 @@ const program = ts.createProgram(files, {
     '@typedhouse/core': [`${root}packages/core/src/index.ts`],
     '@typedhouse/compiler': [`${root}packages/compiler/src/index.ts`],
     '@typedhouse/client': [`${root}packages/client/src/index.ts`],
+    '@typedhouse/devtools': [`${root}packages/devtools/src/index.ts`],
   },
 });
 const diagnostics = ts.getPreEmitDiagnostics(program);
