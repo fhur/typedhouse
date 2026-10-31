@@ -17,13 +17,14 @@ Each optimization page includes a standalone TypeScript example followed by its 
 
 1. [Merge consecutive filters](/docs/compiler/merge-filters/)
 2. [Push filters through selections](/docs/compiler/filter-projections/)
-3. [Push filters into joins](/docs/compiler/filter-joins/)
-4. [Filter before array expansion](/docs/compiler/filter-array-joins/)
-5. [Filter grouping keys early](/docs/compiler/filter-aggregates/)
-6. [Push filters into UNION branches](/docs/compiler/filter-unions/)
-7. [Prune unused columns](/docs/compiler/column-pruning/)
-8. [Extract shared inputs into CTEs](/docs/compiler/shared-ctes/)
-9. [Fold SELECT blocks](/docs/compiler/select-blocks/)
+3. [Merge stacked selections](/docs/compiler/merge-projections/)
+4. [Push filters into joins](/docs/compiler/filter-joins/)
+5. [Filter before array expansion](/docs/compiler/filter-array-joins/)
+6. [Filter grouping keys early](/docs/compiler/filter-aggregates/)
+7. [Push filters into UNION branches](/docs/compiler/filter-unions/)
+8. [Prune unused columns](/docs/compiler/column-pruning/)
+9. [Extract shared inputs into CTEs](/docs/compiler/shared-ctes/)
+10. [Fold SELECT blocks](/docs/compiler/select-blocks/)
 
 ## Choosing the compiler
 
@@ -41,8 +42,8 @@ Rewrites retain parameter object identity. Placeholder allocation follows the em
 
 These transformations preserve query meaning, but do not promise faster execution for every query. ClickHouse still chooses the execution plan, and CTEs are not an execution cache.
 
-SELECT-block folding supports direct CTE references and safe typed integer arithmetic projections over scans and filters. This limited folding does not substitute computed expressions across arbitrary query stages.
+SELECT-block folding supports direct CTE references, any projection over a scan and its filters (and direct selections over a filtered join), a `DISTINCT` flag before sorting and limiting (with whole-row selections folding over it), and one `ARRAY JOIN` per scan block, including an aggregate over that expansion. The EXPLAIN corpus (`packages/compiler/test/explain-corpus.test.ts` and its native twin) checks that every remaining SELECT boundary of every supported API example is a fence (aggregate, sort, limit, distinct, union, join, expansion, CTE or subquery), and on ClickHouse 24.8 that every MergeTree read stays inside the pruned column set. Selection merging and filter pushdown substitute only expressions inside the compiler's closed total fragment; an expression that could fail or change value keeps its original evaluation set.
 
-Currently absent: general computed-project merging, outer-join rewrites, join reordering, cost/statistics-based planning, explicit PREWHERE movement, limit/top-k pushdown through UNION, and real temporary-table materialization.
+Currently absent: outer-join rewrites, join reordering, cost/statistics-based planning, explicit PREWHERE movement, limit/top-k pushdown through UNION, and real temporary-table materialization.
 
 The nested `emitNaive` backend remains a reference for differential tests. Compiler tests cover safety boundaries and SQL shapes; integration suites compare optimized and naive results on ClickHouse. These checks are not a universal performance proof or completion of every planned optimizer acceptance test.

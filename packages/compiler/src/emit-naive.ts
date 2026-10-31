@@ -204,20 +204,31 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       return `${i ? `${separator}${join.joinKind === 'cross' ? 'CROSS JOIN' : 'INNER ALL JOIN'} ` : ''}${source} AS ${joinAlias(join, alias)}${hints}${on}`;
     }).join('');
   }
-  function renderBlock(rel: Rel, order: readonly string[], path = 'root'): string {
+  function renderBlock(rel: Rel, physicalOrder: readonly string[], path = 'root'): string {
     const block = plan!.blocks.get(rel)!;
     const binding = block.source.kind === 'join' ? block.source.rel : undefined;
     const separator = binding && rel === root ? '\n' : ' ';
+    const select = block.distinct ? 'SELECT DISTINCT ' : 'SELECT ';
+    // DISTINCT applies to the Distinct node's full leaf set: a clause folded above it may be
+    // pruned narrower by its consumer, and that demand must never become the DISTINCT list.
+    // Every node folded above a Distinct keeps that set (a whole-row selection may reorder it).
+    const distinctLeaves = block.distinct ? outputLeaves(rel.output) : undefined;
+    const order = distinctLeaves?.map(l => l.name) ?? physicalOrder;
     if (block.aggregate) {
       const aggregate = block.aggregate;
-      const qualifier = block.source.kind === 'cte' ? '' : inputAlias;
+      const expansion = block.arrayJoin;
+      // An expanded block has no input alias: the expansion alias is a plain column of the FROM item.
+      const qualifier = block.source.kind === 'cte' || expansion ? '' : inputAlias;
       // SELECT precedes even a derived FROM in final textual parameter order.
       // Qualify source references; HAVING/ORDER deliberately use output aliases.
       const keys = Object.entries(aggregate.keys).map(([name, e]) => [name, expression(e, aggregate.input, `${path}.keys.${name}`, undefined, false, 'row', qualifier, binding)] as const);
       const items = [...keys.map(([name, sql]) => sql === quoteIdentifier(name) ? sql : `${sql} AS ${quoteIdentifier(name)}`),
         ...Object.entries(aggregate.aggs).map(([name, e]) => `${expression(e, aggregate.input, `${path}.aggs.${name}`, undefined, false, 'aggregate', qualifier, binding)} AS ${quoteIdentifier(name)}`)];
+      const hints = block.source.kind === 'table' ? `${block.source.scan.final ? ' FINAL' : ''}${block.source.scan.sample === undefined ? '' : ` SAMPLE ${block.source.scan.sample}`}` : '';
       const source = block.source.kind === 'table'
-        ? `${quoteIdentifier(block.source.scan.table.name)} AS ${inputAlias}${block.source.scan.final ? ' FINAL' : ''}${block.source.scan.sample === undefined ? '' : ` SAMPLE ${block.source.scan.sample}`}`
+        ? expansion
+          ? `${quoteIdentifier(block.source.scan.table.name)}${hints} ${expansion.left ? 'LEFT ' : ''}ARRAY JOIN ${expression(expansion.expr, expansion.input, `${path}.expr`, undefined, false, 'row', '')} AS ${quoteIdentifier(expansion.alias)}`
+          : `${quoteIdentifier(block.source.scan.table.name)} AS ${inputAlias}${hints}`
         : block.source.kind === 'join' ? joinSource(block.source.rel, path, separator)
         : block.source.kind === 'cte' ? quoteIdentifier(plan!.ctes!.names.get(block.source.rel)!)
         : `(${emit(block.source.rel, `${path}.source`)}) AS ${inputAlias}`;
@@ -232,10 +243,10 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         else if (node.kind === 'Sort') tails.push(` ORDER BY ${node.keys.map((k, j) => `${expression(k.expr, node.input, `${p}.keys[${j}]`, undefined, false, 'row', '')} ${k.dir.toUpperCase()}${k.nulls === undefined ? '' : ` NULLS ${k.nulls.toUpperCase()}`}`).join(', ')}`);
         else tails.push(` LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
       }
-      return `SELECT ${items.join(', ')}${separator}FROM ${source}${where.length ? `${separator}WHERE ${conjunction(where)}` : ''}${keys.length ? `${separator}GROUP BY ${keys.map(([, sql]) => sql).join(', ')}` : ''}${having.length ? `${separator}HAVING ${conjunction(having)}` : ''}${tails.map(t => separator + t.slice(1)).join('')}`;
+      return `${select}${items.join(', ')}${separator}FROM ${source}${where.length ? `${separator}WHERE ${conjunction(where)}` : ''}${keys.length ? `${separator}GROUP BY ${keys.map(([, sql]) => sql).join(', ')}` : ''}${having.length ? `${separator}HAVING ${conjunction(having)}` : ''}${tails.map(t => separator + t.slice(1)).join('')}`;
     }
     if (binding) {
-      const selected = plan?.columns?.get(rel) ?? outputLeaves(rel.output);
+      const selected = distinctLeaves ?? plan?.columns?.get(rel) ?? outputLeaves(rel.output);
       const items = selected.map(leaf => {
         if (block.project) {
           const e = block.project.exprs[leaf.name]!;
@@ -252,7 +263,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         else if (node.kind === 'Sort') tails.push(`${separator}ORDER BY ${node.keys.map(k => `${expression(k.expr, node.input, path, undefined, false, 'row', inputAlias, binding)} ${k.dir.toUpperCase()}${k.nulls ? ` NULLS ${k.nulls.toUpperCase()}` : ''}`).join(', ')}`);
         else tails.push(`${separator}LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
       }
-      return `SELECT ${items.join(', ')}${separator}FROM ${source}${predicates.length ? `${separator}WHERE ${predicates.join(' AND ')}` : ''}${tails.join('')}`;
+      return `${select}${items.join(', ')}${separator}FROM ${source}${predicates.length ? `${separator}WHERE ${predicates.join(' AND ')}` : ''}${tails.join('')}`;
     }
     // Allocate projection Params before WHERE Params, matching textual SQL order.
     const qualifier = blockQualifier(rel);
@@ -262,7 +273,13 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
     let from: string;
     if (block.source.kind === 'table') {
       const scan = block.source.scan;
+      // Bare select items must be columns the pruned scan provides (or the expansion alias).
+      const physical = plan!.columns?.get(scan);
+      if (physical && !block.project) for (const k of order) if (k !== block.arrayJoin?.alias && !physical.some(l => l.name === k)) return fail('missing_physical_column', rel, path, k);
       from = `${quoteIdentifier(scan.table.name)}${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
+      // FINAL/SAMPLE precede ARRAY JOIN; the user alias is a plain column of the block.
+      const expansion = block.arrayJoin;
+      if (expansion) from += ` ${expansion.left ? 'LEFT ' : ''}ARRAY JOIN ${expression(expansion.expr, expansion.input, `${path}.expr`, undefined, false, 'row', qualifier)} AS ${quoteIdentifier(expansion.alias)}`;
     } else if (block.source.kind === 'cte') {
       if (!defined.has(block.source.rel)) return fail('cte_visibility', block.source.rel, path);
       from = quoteIdentifier(plan!.ctes!.names.get(block.source.rel)!);
@@ -281,7 +298,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
     }
     const where = predicates.length ? ` WHERE ${conjunction(predicates)}` : '';
     const tail = tails.join('');
-    return `SELECT ${items.join(', ')} FROM ${from}${where}${tail}`;
+    return `${select}${items.join(', ')} FROM ${from}${where}${tail}`;
   }
   function emit(rel: Rel, path: string): string {
     const name = plan?.ctes?.names.get(rel);

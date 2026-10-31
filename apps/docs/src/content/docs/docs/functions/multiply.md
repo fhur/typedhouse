@@ -47,16 +47,10 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  `__typedhouse_input`.`price` * {p0:Float64} AS `priceWithTax`
+  `id` AS `id`,
+  `price` * {p0:Float64} AS `priceWithTax`
 FROM
-  (
-    SELECT
-      `id`,
-      `price`
-    FROM
-      `products`
-  ) AS `__typedhouse_input`
+  `products`
 ```
 
 Parameters:

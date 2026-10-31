@@ -48,17 +48,11 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  arrayElement(`__typedhouse_input`.`tags`, {p0:Int64}) AS `firstTag`,
-  arrayElement(`__typedhouse_input`.`tags`, {p1:Int64}) AS `lastTag`
+  `id` AS `id`,
+  arrayElement(`tags`, {p0:Int64}) AS `firstTag`,
+  arrayElement(`tags`, {p1:Int64}) AS `lastTag`
 FROM
-  (
-    SELECT
-      `id`,
-      `tags`
-    FROM
-      `articles`
-  ) AS `__typedhouse_input`
+  `articles`
 ```
 
 Parameters:

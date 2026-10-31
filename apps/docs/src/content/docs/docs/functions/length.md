@@ -49,18 +49,11 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  length(`__typedhouse_input`.`title`) AS `titleBytes`,
-  length(`__typedhouse_input`.`tags`) AS `tagCount`
+  `id` AS `id`,
+  length(`title`) AS `titleBytes`,
+  length(`tags`) AS `tagCount`
 FROM
-  (
-    SELECT
-      `id`,
-      `title`,
-      `tags`
-    FROM
-      `articles`
-  ) AS `__typedhouse_input`
+  `articles`
 ```
 
 Parameters:

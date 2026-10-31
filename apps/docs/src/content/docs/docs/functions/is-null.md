@@ -47,16 +47,10 @@ Final SQL:
 
 ```sql
 SELECT
-  `__typedhouse_input`.`id` AS `id`,
-  isNull(`__typedhouse_input`.`nickname`) AS `missingNickname`
+  `id` AS `id`,
+  isNull(`nickname`) AS `missingNickname`
 FROM
-  (
-    SELECT
-      `id`,
-      `nickname`
-    FROM
-      `users`
-  ) AS `__typedhouse_input`
+  `users`
 ```
 
 Parameters:
