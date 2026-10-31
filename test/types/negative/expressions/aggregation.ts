@@ -1,5 +1,14 @@
 import { from, table, col, val, count, sum } from '@typedhouse/core';
 const q = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+q.groupBy(r => ({ count: r.id })).count(); // expect: TS2684 duplicate_column
+q.groupBy(r => r.id).count(1); // expect: TS2554 Expected 0 arguments
+q.count(1); // expect: TS2554 Expected 0 arguments
+q.thenBy; // expect: TS2339 Property 'thenBy' does not exist
+q.groupBy(r => r.id).thenBy(r => r.id); // expect: TS2322 duplicate_column
+q.groupBy(r => r.id).thenBy(() => val(1)); // expect: TS2322 unnamed_expression
+q.groupBy(r => r.id).thenBy(r => ({ other: r.id })).thenBy(r => ({ other: r.id })); // expect: TS2322 duplicate_column
+q.groupBy(r => r.id).thenBy(r => ({ count: r.id })).count(); // expect: TS2684 duplicate_column
+q.groupBy(r => r.id).count().thenBy; // expect: TS2339 Property 'thenBy' does not exist
 q.groupBy(r => r.id).where; // expect: TS2339 Property 'where' does not exist
 q.groupBy(r => r.id).map; // expect: TS2339 Property 'map' does not exist
 q.groupBy(() => val(1, col.UInt8)); // expect: TS2322 unnamed_expression

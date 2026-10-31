@@ -9,6 +9,7 @@ q.orderBy(() => count()); // expect: TS2322 Type '"agg"' is not assignable to ty
 q.orderBy(() => count().desc()); // expect: TS2322 Type '"agg"' is not assignable to type '"row"'.
 const grouped = columnExpr(col.UInt64, 1 as NodeId, ['id'], 'id', 'grouped');
 ordered.thenBy(() => grouped.asc()); // expect: TS2322 Type '"grouped"' is not assignable to type '"row"'.
-q.map(() => val(1)); // expect: TS2322 unnamed_expression
+// Explicit projection type keeps TS 5.5's diagnostic from truncating the unnamed-expression constraint.
+q.map<Expr<number>>(() => val(1)); // expect: TS2322 unnamed_expression
 const raw = new Expr<number>(exprNode({ kind: 'Raw', type: col.Float64.type, resolution: 'declared', opaque: true, provenance: { origin: 'sql' }, parts: ['1'], args: [] }), undefined as never, 'row');
 q.map(() => raw); // expect: TS2322 unnamed_expression

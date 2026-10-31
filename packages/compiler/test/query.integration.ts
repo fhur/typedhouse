@@ -1469,6 +1469,18 @@ it('executes grouped/global aggregates with nullable and empty inputs', async ()
     { k: null, count: 1n, n: 7n, f: 3, v: null, s: null, c: 1n, si: 7n, mi: 7 },
     { k: 'a', count: 2n, n: 5n, f: 4, v: 4, s: 4n, c: 1n, si: 3n, mi: 3 },
   ]);
+  const chainedKeys = q.groupBy(r => r.k).thenBy(r => ({ big: r.n.gt(2) })).count().orderBy(r => r.k.asc().nullsFirst()).thenBy(r => r.big);
+  const objectKeys = q.groupBy(r => ({ k: r.k, big: r.n.gt(2) })).aggregate(() => ({ count: count() })).orderBy(r => r.k.asc().nullsFirst()).thenBy(r => r.big);
+  expect(chainedKeys.toSQL().sql).toBe(objectKeys.toSQL().sql);
+  expect(chainedKeys.toSQL().params).toEqual(objectKeys.toSQL().params);
+  expect(await client.run(chainedKeys)).toEqual([{ k: null, big: true, count: 1n }, { k: 'a', big: false, count: 1n }, { k: 'a', big: true, count: 1n }]);
+  expect(await client.run(q.count())).toEqual([{ count: 3n }]);
+  expect(await client.run(q.limit(2).count())).toEqual([{ count: 2n }]);
+  expect(await client.run(q.where(r => r.n.eq(999)).count())).toEqual([{ count: 0n }]);
+  const shortcut = q.groupBy(r => r.k).count().orderBy(r => r.k.asc().nullsFirst());
+  expect(await client.run(shortcut)).toEqual([{ k: null, count: 1n }, { k: 'a', count: 2n }]);
+  expect(shortcut.toSQL().sql).toBe(q.groupBy(r => r.k).aggregate(() => ({ count: count() })).orderBy(r => r.k.asc().nullsFirst()).toSQL().sql);
+  expect(await client.run(q.where(r => r.n.eq(999)).groupBy(r => r.k).count())).toEqual([]);
   expect(await client.run(q.where(r => r.n.eq(999)).aggregate(g => ({ count: count(), n: sum(g.n), v: max(g.v), s: sum(g.v), m: max(g.n) })))).toEqual([{ count: 0n, n: 0n, v: null, s: null, m: 0 }]);
   expect(await client.run(q.aggregate(g => sum(g.n)))).toEqual([{ n: 12n }]);
   expect(await client.run(q.aggregate(g => ({ c: countIf(g.n.lt(0)), s: sumIf(g.v, g.n.lt(0)), m: maxIf(g.v, g.n.lt(0)), n: sumIf(g.n, g.n.lt(0)) })))).toEqual([{ c: 0n, s: null, m: null, n: 0n }]);
