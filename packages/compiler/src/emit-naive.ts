@@ -1,9 +1,10 @@
-import { print, scalarDescriptor, outputLeaves, expandedOutput, joinOutput, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@typedhouse/core';
+import { print, scalarDescriptor, outputLeaves, expandedOutput, joinOutput, nullExtended, outerColumnType, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@typedhouse/core';
 import type { SqlPlan } from './plan-selects.js';
 import { parameterExpression, parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
 
 import { validateStructure } from './validate-structure.js';
+import { totalExpression, totalPredicate } from './rewrite-expressions.js';
 import { ValidationError } from './validation-error.js';
 export { ValidationError } from './validation-error.js';
 export function quoteIdentifier(name: string): string {
@@ -16,6 +17,23 @@ function hasAggregate(e: ExprNode): boolean {
 }
 function base(t: CHType): CHType { return t.kind === 'Nullable' || t.kind === 'LowCardinality' ? base(t.inner) : t; }
 const joinKeyword = { inner: 'INNER ALL JOIN', left: 'LEFT ALL JOIN', right: 'RIGHT ALL JOIN', full: 'FULL ALL JOIN', cross: 'CROSS JOIN' } as const;
+/** Kinds whose null-extended input set contains this kind's: LeftToInner keeps the Join's
+ * output when it stops extending an input, so an inner Join may carry a left/right/full
+ * output, a left or right Join a full one. The builder only produces the kind's own. */
+const outputKinds = { inner: ['inner', 'left', 'right', 'full'], left: ['left', 'full'], right: ['right', 'full'], full: ['full'], cross: ['cross'] } as const;
+/** A join input column read where the Join's output declares it null-extended but the Join no
+ * longer extends that input (after LeftToInner): toNullable gives exactly outerColumnType's
+ * descriptor on 24.8 (scalars, LowCardinality, SimpleAggregateFunction alike), so expression
+ * types and server `meta` keep matching the descriptors. Never applied to ON conditions. */
+function joinRead(join: Extract<Rel, { kind: 'Join' }>, alias: string, sql: string, declared: CHType, physical: CHType, bare = false): string {
+  const index = join.inputs.findIndex(([a]) => a === alias);
+  if (same(declared, physical) || nullExtended(join.joinKind, index, join.inputs.length)) return sql;
+  // Fix round 1 (m3): a WHERE or ORDER BY over total expressions exposes no type, and every value read here is
+  // non-NULL, so the column is read bare: KeyCondition and PREWHERE see the key as a hand-written INNER join does.
+  if (bare) { if (!same(declared, outerColumnType(physical))) throw new ValidationError('invalid_output', declared, 'join', `${print(declared)} does not null-extend ${print(physical)}`); return sql; }
+  if (!same(declared, outerColumnType(physical))) throw new ValidationError('invalid_output', declared, 'join', `${print(declared)} does not null-extend ${print(physical)}`);
+  return `toNullable(${sql})`;
+}
 /** Permanent one-subquery-per-node reference backend. Unsupported IR is rejected. */
 export function emitNaive(root: Rel): CompiledQuery {
   return emitQuery(root);
@@ -46,6 +64,9 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
   let weekBucketing = false;
   let dateMembership = false;
   let outerJoin = false;
+  // Set while rendering a total WHERE conjunct or ORDER BY key over a join block (see joinRead).
+  let bareJoinReads = false;
+  const bare = <T>(on: boolean, render: () => T): T => { const previous = bareJoinReads; bareJoinReads = on; try { return render(); } finally { bareJoinReads = previous; } };
   // Each derived input owns this local SQL scope; ColumnRefs never bind SELECT aliases.
   const inputAlias = quoteIdentifier(plan?.ctes?.inputAlias ?? '__typedhouse_input');
   const defined = new Set<Rel>();
@@ -87,7 +108,8 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           const side = join.inputs.find(([alias]) => alias === e.path[0]);
           const child = side && (plan?.columns?.get(side[1]) ?? outputLeaves(side[1].output)).find(l => JSON.stringify(l.path) === JSON.stringify(e.path.slice(1)));
           if (!side || !child) return fail('unbound_column', e, path);
-          return `${joinAlias(join, side[0])}.${quoteIdentifier(child.name)}`;
+          const sql = `${joinAlias(join, side[0])}.${quoteIdentifier(child.name)}`;
+          return binding ? joinRead(join, side[0], sql, leaf.type, child.type, bareJoinReads) : sql;
         }
         const physical = plan?.columns?.get(input);
         if (physical && !physical.some(l => l.name === leaf.name)) return fail('missing_physical_column', e, path);
@@ -215,7 +237,19 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       const qualifier = block.source.kind === 'cte' || expansion ? '' : inputAlias;
       // SELECT precedes even a derived FROM in final textual parameter order.
       // Qualify source references; HAVING/ORDER deliberately use output aliases.
-      const keys = Object.entries(aggregate.keys).map(([name, e]) => [name, expression(e, aggregate.input, `${path}.keys.${name}`, undefined, false, 'row', qualifier, binding)] as const);
+      // Fix round 2 (D2): over a join block, a total key groups by its bare reads of converted columns, and its select
+      // item wraps the whole key (`toNullable(b.e) AS e`, idempotent on Nullable/LowCardinality(Nullable)). Every select
+      // item and every HAVING/ORDER BY alias reference then reads the grouping expression itself, or, when the alias binds
+      // a same-named column under prefer_column_name_to_alias = 1, the grouped column itself.
+      const keys = Object.entries(aggregate.keys).map(([name, e]) => {
+        const keyPath = `${path}.keys.${name}`;
+        const wrapped = expression(e, aggregate.input, keyPath, undefined, false, 'row', qualifier, binding);
+        if (!binding || !totalExpression(e)) return [name, wrapped, wrapped] as const;
+        const group = bare(true, () => expression(e, aggregate.input, keyPath, undefined, false, 'row', qualifier, binding));
+        const declared = resolvedType(e);
+        const carriesNull = declared.kind === 'Nullable' || declared.kind === 'LowCardinality' && declared.inner.kind === 'Nullable';
+        return [name, group === wrapped ? wrapped : carriesNull ? `toNullable(${group})` : group, group] as const;
+      });
       const items = [...keys.map(([name, sql]) => sql === quoteIdentifier(name) ? sql : `${sql} AS ${quoteIdentifier(name)}`),
         ...Object.entries(aggregate.aggs).map(([name, e]) => `${expression(e, aggregate.input, `${path}.aggs.${name}`, undefined, false, 'aggregate', qualifier, binding)} AS ${quoteIdentifier(name)}`)];
       const hints = block.source.kind === 'table' ? `${block.source.scan.final ? ' FINAL' : ''}${block.source.scan.sample === undefined ? '' : ` SAMPLE ${block.source.scan.sample}`}` : '';
@@ -228,7 +262,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         : `(${emit(block.source.rel, `${path}.source`)}) AS ${inputAlias}`;
       const where = (block.where ?? []).map((node, i) => {
         if (node.kind !== 'Filter') throw new Error('invalid_aggregate_where');
-        return { expr: node.pred, sql: expression(node.pred, node.input, `${path}.where[${i}]`, undefined, false, 'row', qualifier, binding) };
+        return { expr: node.pred, sql: bare(!!binding && totalPredicate(node.pred), () => expression(node.pred, node.input, `${path}.where[${i}]`, undefined, false, 'row', qualifier, binding)) };
       });
       const having: { expr: ExprNode; sql: string }[] = [], tails: string[] = [];
       for (const [i, node] of block.clauses.entries()) {
@@ -237,7 +271,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         else if (node.kind === 'Sort') tails.push(` ORDER BY ${node.keys.map((k, j) => `${expression(k.expr, node.input, `${p}.keys[${j}]`, undefined, false, 'row', '')} ${k.dir.toUpperCase()}${k.nulls === undefined ? '' : ` NULLS ${k.nulls.toUpperCase()}`}`).join(', ')}`);
         else tails.push(` LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
       }
-      return `${select}${items.join(', ')}${separator}FROM ${source}${where.length ? `${separator}WHERE ${conjunction(where)}` : ''}${keys.length ? `${separator}GROUP BY ${keys.map(([, sql]) => sql).join(', ')}` : ''}${having.length ? `${separator}HAVING ${conjunction(having)}` : ''}${tails.map(t => separator + t.slice(1)).join('')}`;
+      return `${select}${items.join(', ')}${separator}FROM ${source}${where.length ? `${separator}WHERE ${conjunction(where)}` : ''}${keys.length ? `${separator}GROUP BY ${keys.map(([, , group]) => group).join(', ')}` : ''}${having.length ? `${separator}HAVING ${conjunction(having)}` : ''}${tails.map(t => separator + t.slice(1)).join('')}`;
     }
     if (binding) {
       const selected = distinctLeaves ?? plan?.columns?.get(rel) ?? outputLeaves(rel.output);
@@ -248,13 +282,13 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         }
         const side = binding.inputs.find(([alias]) => alias === leaf.path[0])!;
         const child = outputLeaves(side[1].output).find(l => JSON.stringify(l.path) === JSON.stringify(leaf.path.slice(1)))!;
-        return `${joinAlias(binding, side[0])}.${quoteIdentifier(child.name)} AS ${quoteIdentifier(leaf.name)}`;
+        return `${joinRead(binding, side[0], `${joinAlias(binding, side[0])}.${quoteIdentifier(child.name)}`, leaf.type, child.type)} AS ${quoteIdentifier(leaf.name)}`;
       });
       const source = joinSource(binding, path, separator);
       const predicates: string[] = [], tails: string[] = [];
       for (const node of block.clauses) {
-        if (node.kind === 'Filter') predicates.push(`(${expression(node.pred, node.input, path, undefined, false, 'row', inputAlias, binding)})`);
-        else if (node.kind === 'Sort') tails.push(`${separator}ORDER BY ${node.keys.map(k => `${expression(k.expr, node.input, path, undefined, false, 'row', inputAlias, binding)} ${k.dir.toUpperCase()}${k.nulls ? ` NULLS ${k.nulls.toUpperCase()}` : ''}`).join(', ')}`);
+        if (node.kind === 'Filter') predicates.push(`(${bare(totalPredicate(node.pred), () => expression(node.pred, node.input, path, undefined, false, 'row', inputAlias, binding))})`);
+        else if (node.kind === 'Sort') tails.push(`${separator}ORDER BY ${node.keys.map(k => `${bare(totalExpression(k.expr), () => expression(k.expr, node.input, path, undefined, false, 'row', inputAlias, binding))} ${k.dir.toUpperCase()}${k.nulls ? ` NULLS ${k.nulls.toUpperCase()}` : ''}`).join(', ')}`);
         else tails.push(`${separator}LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
       }
       return `${select}${items.join(', ')}${separator}FROM ${source}${predicates.length ? `${separator}WHERE ${predicates.join(' AND ')}` : ''}${tails.join('')}`;
@@ -350,7 +384,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           if (!Array.isArray(rel.on)) return fail('invalid_join_condition', rel, `${path}.on`);
           if (rel.joinKind === 'cross' && rel.on.length) return fail('join_condition_arity', rel, `${path}.on`, 'CROSS JOIN has no ON condition');
           if (!Array.isArray(rel.inputs) || rel.inputs.length < 2 || new Set(rel.inputs.map(([a]) => a)).size !== rel.inputs.length) return fail('join_input_count', rel, `${path}.inputs`);
-          if (JSON.stringify(joinOutput(rel.joinKind, rel.inputs)) !== JSON.stringify(rel.output)) return fail('invalid_output', rel, path);
+          if (!outputKinds[rel.joinKind].some(kind => JSON.stringify(joinOutput(kind, rel.inputs)) === JSON.stringify(rel.output))) return fail('invalid_output', rel, path);
           const clauses = rel.inputs.map(() => [] as { e: ExprNode; path: string }[]);
           const residuals: { e: ExprNode; path: string }[] = [];
           const join = rel;
@@ -390,7 +424,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
             const side = rel.inputs.find(([a]) => a === l.path[0])!;
             const child = (plan?.columns?.get(side[1]) ?? outputLeaves(side[1].output)).find(c => JSON.stringify(c.path) === JSON.stringify(l.path.slice(1)));
             if (!child) return fail('missing_physical_column', rel, path, JSON.stringify(l.path));
-            return `${joinAlias(rel, side[0])}.${quoteIdentifier(child.name)} AS ${quoteIdentifier(l.name)}`;
+            return `${joinRead(rel, side[0], `${joinAlias(rel, side[0])}.${quoteIdentifier(child.name)}`, l.type, child.type)} AS ${quoteIdentifier(l.name)}`;
           });
           if (outer) outerJoin = true;
           let source = '';

@@ -26,11 +26,17 @@ export interface Recipe {
   /** Equal table occurrences (same table and pre-filter) share one Query object, a CTE. */
   shared: boolean;
   post: { side: 0 | 1; op: 'isNull' | 'gt' } | null;
-  /** A WHERE outside the total fragment after a guard: CAST(s AS Nullable(UInt8)) fails unless s = '7' (or NULL). */
-  fallible: { side: 0 | 1 } | null;
+  /** A WHERE outside the total fragment after a guard: CAST(ifNull(s, '7') AS UInt8) fails on every s but '7'
+   * (an extended row reads '7'). Guard `text` (s = '7') keeps no bad row, so those runs return rows; guard `id`
+   * (id > 2) keeps 'z'/'orphan'/'lonely' rows whenever they join, so those runs fail, identically everywhere. */
+  fallible: { side: 0 | 1; guard: 'text' | 'id' } | null;
   project: 'none' | 'direct' | 'computed' | 'aggregate' | 'aggregates';
   order: 'first' | 'last' | null;
   distinct: boolean;
+  /** 4b fix round 1: every oj_a leaf reads `k` through a cast (outside the total fragment), so `fallibleWithin` fences
+   * LeftToInner and PushFilterJoin over it. `safe` = CAST(CAST(id AS String) AS UInt32) never fails; `failing` =
+   * CAST(s AS UInt32) fails on every non-numeric s the server computes. */
+  inputCast: 'none' | 'safe' | 'failing';
 }
 const leaf: fc.Arbitrary<Node> = fc.record({ node: fc.constant('table' as const), table: fc.constantFrom(0 as const, 1 as const, 2 as const), pre: fc.option(fc.integer({ min: 0, max: 4 }), { nil: null }) });
 const condition = fc.record({ left: fc.nat(1), right: fc.nat(1), leftKey: fc.constantFrom<Key>('id', 'k'), rightKey: fc.constantFrom<Key>('id', 'k'), text: fc.boolean() });
@@ -40,14 +46,18 @@ export const recipes: fc.Arbitrary<Recipe> = fc.record({
   root: fc.record({ node: fc.constant('join' as const), kind: outerKind, left: side, right: side, on: condition }),
   shared: fc.boolean(),
   post: fc.option(fc.record({ side: fc.constantFrom(0 as const, 1 as const), op: fc.constantFrom('isNull' as const, 'gt' as const) }), { nil: null }),
-  // One recipe in four: the guard keeps only s = '7' rows, which would otherwise empty most results.
-  fallible: fc.oneof({ weight: 3, arbitrary: fc.constant(null) }, { weight: 1, arbitrary: fc.record({ side: fc.constantFrom(0 as const, 1 as const) }) }),
+  // One recipe in three carries the guarded cast; most `id`-guarded ones fail, which would otherwise hide rows.
+  fallible: fc.oneof({ weight: 2, arbitrary: fc.constant(null) }, { weight: 1, arbitrary: fc.record({ side: fc.constantFrom(0 as const, 1 as const), guard: fc.constantFrom('text' as const, 'id' as const) }) }),
   project: fc.constantFrom('none' as const, 'direct' as const, 'computed' as const, 'aggregate' as const, 'aggregates' as const),
   order: fc.constantFrom('first' as const, 'last' as const, null),
   distinct: fc.boolean(),
+  // `failing` is not generated: with a non-pushable conjunct (e.g. isNull on an extended input) beside a guard, MergeFilter's
+  // merged WHERE lets 24.8 push the guard below the input's cast where naive's nested filters do not (pre-existing, pinned in
+  // outer-join.integration.ts "FINDING pin (pre-existing, MergeFilter)"); real failures over fenced joins are the Tester's anchors.
+  inputCast: fc.oneof({ weight: 2, arbitrary: fc.constant('none' as const) }, { weight: 1, arbitrary: fc.constant('safe' as const) }),
 });
 const label = (n: Node): string => n.node === 'table' ? `${n.table}${n.pre === null ? '' : '>'}` : `${n.kind}(${label(n.left)},${label(n.right)};${n.on.left}${n.on.leftKey[0]}${n.on.right}${n.on.rightKey[0]}${n.on.text ? '+' : ''})`;
-export function shape(r: Recipe) { return `${label(r.root)}:${r.shared}:${r.post ? `${r.post.side}${r.post.op}` : '-'}:${r.fallible ? `cast${r.fallible.side}` : '-'}:${r.project}:${r.order ?? '-'}:${r.distinct ? 'distinct' : '-'}`; }
+export function shape(r: Recipe) { return `${label(r.root)}:${r.shared}:${r.post ? `${r.post.side}${r.post.op}` : '-'}:${r.fallible ? `cast${r.fallible.side}${r.fallible.guard}` : '-'}:${r.project}:${r.order ?? '-'}:${r.distinct ? 'distinct' : '-'}:${r.inputCast}`; }
 /** Aliases by depth: the root joins a0/a1, a nested join under a0 joins b0/b1, under a1 c0/c1. */
 const aliases = (prefix: string): [string, string] => [`${prefix}0`, `${prefix}1`];
 const childPrefix = (prefix: string, i: 0 | 1) => prefix === 'a' ? (i ? 'c' : 'b') : 'x';
@@ -69,7 +79,9 @@ export function build(r: Recipe, fault = false): Query<unknown> {
   function make(n: Node, prefix: string): Query<unknown> {
     if (n.node === 'table') {
       const id = `${n.table}:${n.pre}`;
-      const fresh = () => (n.pre === null ? sources[n.table]! : sources[n.table]!.where(x => x.id.gt(n.pre!))) as Query<unknown>;
+      const filtered: any = n.pre === null ? sources[n.table]! : sources[n.table]!.where(x => x.id.gt(n.pre!));
+      const fresh = () => (n.table !== 0 || r.inputCast === 'none' ? filtered : filtered.map((x: any) => ({ id: x.id,
+        k: r.inputCast === 'safe' ? cast(cast(x.id, col.String), col.UInt32) : cast(x.s, col.UInt32), s: x.s, tags: x.tags, lc: x.lc, at: x.at, flag: x.flag }))) as Query<unknown>;
       if (!r.shared) return fresh();
       if (!cache.has(id)) cache.set(id, fresh());
       return cache.get(id)!;
@@ -91,8 +103,9 @@ export function build(r: Recipe, fault = false): Query<unknown> {
     const t = at(row, r.post!.side ? rt : lt);
     return r.post!.op === 'isNull' ? t.k.isNull() : t.id.gt(2);
   });
-  const filtered: any = !r.fallible ? posted : posted.where((row: any) => at(row, r.fallible!.side ? rt : lt).s.eq('7'))
-    .where((row: any) => cast(at(row, r.fallible!.side ? rt : lt).s, col.Nullable(col.UInt8)).gt(1));
+  const guarded = (row: any) => at(row, r.fallible!.side ? rt : lt);
+  const filtered: any = !r.fallible ? posted : posted.where((row: any) => r.fallible!.guard === 'text' ? guarded(row).s.eq('7') : guarded(row).id.gt(2))
+    .where((row: any) => cast(guarded(row).s.ifNull('7'), col.UInt8).gt(1));
   let out: any;
   switch (r.project) {
     case 'none': out = filtered; break;
@@ -110,16 +123,17 @@ export function build(r: Recipe, fault = false): Query<unknown> {
 }
 const KW: Record<Kind, string> = { inner: 'INNER ALL JOIN', left: 'LEFT ALL JOIN', right: 'RIGHT ALL JOIN', full: 'FULL ALL JOIN' };
 /** Native SQL of a node: a derived table whose columns are named by their path below it, joined by `__`. */
-function nativeNode(n: Node, prefix: string): string {
-  if (n.node === 'table') return `SELECT ${COLUMNS.join(',')} FROM ${tables[n.table]}${n.pre === null ? '' : ` WHERE id > ${n.pre}`}`;
+function nativeNode(n: Node, prefix: string, inputCast: Recipe['inputCast']): string {
+  const k = n.node === 'table' && n.table === 0 && inputCast !== 'none' ? (inputCast === 'safe' ? 'CAST(CAST(id AS String) AS UInt32) AS k' : 'CAST(s AS UInt32) AS k') : 'k';
+  if (n.node === 'table') return `SELECT ${COLUMNS.map(c => c === 'k' ? k : c).join(',')} FROM ${tables[n.table]}${n.pre === null ? '' : ` WHERE id > ${n.pre}`}`;
   const cols = tablePaths(n, prefix).flatMap(p => COLUMNS.map(c => `${p[0]}.\`${[...p.slice(1), c].join('__')}\` AS \`${[...p, c].join('__')}\``));
-  return `SELECT ${cols.join(', ')} FROM ${joinText(n, prefix)}`;
+  return `SELECT ${cols.join(', ')} FROM ${joinText(n, prefix, inputCast)}`;
 }
 const ref = (path: readonly string[], column: string) => `${path[0]}.\`${[...path.slice(1), column].join('__')}\``;
-function joinText(n: Extract<Node, { node: 'join' }>, prefix: string): string {
+function joinText(n: Extract<Node, { node: 'join' }>, prefix: string, inputCast: Recipe['inputCast']): string {
   const [la, ra] = aliases(prefix);
   const lp = pick(sidePaths(n, prefix, 0), n.on.left), rp = pick(sidePaths(n, prefix, 1), n.on.right);
-  return `(${nativeNode(n.left, childPrefix(prefix, 0))}) AS ${la} ${KW[n.kind]} (${nativeNode(n.right, childPrefix(prefix, 1))}) AS ${ra} ON ${ref(lp, n.on.leftKey)} = ${ref(rp, n.on.rightKey)}${n.on.text ? ` AND ${ref(lp, 's')} = ${ref(rp, 's')}` : ''}`;
+  return `(${nativeNode(n.left, childPrefix(prefix, 0), inputCast)}) AS ${la} ${KW[n.kind]} (${nativeNode(n.right, childPrefix(prefix, 1), inputCast)}) AS ${ra} ON ${ref(lp, n.on.leftKey)} = ${ref(rp, n.on.rightKey)}${n.on.text ? ` AND ${ref(lp, 's')} = ${ref(rp, 's')}` : ''}`;
 }
 const flat = (path: readonly string[], column: string) => `\`${[...path, column].join('__')}\``;
 /** Independent native SQL. Column aliases are the compiled output names, so one decoder reads all three. The joined
@@ -128,10 +142,11 @@ export function native(r: Recipe, names: readonly string[]): string {
   const lt = sidePaths(r.root, 'a', 0)[0]!, rt = sidePaths(r.root, 'a', 1)[0]!;
   const all = tablePaths(r.root, 'a').flatMap(p => COLUMNS.map(c => `${ref(p, c)} AS ${flat(p, c)}`));
   const where = !r.post ? '' : ` WHERE ${r.post.op === 'isNull' ? `${ref(r.post.side ? rt : lt, 'k')} IS NULL` : `${ref(r.post.side ? rt : lt, 'id')} > 2`}`;
-  let base = `SELECT ${all.join(', ')} FROM ${joinText(r.root, 'a')}${where}`;
+  let base = `SELECT ${all.join(', ')} FROM ${joinText(r.root, 'a', r.inputCast)}${where}`;
   if (r.fallible) {
-    const text = flat(r.fallible.side ? rt : lt, 's');
-    base = `SELECT * FROM (SELECT * FROM (${base}) WHERE ${text} = '7') WHERE CAST(${text} AS Nullable(UInt8)) > 1`;
+    const g = r.fallible.side ? rt : lt, text = flat(g, 's');
+    const guard = r.fallible.guard === 'text' ? `${text} = '7'` : `${flat(g, 'id')} > 2`;
+    base = `SELECT * FROM (SELECT * FROM (${base}) WHERE ${guard}) WHERE CAST(ifNull(${text}, '7') AS UInt8) > 1`;
   }
   const f = (path: readonly string[], c: string) => `q.${flat(path, c)}`;
   const select = r.project === 'none' ? tablePaths(r.root, 'a').flatMap(p => COLUMNS.map(c => f(p, c)))

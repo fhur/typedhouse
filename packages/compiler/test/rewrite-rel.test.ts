@@ -1,9 +1,9 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, createKnownFunctions, max, sum, crossJoin, exprNode, from, join, scalar, table, unionAll, val, type Rel } from '@typedhouse/core';
+import { cast, col, count, createKnownFunctions, max, sum, crossJoin, exprNode, from, join, leftJoin, rightJoin, scalar, table, unionAll, val, type ExprNode, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { validateRel } from '../src/emit-naive.js';
-import { rewriteRel } from '../src/rewrite-rel.js';
-import { conjuncts, references, safePredicate, totalExpression } from '../src/rewrite-expressions.js';
+import { rewriteMeasure, rewriteRel } from '../src/rewrite-rel.js';
+import { conjuncts, nullRejecting, references, safePredicate, totalExpression } from '../src/rewrite-expressions.js';
 const q = from(table('rewrite', { id: col.UInt32, text: col.Nullable(col.String), ids: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 function rewrite(root: Rel) {
   const snapshot = () => JSON.stringify(root, (_, v: unknown) => typeof v === 'bigint' ? `${v}n` : v);
@@ -165,7 +165,7 @@ it('keeps diagnostic paths on original objects and equal-valued Params distinct 
   expect(compiled.parameterTypes).toEqual({ p0: col.UInt32.type, p1: col.UInt32.type });
   const rewritten = rewrite(query.ir);
   expect(rewritten.hits.PushFilterJoin).toBeGreaterThan(0);
-  expect(rewriteRel(rewritten.root).hits).toEqual({ MergeFilter: 0, MergeProject: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 });
+  expect(rewriteRel(rewritten.root).hits).toEqual({ MergeFilter: 0, MergeProject: 0, PushFilterProject: 0, LeftToInner: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 });
 });
 it('pushes direct aggregate keys, splitting AND but retaining aggregate/mixed OR predicates', () => {
   const a = q.groupBy(r => ({ key: r.id })).aggregate(g => ({ n: count(), highest: max(g.id), total: sum(g.id) }));
@@ -268,10 +268,14 @@ it('pushes safe conjuncts below any total array expansion, keeping alias-depende
 it('(vi) gates per conjunct: only safe conjuncts cross Join, ArrayJoin, Aggregate and Union; only total ones cross a Project', () => {
   const unsafe = (text: typeof q.row.text) => cast(text, col.Nullable(col.UInt32)).gt(1);
   const kinds = (e: import('@typedhouse/core').ExprNode) => conjuncts(e).map(c => c.kind === 'Call' && c.args.some(a => a.kind === 'Cast') ? 'cast' : safePredicate(c) ? 'safe' : 'arith');
-  const joined = rewrite(crossJoin({ a: q, b: q }).where(r => r.a.id.gt(1).and(r.a.id.plus(1).gt(2n)).and(unsafe(r.a.text))).ir);
+  // Slice 4b: a non-total conjunct in (or above) the Filter fences PushFilterJoin entirely (`fallibleExposure`:
+  // 24.8 copies it across ON equalities into an input the moved guard no longer precedes).
+  const fenced = crossJoin({ a: q, b: q }).where(r => r.a.id.gt(1).and(r.a.id.plus(1).gt(2n)).and(unsafe(r.a.text)));
+  expect(rewrite(fenced.ir).root).toBe(fenced.ir);
+  const joined = rewrite(crossJoin({ a: q, b: q }).where(r => r.a.id.gt(1).and(r.a.id.plus(1).gt(2n))).ir);
   expect(joined.hits.PushFilterJoin).toBe(1);
   if (joined.root.kind !== 'Filter' || joined.root.input.kind !== 'Join' || joined.root.input.inputs[0]![1].kind !== 'Filter') throw new Error('shape');
-  expect(kinds(joined.root.pred)).toEqual(['arith', 'cast']);
+  expect(kinds(joined.root.pred)).toEqual(['arith']);
   expect(kinds(joined.root.input.inputs[0]![1].pred)).toEqual(['safe']);
   expect(joined.root.input.inputs[1]![1]).toBe(q.ir);
   const expanded = rewrite(q.arrayJoin(r => r.ids, 'part').where(r => r.id.gt(1).and(r.id.plus(1).gt(2n)).and(unsafe(r.text))).ir);
@@ -302,4 +306,193 @@ it('(vi) gates per conjunct: only safe conjuncts cross Join, ArrayJoin, Aggregat
   expect(merged.root.kind === 'Filter' && merged.root.input).toBe(q.ir);
   const blocked = q.where(r => unsafe(r.text)).where(r => r.id.plus(1).gt(2n));
   expect(rewrite(blocked.ir).root).toBe(blocked.ir);
+});
+
+// Slice 4b: LeftToInner and the outer-join conditions of PushFilterJoin.
+const oa = from(table('oa', { id: col.UInt32, s: col.String, k: col.Nullable(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const ob = from(table('ob', { id: col.UInt32, s: col.String, n: col.Int64, k: col.Nullable(col.UInt32), tags: col.Array(col.String), lc: col.LowCardinality(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const lj = () => leftJoin({ a: oa }, { b: ob }).on(r => r.a.id.eq(r.b.id));
+const joinOf = (rel: Rel) => { while (rel.kind !== 'Join') { if (!('input' in rel)) throw new Error('no join'); rel = rel.input; } return rel; };
+it('LeftToInner: each null-rejecting form on the extended side makes the join inner; the Filter and the output stay', () => {
+  const forms = [
+    lj().where(r => r.b.s.eq('x')), lj().where(r => r.b.s.ne('x')), lj().where(r => r.b.n.lt(3n)), lj().where(r => r.b.n.le(3n)),
+    lj().where(r => r.b.n.gt(3n)), lj().where(r => r.b.n.ge(3n)), lj().where(r => r.b.s.isNotNull()), lj().where(r => r.b.lc.eq('x')),
+    // Both sides in one comparison: still NULL on an extended row; it stays above as a residual.
+    lj().where(r => r.a.s.eq(r.b.s)),
+    // Already Nullable in its source table: an extended row has k = NULL, `k > 1` is NULL (falsy in WHERE),
+    // so it is rejected exactly as before. Source NULLs are rejected by the same predicate on either kind.
+    lj().where(r => r.b.k.gt(1)),
+    // A null-rejecting conjunct anywhere in the conjunction is enough; the or-conjunct stays as is.
+    lj().where(r => r.a.s.eq('x').or(r.b.s.eq('y'))).where(r => r.b.n.gt(0n)),
+  ];
+  for (const query of forms) {
+    const result = rewrite(query.ir);
+    expect(result.hits.LeftToInner).toBe(1);
+    const j = joinOf(result.root);
+    expect(j.joinKind).toBe('inner');
+    expect(j.output).toEqual(joinOf(query.ir).output);
+    // Nothing moves into b: its descriptors are wider in the Join's output than its own.
+    expect(j.inputs[1]![1]).toBe(ob.ir);
+    const sql = compile(query.ir).sql;
+    expect(sql).toMatch(/INNER ALL JOIN/);
+    expect(sql).not.toMatch(/join_use_nulls|LEFT ALL JOIN/);
+  }
+  // Symmetric for right joins on the first input.
+  const right = rewrite(rightJoin({ a: oa }, { b: ob }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.s.eq('x')).ir);
+  expect(right.hits).toMatchObject({ LeftToInner: 1, PushFilterJoin: 0 });
+  expect(joinOf(right.root).joinKind).toBe('inner');
+});
+it('LeftToInner negatives: or across sides, isNull, ifNull-wrapped, Param-only, preserved side only, unsafe conjuncts', () => {
+  const negatives: [Rel, number][] = [
+    [lj().where(r => r.a.s.eq('x').or(r.b.s.eq('y'))).ir, 0],
+    [lj().where(r => r.b.s.isNull()).ir, 0],
+    [lj().where(r => r.b.n.ifNull(0n).gt(1n)).ir, 0],
+    [lj().where(() => val(true)).ir, 0],
+    [lj().where(() => val(1, col.UInt32).eq(val(1, col.UInt32))).ir, 0],
+    // Preserved side only: pushed into a (PushFilterJoin), the join stays left.
+    [lj().where(r => r.a.s.eq('x')).ir, 1],
+    // Outside safePredicate: a cast never converts or moves.
+    [lj().where(r => cast(r.b.s.ifNull('7'), col.UInt8).gt(1)).ir, 0],
+  ];
+  for (const [root, pushed] of negatives) {
+    const result = rewrite(root);
+    expect(result.hits.LeftToInner).toBe(0);
+    expect(result.hits.PushFilterJoin).toBe(pushed);
+    expect(joinOf(result.root).joinKind).toBe('left');
+    expect(compile(root).sql).toMatch(/LEFT ALL JOIN[^]*join_use_nulls = 1/);
+  }
+  // The predicate itself, directly: only bare Nullable columns of the named side, through the closed forms.
+  const bare = (q: { ir: Rel }) => { const r = q.ir; if (r.kind !== 'Filter') throw new Error('filter'); return { pred: r.pred, join: r.input.id }; };
+  const tags = bare(lj().where(r => r.b.tags.length().gt(0n)));
+  expect(nullRejecting(tags.pred, tags.join, 'b')).toBe(false); // Array side columns keep server defaults ([]).
+  const arrayRef = references(tags.pred)[0]!;
+  const forged: ExprNode = exprNode({ kind: 'Call', fn: { name: 'eq', origin: 'typed', deterministic: true }, args: [arrayRef, arrayRef], type: { kind: 'scalar', name: 'Bool' } });
+  expect(nullRejecting(forged, tags.join, 'b')).toBe(false);
+  const pre = bare(lj().where(r => r.b.s.eq('x')));
+  expect(nullRejecting(pre.pred, pre.join, 'b')).toBe(true);
+  expect(nullRejecting(pre.pred, pre.join, 'a')).toBe(false);
+  expect(nullRejecting(pre.pred, oa.ir.id, 'b')).toBe(false);
+  const and: ExprNode = exprNode({ kind: 'Call', fn: { name: 'and', origin: 'typed', deterministic: true }, args: [bare(lj().where(r => r.a.s.eq('x'))).pred, pre.pred], type: { kind: 'Nullable', inner: { kind: 'scalar', name: 'Bool' } } });
+  expect(nullRejecting(and, pre.join, 'b')).toBe(true);
+  const not = bare(lj().where(r => r.b.s.eq('x').not()));
+  expect(nullRejecting(not.pred, not.join, 'b')).toBe(false);
+});
+it('LeftToInner never fires at or under a Filter with a non-total conjunct (server push-down would reorder it)', () => {
+  const bad = (r: any): any => cast(r.b.s.ifNull('7'), col.UInt8).gt(1);
+  for (const root of [
+    lj().where(r => r.b.n.gt(2n)).where(bad).ir,
+    lj().where(r => r.b.n.gt(2n).and(bad(r))).ir,
+    lj().where(r => r.b.n.gt(2n)).map(r => ({ id: r.a.id, s: r.b.s })).where(r => cast(r.s.ifNull('7'), col.UInt8).gt(1)).ir,
+    lj().where(r => r.b.n.gt(2n)).orderBy(r => r.a.id).limit(3).where(bad).ir,
+  ]) {
+    const result = rewrite(root);
+    expect(result.hits.LeftToInner).toBe(0);
+    expect(compile(root).sql).toMatch(/LEFT ALL JOIN/);
+  }
+  // A fallible Filter elsewhere (another union branch, an outer scope around an IN subquery) does not expose this join...
+  const converted = lj().where(r => r.b.n.gt(2n)).map(r => ({ id: r.a.id }));
+  const elsewhere = lj().where(bad).map(r => ({ id: r.a.id }));
+  expect(rewrite(unionAll(converted, elsewhere).ir).hits.LeftToInner).toBe(1);
+  expect(rewrite(oa.where(r => r.id.in(converted.map(c => c.id))).where(r => cast(r.s, col.UInt8).gt(1)).ir).hits.LeftToInner).toBe(1);
+  // ...while a non-total IN above the join does (conservatively).
+  expect(rewrite(converted.where(r => r.id.in(elsewhere.map(e => e.id))).ir).hits.LeftToInner).toBe(0);
+  // A total but non-safe conjunct (integer plus) above does not expose it either.
+  expect(rewrite(lj().where(r => r.b.n.gt(2n)).where(r => r.a.id.plus(val(1, col.UInt32)).gt(2n)).ir).hits.LeftToInner).toBe(1);
+});
+it('outer PushFilterJoin never enters an extended input, even one whose output the join leaves unchanged; LeftToInner needs safePredicate', () => {
+  // Every column of `on` is already Nullable or an Array, so the left join's output for it equals its own output.
+  const on = from(table('on', { id: col.Nullable(col.UInt32), tags: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const anti = leftJoin({ a: oa }, { b: on }).on(r => r.a.k.eq(r.b.id)).where(r => r.b.id.isNull());
+  const result = rewrite(anti.ir);
+  expect(result.hits).toMatchObject({ LeftToInner: 0, PushFilterJoin: 0 });
+  expect(joinOf(result.root).inputs[1]![1]).toBe(on.ir);
+  // Null-rejecting and total, but outside safePredicate (integer minus): no conversion.
+  const total = lj().where(r => r.b.n.gt(r.b.n.minus(1n)));
+  expect(rewrite(total.ir).hits.LeftToInner).toBe(0);
+});
+it('LeftToInner judges the substituted conjunct after projection pushdown', () => {
+  const direct = lj().map(r => ({ id: r.a.id, bs: r.b.s })).where(r => r.bs.eq('x'));
+  expect(rewrite(direct.ir).hits).toMatchObject({ PushFilterProject: 1, LeftToInner: 1 });
+  // Fix round 1 (m3): the select list keeps the descriptor (toNullable), the total WHERE reads the column bare.
+  expect(compile(direct.ir).sql).toMatch(/toNullable\(`b`\.`s`\) AS `bs`[^]*INNER ALL JOIN[^]*WHERE \(`b`\.`s` = /);
+  const wrapped = lj().map(r => ({ id: r.a.id, n: r.b.n.ifNull(0n) })).where(r => r.n.gt(1n));
+  expect(rewrite(wrapped.ir).hits).toMatchObject({ PushFilterProject: 1, LeftToInner: 0 });
+});
+it('join_use_nulls stays while another outer join survives and goes when none does; columns keep their descriptors', () => {
+  const nested = leftJoin({ x: lj() }, { c: ob }).on(r => r.x.a.id.eq(r.c.id));
+  const outerOnly = nested.where(r => r.c.s.eq('x'));
+  const result = rewrite(outerOnly.ir);
+  expect(result.hits.LeftToInner).toBe(1);
+  const sql = compile(outerOnly.ir).sql;
+  expect(sql).toMatch(/LEFT ALL JOIN[^]*INNER ALL JOIN|INNER ALL JOIN[^]*LEFT ALL JOIN/);
+  expect(sql.match(/join_use_nulls = 1/g)).toHaveLength(2); // the SETTINGS clause and its comment
+  const both = nested.where(r => r.c.s.eq('x')).where(r => r.x.b.s.eq('y'));
+  expect(rewrite(both.ir).hits.LeftToInner).toBe(2);
+  expect(compile(both.ir).sql).not.toMatch(/join_use_nulls|LEFT ALL JOIN/);
+  // The compiled descriptors are the original graph's (Nullable on the formerly extended inputs).
+  expect(compile(both.ir).columns).toEqual(emitNaive(both.ir).columns);
+  expect(Object.values(compile(both.ir).columns).filter(t => t.kind === 'Nullable' || t.kind === 'LowCardinality').length).toBeGreaterThan(0);
+});
+it('LeftToInner strictly decreases only the fourth (null-extended input) component of the measure', () => {
+  const root = lj().where(r => r.b.s.eq('x')).ir;
+  const once = (() => { try { return rewriteRel(root, 1); } catch (error) { return error as Error; } })();
+  expect(once).toBeInstanceOf(Error); // one pass converts, a second is needed to observe the fixpoint
+  const result = rewriteRel(root);
+  const [d0, f0, n0, x0] = rewriteMeasure(root), [d1, f1, n1, x1] = rewriteMeasure(result.root);
+  expect([d1, f1, n1]).toEqual([d0, f0, n0]);
+  expect([x0, x1]).toEqual([1, 0]);
+});
+
+// Fix round 1 (D1): a non-total expression anywhere inside either join input fences LeftToInner and PushFilterJoin.
+it('fix round 1: fallibleWithin fences both join rules over inputs with fallible projections, expansions, aggregates, filters, sorts', () => {
+  const known = createKnownFunctions({ intDiv: { isAggregate: false, deterministic: true, aliasTo: '' }, splitByChar: { isAggregate: false, deterministic: true, aliasTo: '' } } as const).fn;
+  const fallible: [string, { ir: Rel }][] = [
+    ['cast projection', ob.map(r => ({ id: r.id, n: r.n, s: r.s, c: cast(r.s, col.UInt8) }))],
+    ['known call', ob.map(r => ({ id: r.id, n: r.n, s: r.s, c: known.intDiv(r.n, r.n).as(col.Int64) }))],
+    ['fallible expansion', ob.arrayJoin(r => known.splitByChar(val(','), r.s).as(col.Array(col.String)), 'x').map(r => ({ id: r.id, n: r.n, s: r.s }))],
+    ['fallible aggregate', ob.groupBy(r => ({ id: r.id })).aggregate(g => ({ n: max(g.n), s: max(g.s), c: sum(cast(g.s, col.UInt8)) }))],
+    ['fallible filter', ob.where(r => cast(r.s, col.UInt8).gt(1))],
+    ['fallible sort key', ob.orderBy(r => cast(r.s, col.UInt8)).limit(10)],
+  ];
+  for (const [label, input] of fallible) {
+    const extended = leftJoin({ a: oa }, { b: input as any }).on((r: any) => r.a.id.eq(r.b.id)).where((r: any) => r.b.n.gt(0n).and(r.a.s.eq('x')));
+    expect(rewrite(extended.ir).hits, `${label} (extended)`).toMatchObject({ LeftToInner: 0, PushFilterJoin: 0 });
+    const preserved = leftJoin({ b: input as any }, { a: oa }).on((r: any) => r.a.id.eq(r.b.id)).where((r: any) => r.a.id.lt(3).and(r.b.n.gt(0n)));
+    expect(rewrite(preserved.ir).hits, `${label} (preserved)`).toMatchObject({ LeftToInner: 0, PushFilterJoin: 0 });
+    const inner = join({ a: oa, b: input as any }).on((r: any) => r.a.id.eq(r.b.id)).where((r: any) => r.a.id.gt(2));
+    expect(rewrite(inner.ir).hits.PushFilterJoin, `${label} (inner)`).toBe(0);
+  }
+  // Total inputs still convert and push: integer arithmetic, renames, count/max/integer sum, a total filter and sort.
+  const total: [string, { ir: Rel }][] = [
+    ['arithmetic', ob.map(r => ({ id: r.id, n: r.n.plus(1n), s: r.s }))],
+    ['total aggregate', ob.groupBy(r => ({ id: r.id })).aggregate(g => ({ n: sum(g.n), s: max(g.s), c: count() }))],
+    ['total filter and sort', ob.where(r => r.n.gt(1n)).orderBy(r => r.id).limit(10)],
+  ];
+  for (const [label, input] of total) {
+    const extended = leftJoin({ a: oa }, { b: input as any }).on((r: any) => r.a.id.eq(r.b.id)).where((r: any) => r.b.n.gt(0n).and(r.a.s.eq('x')));
+    expect(rewrite(extended.ir).hits, label).toMatchObject({ LeftToInner: 1, PushFilterJoin: 1 });
+  }
+});
+it('fix round 1 (m3): total WHERE and ORDER BY read a converted column bare; outputs, GROUP BY keys and aggregates keep toNullable', () => {
+  const q = lj().where(r => r.b.n.gt(2n)).orderBy(r => r.b.s);
+  const sql = compile(q.ir).sql;
+  expect(sql).toMatch(/toNullable\(`b`\.`n`\) AS `__typedhouse_leaf_\d+`/);
+  expect(sql).toMatch(/WHERE \(`b`\.`n` > \{p\d+:Int64\}\)/);
+  expect(sql).toMatch(/ORDER BY `b`\.`s` ASC/);
+  const grouped = lj().where(r => r.b.n.gt(2n)).groupBy(r => ({ s: r.b.s })).aggregate(g => ({ m: max(g.b.n) }));
+  const g = compile(grouped.ir).sql;
+  expect(g).toMatch(/toNullable\(`b`\.`s`\) AS `s`, max\(toNullable\(`b`\.`n`\)\)/);
+  expect(g).toMatch(/WHERE `b`\.`n` > /);
+  expect(compile(grouped.ir).columns).toEqual(emitNaive(grouped.ir).columns);
+});
+it('fix round 2 (D2): a total key over a converted join groups by its bare reads; only the select item carries the descriptor', () => {
+  const conv = () => lj().where(r => r.b.n.gt(0n));
+  const identity = conv().groupBy(r => ({ s: r.b.s })).aggregate(() => ({ c: count() })).where(r => r.s.ne('x')).orderBy(r => r.s.desc());
+  expect(compile(identity.ir).sql).toBe('SELECT toNullable(`b`.`s`) AS `s`, count() AS `c`\nFROM (SELECT `id` FROM `oa`) AS `a`\nINNER ALL JOIN (SELECT `id`, `s`, `n` FROM `ob`) AS `b` ON `a`.`id` = `b`.`id`\nWHERE `b`.`n` > {p0:Int64}\nGROUP BY `b`.`s`\nHAVING `s` != {p1:String}\nORDER BY `s` DESC');
+  // Compound keys: the whole key is wrapped when its declared type carries NULL (m), not when it does not (f).
+  const compound = conv().groupBy(r => ({ m: r.b.n.plus(1n), f: r.b.n.ifNull(0n), lc: r.b.lc })).aggregate(() => ({ c: count() }));
+  expect(compile(compound.ir).sql).toBe('SELECT toNullable(`b`.`n` + {p0:Int64}) AS `m`, ifNull(`b`.`n`, {p1:Int64}) AS `f`, toNullable(`b`.`lc`) AS `lc`, count() AS `c`\nFROM (SELECT `id` FROM `oa`) AS `a`\nINNER ALL JOIN (SELECT `id`, `n`, `lc` FROM `ob`) AS `b` ON `a`.`id` = `b`.`id`\nWHERE `b`.`n` > {p2:Int64}\nGROUP BY `b`.`n` + {p0:Int64}, ifNull(`b`.`n`, {p1:Int64}), `b`.`lc`');
+  for (const q of [identity, compound]) expect(compile(q.ir).columns).toEqual(emitNaive(q.ir).columns);
+  // Unconverted (LEFT) aggregate blocks keep their single rendering.
+  expect(compile(lj().groupBy(r => ({ s: r.b.s })).aggregate(() => ({ c: count() })).ir).sql).toMatch(/SELECT `b`\.`s` AS `s`, count\(\) AS `c`[^]*LEFT ALL JOIN[^]*GROUP BY `b`\.`s`/);
 });

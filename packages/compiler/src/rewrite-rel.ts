@@ -1,5 +1,5 @@
-import { outputLeaves, print, relNode as constructRel, type ExprNode, type Rel } from '@typedhouse/core';
-import { exprNode, conjunction, conjuncts, contains, mapExpression, rebind, references, safeAggregate, safePredicate, substitute, totalExpression, totalPredicate } from './rewrite-expressions.js';
+import { nullExtended, outputLeaves, print, relNode as constructRel, type CHType, type ExprNode, type Rel } from '@typedhouse/core';
+import { exprNode, conjunction, conjuncts, contains, mapExpression, nullRejecting, rebind, references, safeAggregate, safePredicate, substitute, totalExpression, totalPredicate } from './rewrite-expressions.js';
 
 function mapRecord(es: Readonly<Record<string, ExprNode>>, visit: (e: ExprNode) => ExprNode): Readonly<Record<string, ExprNode>> {
   const out: Record<string, ExprNode> = {};
@@ -32,7 +32,7 @@ function relNode(fields: Parameters<typeof constructRel>[0]): Rel {
   return Object.keys(edges).every(k => same(edges[k], (made as unknown as Record<string, unknown>)[k])) ? made : Object.freeze({ ...made, ...edges });
 }
 
-export type RewriteRule = 'MergeFilter' | 'MergeProject' | 'PushFilterProject' | 'PushFilterJoin' | 'PushFilterArrayJoin' | 'PushFilterAggKey' | 'PushFilterUnion';
+export type RewriteRule = 'MergeFilter' | 'MergeProject' | 'PushFilterProject' | 'LeftToInner' | 'PushFilterJoin' | 'PushFilterArrayJoin' | 'PushFilterAggKey' | 'PushFilterUnion';
 export interface RewriteResult { readonly root: Rel; readonly hits: Readonly<Record<RewriteRule, number>> }
 const filter = (input: Rel, pred: ExprNode): Rel => relNode({ kind: 'Filter', input, pred, output: input.output });
 const values = (r: Readonly<Record<string, ExprNode>>) => Object.getOwnPropertyNames(r).map(k => r[k]!);
@@ -56,25 +56,82 @@ function countUses(root: Rel): Map<Rel, number> {
   visit(root);
   return uses;
 }
+/** Nodes at or below (through relational edges, not Subquery scopes) a Filter with a conjunct
+ * outside the total fragment. ClickHouse's own filter push-down may evaluate such a conjunct
+ * below any WHERE of an inner join it crosses, and it never crosses into the extended input of
+ * an outer join: LeftToInner under such a Filter would let a cast or a division run on rows a
+ * null-rejecting guard above the join was keeping from it (observed on 24.8: CANNOT_PARSE_TEXT
+ * where naive returns rows). */
+function fallibleExposure(root: Rel): Set<Rel> {
+  const exposed = new Set<Rel>(), visited = new Set<Rel>();
+  const mark = (node: Rel): void => { if (exposed.has(node)) return; exposed.add(node); edges(node).rels.forEach(mark); };
+  function visit(node: Rel): void {
+    if (visited.has(node)) return;
+    visited.add(node);
+    if (node.kind === 'Filter' && !conjuncts(node.pred).every(totalPredicate)) mark(node);
+    const { rels, exprs } = edges(node);
+    rels.forEach(visit);
+    for (const e of exprs) mapExpression(e, r => r, sub => { visit(sub); return sub; });
+  }
+  visit(root);
+  return exposed;
+}
+/** Fix round 1 (D1): whether a subtree (through relational edges, not Subquery scopes) evaluates any expression
+ * outside the total fragment: a Filter conjunct outside `totalPredicate`, a projected, expanded, sort or grouping
+ * expression outside `totalExpression` (Raw, Subquery, casts, division, known/user calls...), an aggregate outside
+ * `totalAggregate`, or a RawRel. ClickHouse 24.8 pushes a join's WHERE (or its ON-equality image) into an INNER
+ * join's inputs below their projections, expansions and GROUP BY, so a row such an expression would fail on in naive
+ * SQL is never computed (LeftToInner suppressing a failure), or the guard leaves the WHERE and stops being copied
+ * across ON into the other input (PushFilterJoin raising one). Immutable nodes, so the memo is global. */
+const fallibleMemo = new WeakMap<Rel, boolean>();
+const totalAggregates = new Set(['count', 'max', 'min', 'any', 'anyLast', 'uniq']);
+function totalAggregate(e: ExprNode): boolean {
+  if (e.kind !== 'Agg') return totalExpression(e);
+  if (e.fn.origin !== 'typed' || e.params.length || e.combinators.length || !e.args.every(totalExpression)) return false;
+  if (totalAggregates.has(e.fn.name)) return true;
+  // Integer sum wraps; Decimal sum can overflow and raise.
+  const integer = (t: CHType | null | undefined): boolean => !!t && (t.kind === 'Nullable' || t.kind === 'LowCardinality' ? integer(t.inner) : t.kind === 'scalar' && /^U?Int(8|16|32|64|128|256)$/.test(t.name));
+  return e.fn.name === 'sum' && e.args.every(a => integer(a.type));
+}
+export function fallibleWithin(node: Rel): boolean {
+  const known = fallibleMemo.get(node);
+  if (known !== undefined) return known;
+  let own = false;
+  switch (node.kind) {
+    case 'Filter': own = !conjuncts(node.pred).every(totalPredicate); break;
+    case 'Project': own = !values(node.exprs).every(totalExpression); break;
+    case 'ArrayJoin': own = !totalExpression(node.expr); break;
+    case 'Aggregate': own = !values(node.keys).every(totalExpression) || !values(node.aggs).every(totalAggregate); break;
+    case 'Sort': own = !node.keys.every(k => totalExpression(k.expr)); break;
+    case 'Join': own = !node.on.every(totalPredicate); break;
+    case 'RawRel': own = true; break;
+  }
+  const result = own || edges(node).rels.some(fallibleWithin);
+  fallibleMemo.set(node, result);
+  return result;
+}
+/** Null-extended input occurrences of a Join kind: what LeftToInner strictly decreases. */
+const extendedSides = (node: Extract<Rel, { kind: 'Join' }>) => node.inputs.filter((_, i) => nullExtended(node.joinKind, i, node.inputs.length)).length;
 /** Lexicographic occurrence-tree measure. Filters do not contribute to distance,
  * so splitting one join predicate cannot increase a residual's distance. The
- * third component counts non-Filter occurrences, including subquery scopes. */
-export function rewriteMeasure(root: Rel): readonly [number, number, number] {
-  const memo = new Map<Rel, readonly [number, number, number, number]>();
-  function visit(node: Rel): readonly [number, number, number, number] {
+ * third component counts non-Filter occurrences, including subquery scopes; the
+ * fourth counts null-extended join inputs over the same occurrences. */
+export function rewriteMeasure(root: Rel): readonly [number, number, number, number] {
+  const memo = new Map<Rel, readonly [number, number, number, number, number]>();
+  function visit(node: Rel): readonly [number, number, number, number, number] {
     const old = memo.get(node);
     if (old) return old;
     const { rels, exprs } = edges(node);
-    let size = node.kind === 'Filter' ? 0 : 1, distance = 0, filters = node.kind === 'Filter' ? 1 : 0, nodes = size;
-    for (const child of rels) { const [s, d, f, n] = visit(child); size += s; distance += d; filters += f; nodes += n; }
+    let size = node.kind === 'Filter' ? 0 : 1, distance = 0, filters = node.kind === 'Filter' ? 1 : 0, nodes = size, extended = node.kind === 'Join' ? extendedSides(node) : 0;
+    for (const child of rels) { const [s, d, f, n, x] = visit(child); size += s; distance += d; filters += f; nodes += n; extended += x; }
     if (node.kind === 'Filter') distance += size * conjuncts(node.pred).length;
-    for (const e of exprs) mapExpression(e, r => r, sub => { const [, d, f, n] = visit(sub); distance += d; filters += f; nodes += n; return sub; });
-    const result = [size, distance, filters, nodes] as const;
+    for (const e of exprs) mapExpression(e, r => r, sub => { const [, d, f, n, x] = visit(sub); distance += d; filters += f; nodes += n; extended += x; return sub; });
+    const result = [size, distance, filters, nodes, extended] as const;
     memo.set(node, result);
     return result;
   }
-  const [, distance, filters, nodes] = visit(root);
-  return [distance, filters, nodes];
+  const [, distance, filters, nodes, extended] = visit(root);
+  return [distance, filters, nodes, extended];
 }
 /** Validated graphs only. No mutation, registry or predicate memoization by input.
  * Each pass memoizes original occurrences, never consumer-specific pushdowns.
@@ -88,11 +145,20 @@ export function rewriteMeasure(root: Rel): readonly [number, number, number] {
  * arms decrease distance exactly as whole-predicate pushes did.
  * MergeProject changes neither distance nor Filter count unless a Filter sits above
  * it (then distance drops); it strictly decreases the non-Filter occurrence count.
+ * LeftToInner replaces one Join by another over the same inputs and keeps its Filter, so
+ * distance, Filter count and node count are unchanged; it strictly decreases the number
+ * of null-extended join inputs (left/right 1 -> inner 0, full 2 -> left/right 1 or inner 0),
+ * which no rule increases (no rule creates or copies a Join). Both join rules are fenced: never at or under a
+ * Filter with a non-total conjunct, never over an input whose subtree evaluates a non-total expression.
  * No rule pulls predicates upward. Fifty passes are a safety limit, never partial success.
  */
+function lexicographicallyLess(a: readonly number[], b: readonly number[]): boolean {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i]! < b[i]!;
+  return false;
+}
 export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
-  const hits: Record<RewriteRule, number> = { MergeFilter: 0, MergeProject: 0, PushFilterProject: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 };
-  let uses = new Map<Rel, number>();
+  const hits: Record<RewriteRule, number> = { MergeFilter: 0, MergeProject: 0, PushFilterProject: 0, LeftToInner: 0, PushFilterJoin: 0, PushFilterArrayJoin: 0, PushFilterAggKey: 0, PushFilterUnion: 0 };
+  let uses = new Map<Rel, number>(), exposed = new Set<Rel>();
   const scoped = (e: ExprNode) => contains(e, a => a.kind === 'Subquery' || a.kind === 'Agg');
   const repeatable = (e: ExprNode) => !contains(e, a => a.kind === 'Raw' || (a.kind === 'Call' || a.kind === 'Agg') && a.fn.deterministic !== true);
   function mergeProject(outer: Extract<Rel, { kind: 'Project' }>): Rel {
@@ -177,13 +243,42 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
       hits.PushFilterArrayJoin++;
       return above(relNode({ kind: 'ArrayJoin', input, expr: rebind(child.expr, child.input, input), alias: child.alias, left: child.left, output: child.output, columns: child.columns }), residual);
     }
-    if (child.kind === 'Join' && (child.joinKind === 'inner' || child.joinKind === 'cross') && child.on.every(safePredicate)) {
+    // LeftToInner: a safe conjunct that is null-rejecting on a null-extended input removes
+    // every row that input's extension produced, so the Join stops extending it (full ->
+    // left/right/inner by which inputs are rejected). The Filter stays above unchanged and the
+    // Join keeps its output: descriptors stay Nullable, and the emitter reads a formerly
+    // extended column through toNullable, so `columns` and server `meta` keep agreeing.
+    // Never under (or in) a Filter with a non-total conjunct (`fallibleExposure`), nor over an input that evaluates a
+    // non-total expression anywhere below (`fallibleWithin`, fix round 1).
+    const fallibleInput = child.kind === 'Join' && child.inputs.some(([, input]) => fallibleWithin(input));
+    if (child.kind === 'Join' && (child.joinKind === 'left' || child.joinKind === 'right' || child.joinKind === 'full') && !exposed.has(node) && !fallibleInput) {
+      const n = child.inputs.length, preds = conjuncts(node.pred).filter(safePredicate);
+      const still = child.inputs.map(([alias], i) => nullExtended(child.joinKind, i, n) && !preds.some(pred => nullRejecting(pred, child.id, alias)));
+      const kinds = ['inner', 'left', 'right', 'full'] as const;
+      const joinKind = kinds.find(k => still.every((x, i) => x === nullExtended(k, i, n)));
+      if (joinKind && joinKind !== child.joinKind) {
+        const joined = relNode({ kind: 'Join', joinKind, inputs: child.inputs, on: child.on, scope: child.scope ?? child.id, output: child.output });
+        hits.LeftToInner++;
+        return filter(joined, rebind(node.pred, child, joined));
+      }
+    }
+    // A conjunct crosses into an input only if the Join neither null-extends it (left: the
+    // first input; right: the last; full: none) nor reads it with wider descriptors than the
+    // input's own (an input LeftToInner stopped extending): pushing there would retype it.
+    // Neither at or under a Filter with a non-total conjunct (`fallibleExposure`): 24.8's filter
+    // push-down copies such a conjunct across ON equalities into the other input, where a guard
+    // this rule moved into one input no longer precedes it (CANNOT_PARSE_TEXT where naive, whose
+    // guard is pushed together with it, returns rows). This held for inner joins before 4b too.
+    if (child.kind === 'Join' && child.on.every(safePredicate) && !exposed.has(node) && !fallibleInput) {
       const sides = new Map<string, ExprNode[]>();
       const residual: ExprNode[] = [];
+      const own = (r: Rel) => JSON.stringify(r.output);
+      const admits = new Set(child.inputs.filter(([alias, input], i) => !nullExtended(child.joinKind, i, child.inputs.length)
+        && (child.output.inputs[i]?.[1] === input.output || JSON.stringify(child.output.inputs[i]?.[1]) === own(input))).map(([alias]) => alias));
       for (const pred of conjuncts(node.pred)) {
         const refs = references(pred);
         const alias = refs[0]?.path[0];
-        if (!safePredicate(pred) || !alias || !refs.every(r => r.rel === child.id && r.path[0] === alias) || !child.inputs.some(([a]) => a === alias)) { residual.push(pred); continue; }
+        if (!safePredicate(pred) || !alias || !refs.every(r => r.rel === child.id && r.path[0] === alias) || !admits.has(alias)) { residual.push(pred); continue; }
         const es = sides.get(alias) ?? [];
         es.push(pred); sides.set(alias, es);
       }
@@ -203,6 +298,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
   for (let pass = 0; pass < maxPasses; pass++) {
     const memo = new Map<Rel, Rel>();
     uses = countUses(root);
+    exposed = fallibleExposure(root);
     function visit(node: Rel): Rel {
       const cached = memo.get(node);
       if (cached) return cached;
@@ -235,7 +331,11 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
         const inputs = node.inputs.map(visit);
         if (inputs.some((r, i) => r !== node.inputs[i])) result = relNode({ kind: 'Union', inputs, all: node.all, output: node.output });
       }
+      // A rebuilt occurrence inherits its original's exposure before the local rules see it.
+      if (result !== node && exposed.has(node)) exposed.add(result);
+      const before = result;
       result = local(result);
+      if (result !== before && exposed.has(before)) exposed.add(result);
       // A rewritten occurrence replaces its original in every parent slot.
       if (result !== node) uses.set(result, uses.get(node) ?? 0);
       memo.set(node, result);
@@ -244,7 +344,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
     const next = visit(root);
     if (next === root) return Object.freeze({ root, hits: Object.freeze(hits) });
     const before = rewriteMeasure(root), after = rewriteMeasure(next);
-    if (!(after[0] < before[0] || after[0] === before[0] && (after[1] < before[1] || after[1] === before[1] && after[2] < before[2]))) throw new Error('rewrite_nonconvergence: non-decreasing measure');
+    if (!lexicographicallyLess(after, before)) throw new Error('rewrite_nonconvergence: non-decreasing measure');
     root = next;
   }
   throw new Error(`rewrite_nonconvergence: exceeded ${maxPasses} passes`);

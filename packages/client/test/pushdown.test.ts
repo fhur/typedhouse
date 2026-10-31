@@ -3,7 +3,7 @@ import fc from 'fast-check';
 import { compile, emitNaive } from '@typedhouse/compiler';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { build, fails, recipeArbitrary, seed, shape, shapeCount } from './pushdown-arbitrary.js';
-it('reconstructs shrinkable multi-operator recipes with all five actual rewrite hits', () => {
+it('reconstructs shrinkable multi-operator recipes with all six actual rewrite hits (4b: LeftToInner)', () => {
   const hits = new Set<string>();
   const shapes = new Set<string>();
   let failing = 0, filtered = 0;
@@ -23,8 +23,9 @@ it('reconstructs shrinkable multi-operator recipes with all five actual rewrite 
       expect(compiled.sql).not.toMatch(/ AND \(?intDiv\(/);
       expect(compiled.sql).not.toMatch(/intDiv\([^)]*\) > \{p\d+:UInt64\}\)? AND /);
     }
-  }), { seed, numRuns: 500 });
-  expect([...hits].sort()).toEqual(['MergeFilter', 'MergeProject', 'PushFilterArrayJoin', 'PushFilterJoin', 'PushFilterProject']);
+    // 4b: eight kinds share the stream; 700 runs reach every one of the 132 shapes (500 reached 129).
+  }), { seed, numRuns: 700 });
+  expect([...hits].sort()).toEqual(['LeftToInner', 'MergeFilter', 'MergeProject', 'PushFilterArrayJoin', 'PushFilterJoin', 'PushFilterProject']);
   expect(shapes.size).toBe(shapeCount);
   // Both outcomes of the fallible filter occur in the 500-run stream: the amount = 0 row kept (every execution fails) and removed.
   expect(failing).toBeGreaterThan(20);

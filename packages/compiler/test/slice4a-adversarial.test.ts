@@ -63,18 +63,24 @@ it('join_use_nulls appears exactly once, last, whenever an outer join is emitted
   for (const root of inner) for (const sql of both(root)) expect(sql, sql).not.toMatch(/join_use_nulls|SETTINGS|\/\*/);
 });
 
-it('planner widening: WHERE stays in the outer join block (never ON, never pushed into a side); 3b isolation still opens a block above it', () => {
+// Slice 4b flipped this 4a pin deliberately: `b.s = 'x'` is null-rejecting on b, so LeftToInner makes the
+// join INNER; b's reads keep their Nullable descriptor through toNullable; nothing is pushed into b.
+it('planner widening: WHERE stays in the join block (never ON); 4b LeftToInner; 3b isolation still opens a block above it', () => {
   const total = lj().where(r => r.b.s.eq('x')).map(r => ({ id: r.a.id }));
   const sql = compile(total.ir).sql;
-  expect(sql).toMatch(/LEFT ALL JOIN \(SELECT `id`, `s` FROM `ob`\) AS `b` ON `a`\.`id` = `b`\.`id`\nWHERE \(`b`\.`s` = \{p0:String\}\)/);
-  expect(rewriteRel(total.ir).hits.PushFilterJoin).toBe(0);
+  expect(sql).toMatch(/INNER ALL JOIN \(SELECT `id`, `s` FROM `ob`\) AS `b` ON `a`\.`id` = `b`\.`id`\nWHERE \(`b`\.`s` = \{p0:String\}\)/); // fix round 1 (m3): a total WHERE reads the converted column bare
+  expect(sql).not.toMatch(/join_use_nulls/);
+  expect(rewriteRel(total.ir).hits).toMatchObject({ LeftToInner: 1, PushFilterJoin: 0 });
+  // A fallible conjunct is not `safePredicate`, so it neither converts the join nor moves; it also fences the join below it.
   const fallible = lj().where(r => r.a.id.ne(2)).where(r => cast(r.b.s.ifNull('0'), col.UInt64).gt(0n));
   const f = compile(fallible.ir).sql;
+  // Under the cast Filter the join is exposed (`fallibleExposure`): nothing converts or moves, as in 4a.
+  expect(rewriteRel(fallible.ir).hits).toMatchObject({ LeftToInner: 0, PushFilterJoin: 0 });
   expect(f.match(/SELECT /g)).toHaveLength(2);
   expect(f).toMatch(/LEFT ALL JOIN `ob` AS `b` ON `a`\.`id` = `b`\.`id` WHERE \(`a`\.`id` != \{p0:UInt32\}\)\) AS `__typedhouse_input` WHERE CAST\(ifNull/);
-  // A filter on the preserved side of a left join over an inner join input is still not pushed (4a: every outer kind fences).
+  // 4b: a filter on the preserved side of a left/right join is pushed into that side only.
   for (const q of [leftJoin({ a: A }, { b: B }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.s.eq('x')), rightJoin({ a: A }, { b: B }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.s.eq('x'))]) {
-    expect(rewriteRel(q.ir).hits.PushFilterJoin).toBe(0);
+    expect(rewriteRel(q.ir).hits).toMatchObject({ LeftToInner: 0, PushFilterJoin: 1 });
   }
 });
 

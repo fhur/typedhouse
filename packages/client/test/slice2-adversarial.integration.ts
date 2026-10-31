@@ -181,7 +181,7 @@ it('volatile filter below a LEFT expansion keeps the nested emission (fix round 
 it('mixed conjuncts over a join and an expansion, merged total filters, HAVING with DISTINCT and distinct shapes agree', async () => {
   const k = val(1n, col.Int64);
   const joined = join({ a: t, b: u }).on(x => x.a.id.eq(x.b.id)).where(x => x.a.id.gt(1).and(x.a.n.plus(k).gt(-100n)).and(cast(x.a.s, col.UInt64).gt(7n)).and(x.b.v.lt(5n))).map(x => ({ id: x.a.id, v: x.b.v }));
-  const r1 = await agree(joined.ir, 'SELECT a.id AS id, b.v AS v FROM adv_s2 a INNER JOIN adv_s2_other b ON a.id = b.id WHERE a.id > 1 AND a.n + 1 > -100 AND toUInt64(a.s) > 7 AND b.v < 5', { PushFilterJoin: 1 });
+  const r1 = await agree(joined.ir, 'SELECT a.id AS id, b.v AS v FROM adv_s2 a INNER JOIN adv_s2_other b ON a.id = b.id WHERE a.id > 1 AND a.n + 1 > -100 AND toUInt64(a.s) > 7 AND b.v < 5', { PushFilterJoin: 0 }); // 4b: the cast conjunct fences the join (fallibleExposure)
   expect(r1.data).toEqual([{ id: 3, v: '2' }, { id: 3, v: '2' }]);
   const expanded = t.arrayJoin(x => x.ids, 'x').where(x => x.id.gt(1).and(x.n.plus(k).gt(-100n)).and(cast(x.s, col.UInt64).gt(7n)).and(x.x.eq('q'))).map(x => ({ id: x.id, x: x.x }));
   // Slice 3b (flipped from 1 SELECT): the residual carries a cast, so it keeps its own SELECT above the pushed safe WHERE.

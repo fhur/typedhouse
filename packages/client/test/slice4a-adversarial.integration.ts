@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { cast, col, count, countIf, sum, avg, uniq, max, from, join, leftJoin, rightJoin, fullJoin, scalar, table, unionAll, parseCHType, print, outerColumnType, type Rel, type CHType } from '@typedhouse/core';
+import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { compile, emitNaive } from '@typedhouse/compiler';
 import { createClickHouseBackend, createClient as createTypedClient } from '../src/index.js';
 import { collect } from './backend-harness.js';
@@ -58,6 +59,8 @@ async function agree(root: Rel, options: { oracle?: string; ordered?: boolean; e
   expect(optimized.columns, context).toEqual(naive.columns);
   for (const sql of [optimized.sql, naive.sql]) {
     if (options.outer === false) expect(sql, context).not.toContain('join_use_nulls');
+    // Slice 4b: LeftToInner may make every outer join of the optimized text inner; then (only then) it drops the setting.
+    else if (sql === optimized.sql && !/(LEFT|RIGHT|FULL) ALL JOIN/.test(sql)) { expect(sql, context).not.toContain('join_use_nulls'); expect(rewriteRel(root).hits.LeftToInner, context).toBeGreaterThan(0); }
     else { expect(sql, context).toMatch(NOTE); expect(sql.match(/join_use_nulls = 1/g), context).toHaveLength(2); }
   }
   let first: Result | undefined;

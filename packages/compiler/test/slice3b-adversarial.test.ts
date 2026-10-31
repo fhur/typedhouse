@@ -120,8 +120,9 @@ it('rule: blocks of every source kind, HAVING sequences, expansions, CTE, union 
   expect(rewriteRel(j.where(r => cast(r.a.s, col.UInt64).gt(0n)).where(r => r.b.v.gt(1)).ir).hits.PushFilterJoin).toBe(0);
   expect(pushed).toMatch(/WHERE \(CAST\(`a`\.`s` AS UInt64\) > \{p0:UInt64\}\)\) AS `__typedhouse_input` WHERE `__typedhouse_input`\.`__typedhouse_leaf_8` > \{p1:UInt32\}$/);
   // A safe conjunct pushed into a join side that already holds a fallible filter lands above it in IR order and is not AND-ed in.
-  const side = check(join({ a: t.where(bad), b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.k.eq('x')).map(r => ({ id: r.a.id })).ir, 4);
-  expect(side).toContain('FROM (SELECT `__typedhouse_input`.`id` FROM (SELECT `id`, `k` FROM `adv_s3b` WHERE CAST(`s` AS UInt64) > {p0:UInt64}) AS `__typedhouse_input` WHERE `__typedhouse_input`.`k` = {p1:String}) AS `a`');
+  // 4b fix round 1 (was 4): input a evaluates a fallible filter, so `a.k = 'x'` is not pushed into it (`fallibleWithin`) and folds into the join block.
+  const side = check(join({ a: t.where(bad), b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.k.eq('x')).map(r => ({ id: r.a.id })).ir, 3);
+  expect(side).toContain('FROM (SELECT `id`, `k` FROM `adv_s3b` WHERE CAST(`s` AS UInt64) > {p0:UInt64}) AS `a`\nINNER ALL JOIN (SELECT `id` FROM `adv_s3b_other`) AS `b` ON `a`.`id` = `b`.`id`\nWHERE (`a`.`k` = {p1:String})');
   // HAVING: safe, fallible, safe = three blocks; ORDER BY/LIMIT land in the outermost; a fallible first HAVING keeps its own block (deviation 1) and never shares with a later conjunct.
   const g = t.groupBy(r => ({ k: r.k })).aggregate(g => ({ c: count(), m: max(g.s) }));
   const having = check(g.where(r => r.c.gt(1n)).where(r => cast(r.m, col.UInt64).gt(0n)).where(r => r.c.lt(9n)).orderBy(r => r.k).limit(2).ir, 3, 'having safe,bad,safe');

@@ -213,11 +213,17 @@ it('(vi) a mixed conjunction (safe AND arithmetic AND cast) splits exactly at ea
   const mixed = (r: typeof t.row) => safe(r).and(arith(r)).and(unsafe(r));
   // Join: only the safe conjunct reaches side a; arithmetic and cast stay as the residual above the join.
   const j = rewrite(join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.id.gt(1).and(r.a.n.plus(val(1n, col.Int64)).gt(2n)).and(cast(r.a.s, col.UInt64).gt(1n)).and(r.b.v.lt(5n))).map(r => ({ id: r.a.id })).ir);
-  expect(j.hits.PushFilterJoin).toBe(1);
+  // Slice 4b flipped this pin: a non-total conjunct in the Filter fences PushFilterJoin (`fallibleExposure`: 24.8's
+  // filter push-down copies it across ON equalities into an input a moved guard would no longer precede). The
+  // whole conjunction stays one WHERE over the join block, in naive's order.
+  expect(j.hits.PushFilterJoin).toBe(0);
   const jf = boundaryFilter(j.root, 'Join')!;
-  expect(conjuncts(jf.pred).map(safePredicate)).toEqual([false, false]);
-  // Slice 3 fix round 1: the direct selection folds over the filtered join block, which is now the root (newline separators).
-  expect(j.compiled.sql).toBe('SELECT `a`.`id` AS `id`\nFROM (SELECT `id`, `n`, `s` FROM `adv` WHERE `id` > {p0:UInt32}) AS `a`\nINNER ALL JOIN (SELECT `id` FROM `adv2` WHERE `v` < {p1:UInt64}) AS `b` ON `a`.`id` = `b`.`id`\nWHERE (`a`.`n` + {p2:Int64} > {p3:Int64} AND CAST(`a`.`s` AS UInt64) > {p4:UInt64})');
+  expect(conjuncts(jf.pred).map(safePredicate)).toEqual([true, false, false, true]);
+  expect(j.compiled.sql).toBe('SELECT `a`.`id` AS `id`\nFROM (SELECT `id`, `n`, `s` FROM `adv`) AS `a`\nINNER ALL JOIN `adv2` AS `b` ON `a`.`id` = `b`.`id`\nWHERE (`a`.`id` > {p0:UInt32} AND `a`.`n` + {p1:Int64} > {p2:Int64} AND CAST(`a`.`s` AS UInt64) > {p3:UInt64} AND `b`.`v` < {p4:UInt64})');
+  // Without the cast, only the safe conjuncts reach the sides; the arithmetic stays above.
+  const jt = rewrite(join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.id.gt(1).and(r.a.n.plus(val(1n, col.Int64)).gt(2n)).and(r.b.v.lt(5n))).map(r => ({ id: r.a.id })).ir);
+  expect(jt.hits.PushFilterJoin).toBe(1);
+  expect(conjuncts(boundaryFilter(jt.root, 'Join')!.pred).map(totalPredicate)).toEqual([true]);
   // ArrayJoin (inner and left): only the safe conjunct moves below the expansion.
   for (const left of [false, true]) {
     const q = left ? t.leftArrayJoin(r => r.ids, 'x') : t.arrayJoin(r => r.ids, 'x');

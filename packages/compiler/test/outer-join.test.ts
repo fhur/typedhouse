@@ -139,20 +139,27 @@ it('never adds join_use_nulls to inner/cross-only queries; adds it once for an o
   }
 });
 
-it('keeps outer joins as PushFilterJoin fences: filters stay above (folded into the join block WHERE), never pushed into either side', () => {
-  for (const q of [
-    leftJoin({ a }, { b }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.s.eq('x')).where(r => r.b.s.eq('y')),
-    rightJoin({ a }, { b }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.s.eq('y')),
-    fullJoin({ a }, { b }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.s.eq('x')),
-  ]) {
-    const result = rewriteRel(q.ir);
-    expect(result.hits.PushFilterJoin).toBe(0);
-    let rel = result.root;
-    while (rel.kind === 'Filter') rel = rel.input;
-    expect(rel.kind).toBe('Join');
-    if (rel.kind === 'Join') expect(rel.inputs.every(([, input]) => input.kind === 'Scan')).toBe(true);
-    const sql = compile(q.ir).sql;
-    expect(sql).toMatch(/ALL JOIN `tb` AS `b` ON `a`\.`id` = `b`\.`id`\nWHERE /);
+// Slice 4b replaced the 4a fence pin: outer joins push only into inputs they neither extend nor rewrap.
+it('pushes into preserved inputs only; null-rejecting conjuncts convert the kind (LeftToInner)', () => {
+  const inner = (rel: Rel) => { while (rel.kind === 'Filter') rel = rel.input; if (rel.kind !== 'Join') throw new Error('join'); return rel; };
+  const cases: [Rel, Record<string, number>, string, string[]][] = [
+    // b.s = 'y' rejects b's extension: inner; a.s is pushed into a; b keeps its wider descriptors, so b.s stays above.
+    [leftJoin({ a }, { b }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.s.eq('x')).where(r => r.b.s.eq('y')).ir, { LeftToInner: 1, PushFilterJoin: 1 }, 'inner', ['Filter', 'Scan']],
+    // b is the preserved input of a right join.
+    [rightJoin({ a }, { b }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.s.eq('y')).ir, { LeftToInner: 0, PushFilterJoin: 1 }, 'right', ['Scan', 'Filter']],
+    // a.s rejects a's extension of a full join: left (b still extended); a is rewrapped, so nothing is pushed.
+    [fullJoin({ a }, { b }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.s.eq('x')).ir, { LeftToInner: 1, PushFilterJoin: 0 }, 'left', ['Scan', 'Scan']],
+    [fullJoin({ a }, { b }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.s.eq('x')).ir, { LeftToInner: 1, PushFilterJoin: 0 }, 'right', ['Scan', 'Scan']],
+    [fullJoin({ a }, { b }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.s.eq('x').and(r.b.lc.ne('z'))).ir, { LeftToInner: 1, PushFilterJoin: 0 }, 'inner', ['Scan', 'Scan']],
+  ];
+  for (const [root, hits, kind, inputs] of cases) {
+    const result = rewriteRel(root);
+    expect(result.hits).toMatchObject(hits);
+    const j = inner(result.root);
+    expect(j.joinKind).toBe(kind);
+    expect(j.output).toEqual(inner(root).output);
+    expect(j.inputs.map(([, input]) => input.kind)).toEqual(inputs);
+    expect(compile(root).columns).toEqual(emitNaive(root).columns);
   }
   // The same filters over an inner join are pushed into the sides.
   expect(rewriteRel(join({ a, b }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.s.eq('x')).ir).hits.PushFilterJoin).toBe(1);
@@ -169,8 +176,12 @@ it('validates hand-built outer joins: residual ON, computed equality, unwrapped 
     expect(() => emit(relNode({ ...fields, on: [...ok.on, lt!] }))).toThrowError(expect.objectContaining({ code: 'join_condition_not_equi', path: 'root.on[1]' }));
     expect(() => emit(relNode({ ...fields, on: [computed!] }))).toThrowError(expect.objectContaining({ code: 'join_condition_arity', path: 'root.on[0]' }));
     expect(() => emit(relNode({ ...fields, output: { shape: 'nested', inputs: ok.inputs.map(([alias, rel]) => [alias, rel.output] as const) } }))).toThrowError(expect.objectContaining({ code: 'invalid_output' }));
-    // Relabelling the kind without rewrapping the output is caught by the output check, not trusted.
-    expect(() => emit(relNode({ ...fields, joinKind: 'inner' }))).toThrowError(expect.objectContaining({ code: 'invalid_output' }));
+    // Relabelling the kind is caught by the output check unless the output null-extends a superset of
+    // the new kind's inputs. 4b: left -> inner keeps the left output (what LeftToInner builds) and reads
+    // b through toNullable; left -> right or full does not match and stays invalid.
+    expect(() => emit(relNode({ ...fields, joinKind: 'right' }))).toThrowError(expect.objectContaining({ code: 'invalid_output' }));
+    expect(() => emit(relNode({ ...fields, joinKind: 'full' }))).toThrowError(expect.objectContaining({ code: 'invalid_output' }));
+    expect(emit(relNode({ ...fields, joinKind: 'inner' })).sql).toMatch(/toNullable\(`b`\.`id`\)[^]*INNER ALL JOIN/);
   }
 });
 

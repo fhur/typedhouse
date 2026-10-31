@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createClient } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { cast, col, count, defineFunction, from, join, table, unwrap, type CompiledQuery, type Rel } from '@typedhouse/core';
+import { cast, col, count, defineFunction, from, join, print, table, unwrap, type CompiledQuery, type Rel } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { compile, emitNaive } from '@typedhouse/compiler';
 import { collect } from './backend-harness.js';
@@ -77,6 +77,27 @@ for (const entry of executable) {
   });
 }
 
+it('rule/left-to-inner (4b): the planned text plans an INNER Join step where naive plans LEFT; rows and meta agree', async () => {
+  const entry = entries.find(e => e.id === 'rule/left-to-inner')!;
+  const kinds = async (compiled: CompiledQuery) => {
+    const result = await driver.query({ query: `EXPLAIN PLAN actions = 1 ${compiled.sql}`, query_params: compiled.params, format: 'TabSeparatedRaw' });
+    try { return [...(await result.text()).matchAll(/^\s*Type: (\w+)$/gm)].map(m => m[1]); } finally { result.close(); }
+  };
+  const planned = compile(entry.query.ir), naive = emitNaive(entry.query.ir);
+  expect(planned.sql).not.toMatch(/join_use_nulls/);
+  expect(await kinds(planned)).toEqual(['INNER']);
+  expect(await kinds(naive)).toEqual(['LEFT']);
+  const json = async (compiled: CompiledQuery) => {
+    const result = await driver.query({ query: compiled.sql, query_params: compiled.params, format: 'JSON' });
+    try { return await result.json<Record<string, unknown>>(); } finally { result.close(); }
+  };
+  const [a, b] = [await json(planned), await json(naive)];
+  expect(a.meta).toEqual(b.meta);
+  expect(a.meta?.map(m => m.type)).toEqual(Object.values(planned.columns).map(t => print(t)));
+  const sorted = (rows: unknown[]) => rows.map(r => JSON.stringify(r)).sort();
+  expect(sorted(a.data)).toEqual(sorted(b.data));
+  expect(a.data.length).toBeGreaterThan(0);
+});
 it('negative controls: naive emission, an over-reading select list, an injected sort and an injected IN subquery', async () => {
   // Naive nesting on 24.8: the analyzer absorbs the derived tables into Expression steps and prunes their columns
   // itself, so the native clauses do not separate naive from planned text here; the Docker-free SELECT-count clause does.

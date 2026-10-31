@@ -16,7 +16,7 @@ const fenceSet = (kinds: Iterable<FenceKind | 'unfenced' | 'root'>) => [...new S
 it('has at least thirty ids, each unique, with every rewrite rule represented once', () => {
   expect(entries.length).toBeGreaterThanOrEqual(30);
   expect(new Set(entries.map(e => e.id)).size).toBe(entries.length);
-  expect(entries.filter(e => e.rule).map(e => e.rule).sort()).toEqual(['MergeFilter', 'MergeProject', 'PruneColumns', 'PushFilterAggKey', 'PushFilterArrayJoin', 'PushFilterJoin', 'PushFilterProject', 'PushFilterUnion']);
+  expect(entries.filter(e => e.rule).map(e => e.rule).sort()).toEqual(['LeftToInner', 'MergeFilter', 'MergeProject', 'PruneColumns', 'PushFilterAggKey', 'PushFilterArrayJoin', 'PushFilterJoin', 'PushFilterProject', 'PushFilterUnion']);
 });
 
 for (const entry of entries) {
