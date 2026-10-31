@@ -5,7 +5,7 @@ import { join, basename } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
-import { assertCompilerExit, assertControlDiagnostic, compilerOutput } from './corpus-control-diagnostics.mjs';
+import { assertCompilerExit, assertControlDiagnostic, assertControlDiagnostics, compilerOutput } from './corpus-control-diagnostics.mjs';
 import { controlLayout } from './corpus-control-layout.mjs';
 import { toTypeScript } from '../packages/core/dist/index.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -29,7 +29,7 @@ function run(args, success = true) {
     const text = readFileSync(args[1], 'utf8');
     writeFileSync(`${log}.tsconfig.json`, text);
     for (const file of JSON.parse(text).files) {
-      if (basename(file) === 'control.ts') writeFileSync(`${log}.control.ts`, readFileSync(file, 'utf8'));
+      if (/^control-\d+\.ts$/.test(basename(file))) writeFileSync(`${log}.${basename(file)}`, readFileSync(file, 'utf8'));
     }
   }
   assertCompilerExit(result, success);
@@ -167,51 +167,56 @@ try {
     // The external emit/runtime consumer above remains in OS temp unchanged.
     const layout = controlLayout(root);
     controlDirectory = mkdtempSync(layout.prefix);
-    const probe = join(controlDirectory, 'control.ts');
     const configPath = join(controlDirectory, 'tsconfig.json');
-    config.files = [probe];
     config.compilerOptions.rootDir = layout.rootDir;
-    writeFileSync(configPath, JSON.stringify(config));
-    function checkControl(prefix, query, correct, wrong, widen = false) {
+    const controls = [];
+    function addControl(prefix, query, correct, wrong, widen = false) {
+      const probe = join(controlDirectory, `control-${String(controls.length + 1).padStart(2, '0')}.ts`);
       const assertion = `expectTypeOf<Infer<typeof ${query}>>().toEqualTypeOf<Expected>();`;
       const positive = prefix + `type Expected = ${correct};\n` + assertion;
-      writeFileSync(probe, positive);
-      run(['-p', configPath]); // identical imports/options must genuinely compile
       const negativeAssertion = widen ? assertion.replace('>>()', '> | undefined>()') : assertion;
       assert.ok(widen || correct !== wrong, 'Control must mutate a descriptor-derived field');
-      writeFileSync(probe, prefix + `type Expected = ${wrong};\n` + negativeAssertion);
+      const negative = prefix + `type Expected = ${wrong};\n` + negativeAssertion;
       const expected = { file: probe, line: 5, column: negativeAssertion.indexOf('<Expected>') + 2, code: 2344, message: /Type 'Expected' does not satisfy the constraint/, detail: /Expected:|Actual:/ };
-      assertControlDiagnostic(run(['-p', configPath], false), expected, root);
-      return { positive, expected };
+      const control = { positive, negative, expected };
+      controls.push(control);
+      return control;
     }
     const row = 'supported_filterTenantActive';
     const prefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { filterTenantActive } from ${JSON.stringify(join(root, files[0]).replace(/\.ts$/, '.js'))};\n`;
     const correctRow = decoded(descriptors[row]);
-    const first = checkControl(prefix, 'filterTenantActive', correctRow, correctRow.replace('"tenantId": string', '"tenantId": number'));
-    checkControl(prefix, 'filterTenantActive', correctRow, correctRow, true);
+    const first = addControl(prefix, 'filterTenantActive', correctRow, correctRow.replace('"tenantId": string', '"tenantId": number'));
+    addControl(prefix, 'filterTenantActive', correctRow, correctRow, true);
+    const latestPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { componentsLatest } from ${JSON.stringify(join(root, files[2]).replace(/\.ts$/, '.js'))};\n`;
+    for (const [from, to] of [['"asOf": Date', '"asOf": string'], ['"category": (string) | null', '"category": string']]) {
+      const wrong = decoded(latestOutput).replace(from, to);
+      addControl(latestPrefix, 'componentsLatest', decoded(latestOutput), wrong);
+    }
+    const projectionPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { projectionEnrichment } from ${JSON.stringify(join(root, files[3]).replace(/\.ts$/, '.js'))};\n`;
+    for (const [from, to] of [['"age": bigint', '"age": number'], ['"category": string', '"category": string | null'], ['"tier": string', '"tier": string | null']]) {
+      const wrong = decoded(projectionOutput).replace(from, to);
+      addControl(projectionPrefix, 'projectionEnrichment', decoded(projectionOutput), wrong);
+    }
+    const knownPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { knownHash } from ${JSON.stringify(join(root, files[4]).replace(/\.ts$/, '.js'))};\n`;
+    const wrongKnown = decoded(knownDescriptors.knownHash).replace('bigint', 'number');
+    addControl(knownPrefix, 'knownHash', decoded(knownDescriptors.knownHash), wrongKnown);
+    // Every control is an independent module. Compile all positives first, then
+    // require exactly one intended diagnostic per negative module (no extras).
+    config.files = controls.map(control => control.expected.file);
+    writeFileSync(configPath, JSON.stringify(config));
+    for (const control of controls) writeFileSync(control.expected.file, control.positive);
+    run(['-p', configPath]);
+    for (const control of controls) writeFileSync(control.expected.file, control.negative);
+    assertControlDiagnostics(run(['-p', configPath], false), controls.map(control => control.expected), root);
     // A real broken-rootDir positive must not masquerade as a mismatch control.
-    writeFileSync(probe, first.positive);
+    writeFileSync(first.expected.file, first.positive);
+    config.files = [first.expected.file];
     config.compilerOptions.rootDir = controlDirectory;
     writeFileSync(configPath, JSON.stringify(config));
     const brokenRoot = run(['-p', configPath], false);
     assert.match(compilerOutput(brokenRoot), /error TS6059:/);
     assert.doesNotMatch(compilerOutput(brokenRoot), /error TS2344:/);
     assert.throws(() => assertControlDiagnostic(brokenRoot, first.expected, root));
-    config.compilerOptions.rootDir = layout.rootDir;
-    writeFileSync(configPath, JSON.stringify(config));
-    const latestPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { componentsLatest } from ${JSON.stringify(join(root, files[2]).replace(/\.ts$/, '.js'))};\n`;
-    for (const [from, to] of [['"asOf": Date', '"asOf": string'], ['"category": (string) | null', '"category": string']]) {
-      const wrong = decoded(latestOutput).replace(from, to);
-      checkControl(latestPrefix, 'componentsLatest', decoded(latestOutput), wrong);
-    }
-    const projectionPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { projectionEnrichment } from ${JSON.stringify(join(root, files[3]).replace(/\.ts$/, '.js'))};\n`;
-    for (const [from, to] of [['"age": bigint', '"age": number'], ['"category": string', '"category": string | null'], ['"tier": string', '"tier": string | null']]) {
-      const wrong = decoded(projectionOutput).replace(from, to);
-      checkControl(projectionPrefix, 'projectionEnrichment', decoded(projectionOutput), wrong);
-    }
-    const knownPrefix = `import { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { knownHash } from ${JSON.stringify(join(root, files[4]).replace(/\.ts$/, '.js'))};\n`;
-    const wrongKnown = decoded(knownDescriptors.knownHash).replace('bigint', 'number');
-    checkControl(knownPrefix, 'knownHash', decoded(knownDescriptors.knownHash), wrongKnown);
     console.log('Stale, descriptor-mismatch, inferred-widening, temporal/projection/known and unreadable-declaration controls passed.');
   }
   // Preserve both actual outputs even if the readability contract fails; do not bless them as readable.
