@@ -209,12 +209,17 @@ it('rewrap: every kind and read position over a converted join; meta = columns o
 });
 
 /** Pre-existing class (slice 4c, join-block aggregate alias capture), reproduced over a converted join: alias `nl` equals
- * b's column; HAVING by alias binds the column under prefer_column_name_to_alias = 1 (215). Not counted against 4b. */
-it('4c pin over a converted join: alias equal to a side column in HAVING', async () => {
+ * b's column; HAVING by alias binds the column under prefer_column_name_to_alias = 1 (215). Not counted against 4b.
+ * 4c: FIXED, flipped. `nl` is a column of `qk`, so the aggregate reads the join block as a derived table and agrees. */
+it('4c (was pin) over a converted join: alias equal to a side column in HAVING', async () => {
   const q = lk().where(r => r.b.id.gt(0)).groupBy(r => ({ id: r.a.id })).aggregate(g => ({ nl: max(g.b.nl) })).where(r => r.nl.isNotNull());
   const optimized = compile(q.ir), naive = emitNaive(q.ir);
-  expect((await execute(optimized.sql, optimized.params, { prefer_column_name_to_alias: 1 })).error).toBe('215');
-  expect((await execute(naive.sql, naive.params, { prefer_column_name_to_alias: 1 })).error).toBeUndefined();
+  expect(optimized.sql).toMatch(/\) AS `__typedhouse_input` GROUP BY `__typedhouse_input`\.`__typedhouse_leaf_0` HAVING isNotNull\(`nl`\)/);
+  for (const alias of [0, 1]) {
+    const a = await execute(optimized.sql, optimized.params, { prefer_column_name_to_alias: alias }), b = await execute(naive.sql, naive.params, { prefer_column_name_to_alias: alias });
+    expect(a.error, `4c nl ${alias}`).toBeUndefined();
+    expect(a, `4c nl ${alias}`).toEqual(b);
+  }
 });
 
 it('full -> left/right/inner and nested outer joins match hand-written oracles; join_use_nulls iff an outer join survives', async () => {
@@ -362,17 +367,19 @@ it('re-verification 2: aggregate blocks over converted joins in every cell (keys
   await agree(ck().aggregate(g => ({ c: count(), m: max(g.b.e), d: sum(g.b.d) })).ir, { label: 'global aggregate', converted: 1, oracle: `SELECT count(), max(b.e), sum(b.d) ${W} ${J}` });
   await agree(ck().groupBy(r => ({ s: r.a.s, e: r.b.e })).aggregate(() => ({ c: count() })).where(r => r.s.ne('q')).orderBy(r => r.s).thenBy(r => r.e).ir,
     { label: 'preserved-side key (never wrapped) beside a wrapped key', ordered: true, converted: 1, oracle: `SELECT a.s AS s, b.e AS e, count() ${W} GROUP BY s, e HAVING s != 'q' ORDER BY s, e ${J}` });
-  // Key alias `id` equals a column of BOTH inputs (a.id, b.id). Under prefer_column_name_to_alias = 1 `ORDER BY id` binds a
-  // column, not the grouped b.id: 215. The unconverted LEFT twin fails identically, so this is the 4c class (key alias =
-  // another input's column), not a 4b regression; both are pinned for parity.
+  // Key alias `id` equals a column of BOTH inputs (a.id, b.id). Under prefer_column_name_to_alias = 1 `ORDER BY id` bound a
+  // column, not the grouped b.id: 215. The unconverted LEFT twin failed identically: the 4c class (key alias = another
+  // input's column). 4c: FIXED, flipped. An identity read of a name another input also carries is not exempt when HAVING
+  // or ORDER BY names it, so both twins read the join block as a derived table and agree with naive in every cell.
   const shape = (q: ReturnType<typeof lk>) => q.groupBy(r => ({ id: r.b.id })).aggregate(g => ({ c: count(), id2: max(g.b.id) })).orderBy(r => r.id);
   const conv = shape(ck()), left = shape(lk().where(r => r.b.id.isNull().or(r.b.id.gt(0))));
   expect([rewriteRel(conv.ir).hits.LeftToInner, rewriteRel(left.ir).hits.LeftToInner]).toEqual([1, 0]);
-  expect(compile(conv.ir).sql).toMatch(/toNullable\(`b`\.`id`\) AS `id`[^]*GROUP BY `b`\.`id`/);
+  expect(compile(conv.ir).sql).toMatch(/toNullable\(`b`\.`id`\) AS `__typedhouse_leaf_\d+`[^]*\) AS `__typedhouse_input` GROUP BY `__typedhouse_input`\.`__typedhouse_leaf_\d+` ORDER BY `id`/);
   for (const q of [conv, left]) {
     const c = compile(q.ir), n = emitNaive(q.ir);
-    expect((await execute(c.sql, c.params, { prefer_column_name_to_alias: 1 })).error).toBe('215');
-    expect((await execute(c.sql, c.params, { prefer_column_name_to_alias: 0 })).error).toBeUndefined();
+    for (const alias of [0, 1]) expect((await execute(c.sql, c.params, { prefer_column_name_to_alias: alias }, true)).error, `4c id ${alias}`).toBeUndefined();
     expect((await execute(n.sql, n.params, { prefer_column_name_to_alias: 1 })).error).toBeUndefined();
   }
+  await agree(conv.ir, { label: '4c: key alias id = b.id beside a.id, ORDER BY id (converted)', ordered: true, converted: 1, oracle: `SELECT b.id AS bid, count(), max(b.id) ${W} GROUP BY b.id ORDER BY bid ${J}` });
+  await agree(left.ir, { label: '4c: key alias id = b.id beside a.id, ORDER BY id (LEFT)', ordered: true, converted: 0, oracle: `SELECT b.id AS bid, count(), max(b.id) FROM qa a LEFT ALL JOIN qk b ON a.id = b.id WHERE b.id IS NULL OR b.id > 0 GROUP BY b.id ORDER BY bid ${J}` });
 });

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, defineFunction, from, join, outputLeaves, table, unionAll, type Rel } from '@typedhouse/core';
+import { cast, col, count, defineFunction, from, fullJoin, join, leftJoin, max, outputLeaves, rightJoin, table, unionAll, type Rel } from '@typedhouse/core';
 import { compile } from '../src/index.js';
 import { emitPlanned, validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
@@ -16,6 +16,35 @@ const safe = (r: typeof t.row) => r.id.gt(1n);
 const unsafe = (r: typeof t.row) => cast(r.k, col.UInt64).gt(1n);
 const volatile = defineFunction({ name: 'rowNumberInAllBlocks', args: [], returns: col.UInt64, deterministic: false });
 const grouped = t.groupBy(r => ({ k: r.k })).aggregate(() => ({ n: count() }));
+const w = from(table('w', { id: col.UInt64, z: col.String }, meta));
+// Slice 4c: the same t/u join in every kind; `a` = t (id, k, ids), `b` = u (id, v).
+const joins = {
+  inner: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)),
+  left: () => leftJoin({ a: t }, { b: u }).on(r => r.a.id.eq(r.b.id)),
+  right: () => rightJoin({ a: t }, { b: u }).on(r => r.a.id.eq(r.b.id)),
+  full: () => fullJoin({ a: t }, { b: u }).on(r => r.a.id.eq(r.b.id)),
+} as const;
+const nestedJoins = {
+  inner: () => join({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)), b: u }).on(r => r.n.x.id.eq(r.b.id)),
+  left: () => leftJoin({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)) }, { b: u }).on(r => r.n.x.id.eq(r.b.id)),
+  right: () => rightJoin({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)) }, { b: u }).on(r => r.n.x.id.eq(r.b.id)),
+  full: () => fullJoin({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)) }, { b: u }).on(r => r.n.x.id.eq(r.b.id)),
+} as const;
+const fenced = [['Filter', 'Aggregate'], ['Join']], sortedFence = [['Sort', 'Aggregate'], ['Join']];
+const aliasRows = (['inner', 'left', 'right', 'full'] as const).flatMap(kind => {
+  const j = joins[kind] as () => ReturnType<typeof joins.inner>;
+  const nj = nestedJoins[kind] as () => ReturnType<typeof nestedJoins.inner>;
+  return [
+    { name: `4c ${kind}: aggregate alias equal to a side column (v = count(), HAVING v) keeps the aggregate off the join block`, build: () => j().groupBy(r => ({ key: r.a.id })).aggregate(g => ({ v: count(), m: max(g.b.v) })).where(r => r.v.gt(1n)).ir, blocks: fenced },
+    { name: `4c ${kind}: key alias equal to the other side's column (v = a.k, HAVING v) keeps the aggregate off the join block`, build: () => j().groupBy(r => ({ v: r.a.k })).aggregate(() => ({ c: count() })).where(r => r.v.ne('x')).ir, blocks: fenced },
+    { name: `4c ${kind}: identity key of a name both inputs carry (id = b.id, ORDER BY id) keeps the aggregate off the join block`, build: () => j().groupBy(r => ({ id: r.b.id })).aggregate(() => ({ c: count() })).orderBy(r => r.id).ir, blocks: sortedFence },
+    { name: `4c ${kind}: key alias equal to a pruned column (ids = a.k, ORDER BY ids) keeps the aggregate off the join block`, build: () => j().groupBy(r => ({ ids: r.a.k })).aggregate(() => ({ c: count() })).orderBy(r => r.ids).ir, blocks: sortedFence },
+    { name: `4c ${kind}: key alias equal to a nested join side column (z = b.v, ORDER BY z) keeps the aggregate off the join block`, build: () => nj().groupBy(r => ({ z: r.b.v })).aggregate(() => ({ c: count() })).orderBy(r => r.z).ir, blocks: sortedFence },
+    { name: `4c ${kind}: non-colliding aliases with HAVING and ORDER BY fold onto the join block`, build: () => j().groupBy(r => ({ key: r.a.k })).aggregate(g => ({ c: count(), m: max(g.b.v) })).where(r => r.c.gt(1n)).orderBy(r => r.key).ir, blocks: [['Sort', 'Filter', 'Aggregate', 'Join']] },
+    { name: `4c ${kind}: identity key of a name both inputs carry with no HAVING/ORDER BY folds (the ON reads it qualified only)`, build: () => j().groupBy(r => ({ id: r.a.id })).aggregate(g => ({ c: count(), m: max(g.b.v) })).ir, blocks: [['Aggregate', 'Join']] },
+    { name: `4c ${kind}: identity key only one input carries (v = b.v, HAVING and ORDER BY v) folds`, build: () => j().groupBy(r => ({ v: r.b.v })).aggregate(() => ({ c: count() })).where(r => r.v.ne(1n)).orderBy(r => r.v).ir, blocks: [['Sort', 'Filter', 'Aggregate', 'Join']] },
+  ];
+});
 
 function layout(plan: SqlPlan, rel: Rel): string[][] {
   if (plan.ctes?.names.has(rel)) return [['CTE']];
@@ -139,6 +168,10 @@ const rows: { readonly name: string; readonly build: () => Rel; readonly blocks:
   { name: 'join block takes filters and sorts', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.v.gt(1n)).orderBy(r => r.a.id).ir, blocks: [['Sort', 'Filter', 'Join']] },
   { name: 'distinct over a join block folds', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).map(r => ({ id: r.a.id })).distinct().ir, blocks: [['Distinct', 'Project', 'Join']] },
   { name: 'union always opens a block', build: () => unionAll(t, t).where(safe).ir, blocks: [['Filter'], ['Union']] },
+  ...aliasRows,
+  // 4c CTE-source probe: `n: max(n)` over a CTE folds only while no HAVING/ORDER BY names `n` (else 215 under alias = 1).
+  { name: '4c: name: agg(name) over a CTE without HAVING/ORDER BY reads the CTE directly', build: () => t.cte().groupBy(r => ({ k: r.k })).aggregate(g => ({ id: max(g.id) })).ir, blocks: [['Aggregate', 'CTE']] },
+  { name: '4c: name: agg(name) over a CTE with HAVING on that name keeps its own scope', build: () => t.cte().groupBy(r => ({ k: r.k })).aggregate(g => ({ id: max(g.id) })).where(r => r.id.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['CTE']] },
 ];
 
 it.each(rows)('$name', ({ build, blocks }) => {
@@ -147,7 +180,8 @@ it.each(rows)('$name', ({ build, blocks }) => {
   const plan = planSelects(root, nodes, pruneColumns(root), planCtes(root));
   expect(layout(plan, root)).toEqual(blocks);
   const sql = emitPlanned(plan).sql;
-  expect(sql).not.toContain('*');
+  // 4c rows include outer joins, whose text ends with the join_use_nulls comment.
+  expect(sql.replace(/ \/\* join_use_nulls = 1: [^*]*\*\/$/, '')).not.toContain('*');
   // Without joins, CTEs or unions every planned block is exactly one SELECT.
   if (!blocks.flat().some(k => k === 'Join' || k === 'CTE' || k === 'Union')) expect(sql.match(/SELECT /g)).toHaveLength(blocks.length);
   expect(sql.includes('DISTINCT')).toBe(blocks.flat().includes('Distinct'));

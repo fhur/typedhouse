@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, from, join, table, val } from '@typedhouse/core';
+import { cast, col, count, from, join, leftJoin, max, table, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { validateRel } from '../src/emit-naive.js';
 import { planSelects } from '../src/plan-selects.js';
@@ -146,4 +146,18 @@ it('records Distinct as a flag and ArrayJoin as a FROM-level member of scan bloc
   expect(compile(scan.distinct().map(r => ({ ids: r.ids, id: r.id })).orderBy(r => r.id).map(r => ({ id: r.id })).ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id` FROM (SELECT DISTINCT `ids`, `id` FROM `s` ORDER BY `id` ASC) AS `__typedhouse_input`');
   expect(compile(scan.distinct().map(r => ({ id: r.id })).ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id` FROM (SELECT DISTINCT `id`, `ids` FROM `s`) AS `__typedhouse_input`');
   expect(compile(scan.distinct().map(r => ({ id: r.id, other: r.ids })).ir).sql).toContain('FROM (SELECT DISTINCT `id`, `ids` FROM `s`) AS `__typedhouse_input`');
+});
+
+it('4c: an aggregate alias equal to a join-input column that HAVING/ORDER BY name reads the join block as a derived table', () => {
+  const m = { engine: 'Memory', sortingKey: [], partitionKey: [] } as const;
+  const pa = from(table('pa', { id: col.UInt32, s: col.String, n: col.Int64 }, m)), pb = from(table('pb', { id: col.UInt32, n: col.Int64, v: col.String }, m));
+  const lj = () => leftJoin({ a: pa }, { b: pb }).on(r => r.a.id.eq(r.b.id));
+  // Fenced: `n` (count) is a column of both inputs, read by max(b.n) and named by HAVING/ORDER BY. The derived join block
+  // exposes only leaf names, so `n` can bind nothing but the alias under prefer_column_name_to_alias = 1.
+  const fenced = lj().groupBy(r => ({ id: r.a.id })).aggregate(g => ({ n: count(), top: max(g.b.n) })).where(r => r.n.gt(1n)).orderBy(r => r.n);
+  expect(compile(fenced.ir).sql).toBe('SELECT `__typedhouse_input`.`__typedhouse_leaf_0` AS `id`, count() AS `n`, max(`__typedhouse_input`.`__typedhouse_leaf_4`) AS `top` FROM (SELECT `a`.`id` AS `__typedhouse_leaf_0`, `b`.`n` AS `__typedhouse_leaf_4` FROM (SELECT `id` FROM `pa`) AS `a` LEFT ALL JOIN (SELECT `id`, `n` FROM `pb`) AS `b` ON `a`.`id` = `b`.`id`) AS `__typedhouse_input` GROUP BY `__typedhouse_input`.`__typedhouse_leaf_0` HAVING `n` > {p0:UInt64} ORDER BY `n` ASC SETTINGS join_use_nulls = 1 /* join_use_nulls = 1: unmatched outer-join columns are NULL, not type defaults */');
+  // Folded: `v` is an identity read of a column only `pb` carries; `c`/`top` collide with nothing.
+  const folded = lj().groupBy(r => ({ v: r.b.v })).aggregate(g => ({ c: count(), top: max(g.b.n) })).where(r => r.c.gt(1n)).orderBy(r => r.v);
+  expect(compile(folded.ir).sql).toBe('SELECT `b`.`v` AS `v`, count() AS `c`, max(`b`.`n`) AS `top`\nFROM (SELECT `id` FROM `pa`) AS `a`\nLEFT ALL JOIN `pb` AS `b` ON `a`.`id` = `b`.`id`\nGROUP BY `b`.`v`\nHAVING `c` > {p0:UInt64}\nORDER BY `v` ASC SETTINGS join_use_nulls = 1 /* join_use_nulls = 1: unmatched outer-join columns are NULL, not type defaults */');
+  for (const q of [fenced, folded]) expect(compile(q.ir).columns).toEqual(emitNaive(q.ir).columns);
 });

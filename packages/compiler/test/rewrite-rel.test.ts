@@ -487,12 +487,16 @@ it('fix round 1 (m3): total WHERE and ORDER BY read a converted column bare; out
 });
 it('fix round 2 (D2): a total key over a converted join groups by its bare reads; only the select item carries the descriptor', () => {
   const conv = () => lj().where(r => r.b.n.gt(0n));
-  const identity = conv().groupBy(r => ({ s: r.b.s })).aggregate(() => ({ c: count() })).where(r => r.s.ne('x')).orderBy(r => r.s.desc());
-  expect(compile(identity.ir).sql).toBe('SELECT toNullable(`b`.`s`) AS `s`, count() AS `c`\nFROM (SELECT `id` FROM `oa`) AS `a`\nINNER ALL JOIN (SELECT `id`, `s`, `n` FROM `ob`) AS `b` ON `a`.`id` = `b`.`id`\nWHERE `b`.`n` > {p0:Int64}\nGROUP BY `b`.`s`\nHAVING `s` != {p1:String}\nORDER BY `s` DESC');
+  // 4c: the identity key now reads `lc`, which only `ob` carries; `s` is also a (pruned) column of `oa`, so HAVING `s` /
+  // ORDER BY `s` would bind `a`.`s` under prefer_column_name_to_alias = 1 and that shape is fenced (below).
+  const identity = conv().groupBy(r => ({ lc: r.b.lc })).aggregate(() => ({ c: count() })).where(r => r.lc.ne('x')).orderBy(r => r.lc.desc());
+  expect(compile(identity.ir).sql).toBe('SELECT toNullable(`b`.`lc`) AS `lc`, count() AS `c`\nFROM (SELECT `id` FROM `oa`) AS `a`\nINNER ALL JOIN (SELECT `id`, `n`, `lc` FROM `ob`) AS `b` ON `a`.`id` = `b`.`id`\nWHERE `b`.`n` > {p0:Int64}\nGROUP BY `b`.`lc`\nHAVING `lc` != {p1:String}\nORDER BY `lc` DESC');
+  const both = conv().groupBy(r => ({ s: r.b.s })).aggregate(() => ({ c: count() })).where(r => r.s.ne('x')).orderBy(r => r.s.desc());
+  expect(compile(both.ir).sql).toBe('SELECT `__typedhouse_input`.`__typedhouse_leaf_4` AS `s`, count() AS `c` FROM (SELECT toNullable(`b`.`s`) AS `__typedhouse_leaf_4` FROM (SELECT `id` FROM `oa`) AS `a` INNER ALL JOIN (SELECT `id`, `s`, `n` FROM `ob`) AS `b` ON `a`.`id` = `b`.`id` WHERE (`b`.`n` > {p0:Int64})) AS `__typedhouse_input` GROUP BY `__typedhouse_input`.`__typedhouse_leaf_4` HAVING `s` != {p1:String} ORDER BY `s` DESC');
   // Compound keys: the whole key is wrapped when its declared type carries NULL (m), not when it does not (f).
   const compound = conv().groupBy(r => ({ m: r.b.n.plus(1n), f: r.b.n.ifNull(0n), lc: r.b.lc })).aggregate(() => ({ c: count() }));
   expect(compile(compound.ir).sql).toBe('SELECT toNullable(`b`.`n` + {p0:Int64}) AS `m`, ifNull(`b`.`n`, {p1:Int64}) AS `f`, toNullable(`b`.`lc`) AS `lc`, count() AS `c`\nFROM (SELECT `id` FROM `oa`) AS `a`\nINNER ALL JOIN (SELECT `id`, `n`, `lc` FROM `ob`) AS `b` ON `a`.`id` = `b`.`id`\nWHERE `b`.`n` > {p2:Int64}\nGROUP BY `b`.`n` + {p0:Int64}, ifNull(`b`.`n`, {p1:Int64}), `b`.`lc`');
-  for (const q of [identity, compound]) expect(compile(q.ir).columns).toEqual(emitNaive(q.ir).columns);
+  for (const q of [identity, both, compound]) expect(compile(q.ir).columns).toEqual(emitNaive(q.ir).columns);
   // Unconverted (LEFT) aggregate blocks keep their single rendering.
   expect(compile(lj().groupBy(r => ({ s: r.b.s })).aggregate(() => ({ c: count() })).ir).sql).toMatch(/SELECT `b`\.`s` AS `s`, count\(\) AS `c`[^]*LEFT ALL JOIN[^]*GROUP BY `b`\.`s`/);
 });

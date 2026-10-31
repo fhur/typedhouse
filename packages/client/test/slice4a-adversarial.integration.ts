@@ -192,12 +192,15 @@ it('client facade: run/stream/runBuffered/toSQL tolerate the trailing comment; r
   expect((await execute(`EXPLAIN ${sql}`)).error).toBeUndefined();
 });
 
-/** FINDING (pre-existing at HEAD for inner join blocks; the 4a planner widening makes it reachable for every outer kind):
+/** 4c: FIXED. Flipped from the FINDING pin below; the original text is kept. Every output alias that equals a physical column
+ * of a join input and that HAVING / ORDER BY (or another item, the ON or the WHERE) can resolve now keeps the Aggregate
+ * in its own block over the join block (whose leaves are `__typedhouse_leaf_N`), so both settings agree with naive.
+ * FINDING (pre-existing at HEAD for inner join blocks; the 4a planner widening makes it reachable for every outer kind):
  * an aggregate block folded onto a join source writes HAVING / ORDER BY by output alias, but the Aggregate alias guard in
  * plan-selects.ts compares output names against the join's *leaf* names (`__typedhouse_leaf_N`), never against the physical
  * column names of the join inputs. Under prefer_column_name_to_alias = 1 an alias equal to a side column resolves to that
  * column: NOT_AN_AGGREGATE (215) where naive returns rows, or silently different rows. Pinned as observed. */
-it('FINDING pin: HAVING/ORDER BY alias equal to a join-side column diverges under prefer_column_name_to_alias = 1 (inner at HEAD, and now outer)', async () => {
+it('4c (was FINDING pin): HAVING/ORDER BY alias equal to a join-side column agrees under prefer_column_name_to_alias 0 and 1 (inner and outer)', async () => {
   const cells = async (root: Rel) => {
     const o = compile(root), n = emitNaive(root);
     const out: string[] = [];
@@ -208,13 +211,15 @@ it('FINDING pin: HAVING/ORDER BY alias equal to a join-side column diverges unde
     return out.join(' ');
   };
   const inner = join({ a: A, b: B }).on(r => r.a.id.eq(r.b.id));
-  // count() aliased n while ob.n is read by max(b.n): HAVING n / ORDER BY n bind the column.
-  expect(await cells(inner.groupBy(r => ({ id: r.a.id })).aggregate(g => ({ n: count(), mx: max(g.b.n) })).where(r => r.n.gt(1n)).ir)).toBe('0:agree 1:optimized code 215 vs naive 1 rows');
-  expect(await cells(lj().groupBy(r => ({ id: r.a.id })).aggregate(g => ({ n: count(), mx: max(g.b.n) })).where(r => r.n.gt(1n)).ir)).toBe('0:agree 1:optimized code 215 vs naive 1 rows');
-  expect(await cells(lj().groupBy(r => ({ id: r.a.id })).aggregate(g => ({ n: count(), mx: max(g.b.n) })).orderBy(r => r.n).ir)).toBe('0:agree 1:optimized code 215 vs naive 4 rows');
-  // Silent: key alias s = a.lc while ob.s is another GROUP BY key; HAVING s = 'v' filters b.s instead.
-  expect(await cells(lj().groupBy(r => ({ s: r.a.lc, x: r.b.s })).aggregate(() => ({ c: count() })).where(r => r.s.eq('v')).ir)).toBe('0:agree 1:optimized 0 rows vs naive 2 rows');
-  expect(await cells(inner.groupBy(r => ({ s: r.a.lc, x: r.b.s })).aggregate(() => ({ c: count() })).where(r => r.s.eq('v')).ir)).toBe('0:agree 1:optimized 0 rows vs naive 2 rows');
+  // count() aliased n while ob.n is read by max(b.n): HAVING n / ORDER BY n bound the column (215 at 4b; 4c fences it).
+  expect(await cells(inner.groupBy(r => ({ id: r.a.id })).aggregate(g => ({ n: count(), mx: max(g.b.n) })).where(r => r.n.gt(1n)).ir)).toBe('0:agree 1:agree');
+  expect(await cells(lj().groupBy(r => ({ id: r.a.id })).aggregate(g => ({ n: count(), mx: max(g.b.n) })).where(r => r.n.gt(1n)).ir)).toBe('0:agree 1:agree');
+  expect(await cells(lj().groupBy(r => ({ id: r.a.id })).aggregate(g => ({ n: count(), mx: max(g.b.n) })).orderBy(r => r.n).ir)).toBe('0:agree 1:agree');
+  // Silent: key alias s = a.lc while ob.s is another GROUP BY key; HAVING s = 'v' filtered b.s instead (0 rows at 4b; 4c fences it).
+  expect(await cells(lj().groupBy(r => ({ s: r.a.lc, x: r.b.s })).aggregate(() => ({ c: count() })).where(r => r.s.eq('v')).ir)).toBe('0:agree 1:agree');
+  expect(await cells(inner.groupBy(r => ({ s: r.a.lc, x: r.b.s })).aggregate(() => ({ c: count() })).where(r => r.s.eq('v')).ir)).toBe('0:agree 1:agree');
+  // 4c: the aggregate now reads the join block as a derived table; HAVING names only its own aliases.
+  expect(compile(inner.groupBy(r => ({ id: r.a.id })).aggregate(g => ({ n: count(), mx: max(g.b.n) })).where(r => r.n.gt(1n)).ir).sql).toMatch(/^SELECT `__typedhouse_input`\.`__typedhouse_leaf_0` AS `id`, count\(\) AS `n`[^]*\) AS `__typedhouse_input` GROUP BY `__typedhouse_input`\.`__typedhouse_leaf_0` HAVING `n` > /);
 });
 
 /** Fix round 1 (was a DEFECT pin): 24.8 returns LowCardinality(Nullable(String)) — the SimpleAggregateFunction wrapper
