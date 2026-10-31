@@ -1,5 +1,15 @@
 # v1 implementation coverage and next batch
 
+## Owner decision — pragmatic client conversion scope
+
+Owner explicitly approved delegating response parsing and streaming to the official ClickHouse client, retaining only a small representation-conversion adapter rather than completing a general decoder. Preserve existing 64-bit-and-larger integer → bigint and Date/timestamp-at-millisecond-or-lower-precision → Date conversions, recursively within supported arrays/tuples. Otherwise prefer the driver's parsed representation; no custom Decimal classes, Map reshaping, or exhaustive value-validation program. Type declarations must match actual returned representations: this decision does not authorize claiming unimplemented conversions or silently passing through values under incompatible existing types. Existing non-finite-float compatibility handling may remain a small compatibility exception.
+
+The separate literal one-HTTP-chunk buffering proof is removed from current acceptance scope: rely on official-driver streaming/resource management plus the existing actual 10M-row bounded-memory test. Future difficult conversion families default to driver representations, with focused compatibility tests and explicit type-contract updates where necessary. This supersedes historical complete-decoder and one-chunk backlog entries; it is an owner-approved scope adjustment, not completion of those original spec requirements. `spec.md` remains unchanged.
+
+Owner also explicitly approved enabling `output_format_json_quote_decimals=1` to preserve exact Decimal strings without custom conversion, and changing Map output types/codegen to `Record<string, unknown>` while returning driver objects unchanged (including nested wire values). This intentional breaking Map type change avoids promising bigint/Date conversions inside Maps.
+
+Status: decision recorded only; no runtime/type changes or new validation performed here. Pending DateTime parameter integration is a separate input-serialization task, not justification for expanding response decoding.
+
 ## Latest master pull — rename/NaN merge verification
 
 Resolved the active normal merge of local `9de574f` with `origin/master` `5962e59` (including branding commit `938406e`). Kept the explicitly removed custom-function API/resolver/tests/corpus deleted; retained SQL snippets, preflight data-container/accessor guards, mode/typed-known validation and the strict portable corpus controls. Conflicted retained files differ from local implementations only by package/selector/temp-prefix renames. Applied `@typedhouse/*` imports to local-only snippet fixtures, tests and declarations; generated declaration/correspondence checks passed without refreshing goldens. Upstream Float `-nan` decoder and regression files are preserved exactly.
