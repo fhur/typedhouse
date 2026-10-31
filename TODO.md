@@ -1,3 +1,47 @@
+## Pending changes — pre-commit verification
+
+The uncached full baseline gate passed, including unit tests, type corpus, package consumers, generated expression surface, codegen and ClickHouse compiler/client integration. Nonincremental root typechecks, source/built precise negative diagnostics (including matcher failure probes), and query/core/expression package verifications passed with actual TypeScript 5.5.4, 5.8.3 and 7.0.2.
+
+The dataflow documentation now defines its own table and uses a standalone typecheck-only example: the docs harness checks it without executing the SVG writer. All docs checks, example checks, build and static-link checks passed. The browser gate initially encountered an occupied port 4322; it passed separately with TYPEDHOUSE_DOCS_TEST_PORT=14327, without stopping the existing server.
+
+The unnamed constant projection negative fixture uses an explicit Expr<number> generic so TypeScript 5.5 retains the meaningful unnamed_expression constraint in its diagnostic. The invalid projection remains rejected on all three versions; the named constant projection neighbor is accepted. No diagnostic expectations or production constraints were weakened.
+
+## Devtools — compact SVG labels
+
+SVG nodes show at most five attributes with an overflow count. Limits show only their limit/offset label; filters show a bounded, human-readable condition with parameter values instead of repeated attributes. Raw SQL stays omitted; docs now warn that exports may contain sensitive query values. Graph column metadata remains complete.
+
+Verification: all 15 devtools tests, nonincremental root typecheck and devtools build pass. Coverage includes label limits, filter comparisons/null checks/dates, XML escaping and truncation.
+
+## Devtools — SVG visualization
+
+Added `dataflow(ir).viz(path = 'graph.svg')`: async, Node-only SVG file output with automatic parent-directory creation and explicit overwrite behavior. Dependency-free layered renderer shows shared operators, directed input/subquery edges, column paths/types and escaped labels. Plain `toDataflowGraph` remains available. Updated docs and the ignored playground example.
+
+Verification: 10 devtools tests pass, root nonincremental typecheck passes, devtools build passes, and built-package SVG file export smoke passes. Tests cover default/custom paths, directory creation, overwrite, XML escaping and subquery styling. Full gate and browser visual inspection not run.
+
+## Devtools — relational dataflow inspection
+
+Added optional `@typedhouse/devtools` workspace package exporting `toDataflowGraph(rel)` and its graph types. Core has no inspection export or devtools dependency. JSON-friendly operator nodes preserve output paths/types; producer-to-consumer edges retain repeated uses, join aliases and scalar/IN subquery occurrences. Traversal follows object identity and omits parameter payloads/raw SQL. Documented scope and usage in `compiler/dataflow-graph.md`.
+
+Verification: 7 devtools unit tests passed (sharing, subqueries, raw/case/cast/aggregate-parameter traversal, detached serialization and 2,000-deep relational chains); root nonincremental typecheck passed; core + devtools builds passed; built package self-import/graph serialization smoke passed. Workspace install and frozen lockfile install passed. Full gate/docs verification and TypeScript version matrix not run.
+
+## UUID membership subqueries
+
+Allowed UUID/Nullable(UUID) descriptors in membership validation, preserving descriptor-family matching. This fixes the playground's part-ID `IN` subquery without converting indexed UUID columns to strings. UUID literal parameter serialization is not added by this change.
+
+Verification: production playground `pnpm test test/example.test.ts` passed, returning 10 rows (555 ms test time) under unchanged reader limits; 15 focused membership/subquery unit tests passed; `pnpm typecheck` passed; focused ClickHouse 24.8 UUID IN/NOT IN and nullable-subquery integration passed (1 selected, 92 skipped). Full gate not run.
+
+## Decimal CAST inputs
+
+Fixed `unsupported_cast_type` for Decimal/Nullable(Decimal) operands cast to existing scalar targets, including nullable Decimal256 price fallbacks. Target restrictions and nullable-removal rejection remain unchanged.
+
+Verification: 8 cast unit tests passed (optimized and naive regression coverage); `pnpm typecheck` passed; focused ClickHouse 24.8 Decimal256 integration passed (1 selected, 91 skipped), covering fallback, NULL and zero. Full gate not run.
+
+## Query shortcuts — count and additional grouping keys
+
+Added `Query.count()` and `GroupedQuery.count()` as ordinary aggregate shorthands, plus immutable `GroupedQuery.thenBy()` over original input columns. Chained keys retain descriptors and reject duplicate aliases; grouped count rejects a key named `count`. Existing ordered-query `thenBy` is unchanged. Added `arrayJoin` JSDoc examples for scalar arrays and named-tuple arrays, including empty-array behavior.
+
+Verification: nonincremental root TypeScript 5.8.3 check passed; 5 focused core tests passed; source and rebuilt declaration checks passed with 349 precise diagnostics; focused real ClickHouse 24.8 grouped/global aggregation integration passed (1 selected, 90 skipped), covering empty counts, limited counts, nullable keys and SQL equivalence for chained grouping. `pnpm build` passed. Full gate and cross-version TypeScript matrix not run for this change.
+
 ## Pragmatic client — merged and freshly verified on main
 
 Normal merge **ce8866f67783130594b12cc37b902b171b141586** joins main `7e9af3d` and accepted adapter `a565159`; no history rewrite or push. Resolved every conflict after comparing base/ours/theirs and main's SQL migration. Volatile fixtures retain main's SQL snippets and exact SQL/native assertions. Slice 1 retains both the opaque SQL distance and explicitly deterministic known distance admission/projection fences; no case or assertion removed. EXPLAIN entry is now `escape/sql-snippet`, matching the existing snippet fixture; its golden is a byte-identical rename from main's migrated golden. No optimizer production, public extension API, declaration allowlist, parameter serializer, benchmark input or budget changes. Approved Map/Decimal/minimal-conversion adapter remains intact; codegen snapshot is only its intended comment/hash change, verified without regeneration.

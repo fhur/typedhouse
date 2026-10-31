@@ -20,15 +20,22 @@
     ],
     "checkInputs": [
       "workspaceSources",
-      { "runtime": "node -p \"[process.version, process.platform, process.arch].join('/')\"" },
-      { "runtime": "pnpm --version" }
+      {
+        "runtime": "node -p \"[process.version, process.platform, process.arch].join('/')\""
+      },
+      {
+        "runtime": "pnpm --version"
+      }
     ]
   },
   "targetDefaults": {
     "nx:run-commands": {
       "cache": false,
-      "inputs": ["checkInputs"],
+      "inputs": [
+        "checkInputs"
+      ],
       "outputs": []
     }
-  }
+  },
+  "analytics": false
 }
