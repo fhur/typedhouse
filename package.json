@@ -1,6 +1,7 @@
 {
   "name": "typedhouse",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.11.0",
   "engines": {
