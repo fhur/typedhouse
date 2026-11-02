@@ -6,6 +6,7 @@
   "engines": { "node": ">=20" },
   "nx": { "includedScripts": [] },
   "scripts": {
+    "count:typescript": "node scripts/count-package-typescript.mjs",
     "capture:type-corpus": "tsup scripts/capture-type-corpus.ts --format esm --external testcontainers --out-dir node_modules/.cache/typedhouse-capture && node node_modules/.cache/typedhouse-capture/capture-type-corpus.js",
     "generate:fixture-seed": "tsup scripts/generate-fixture-seed.ts --format esm --out-dir node_modules/.cache/typedhouse-seed && node node_modules/.cache/typedhouse-seed/generate-fixture-seed.js",
     "verify:fixture-seed": "pnpm generate:fixture-seed --check",

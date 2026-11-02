@@ -10,6 +10,7 @@ coverage/
 .pi/
 .worktrees/
 .nx/
+.DS_Store
 
 # Ephemeral compiler controls; each invocation removes only its own directory.
 /.chql-corpus-control-*/
