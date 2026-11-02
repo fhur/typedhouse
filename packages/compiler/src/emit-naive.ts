@@ -1,4 +1,4 @@
-import { print, scalarDescriptor, outputLeaves, expandedOutput, joinOutput, nullExtended, outerColumnType, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@typedhouse/core';
+import { isNullable, print, scalarDescriptor, outputLeaves, expandedOutput, joinOutput, nullExtended, outerColumnType, type CHType, type CompiledQuery, type ExprNode, type Rel } from '@typedhouse/core';
 import type { SqlPlan } from './plan-selects.js';
 import { parameterExpression, parameterWireType, serializeParameter } from './parameters.js';
 import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
@@ -185,6 +185,9 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
             return inner && (inner[1] < operator[1] || inner[1] === operator[1] && (operator[1] === 3 || i > 0 && operator[1] >= 4)) ? `(${sql})` : sql;
           }).join(` ${operator[0]} `);
         }
+        // Slice 4e: over a LowCardinality(Nullable(T)) receiver 24.8 keeps LowCardinality only for a constant
+        // fallback; toLowCardinality (idempotent) pins the catalog's LowCardinality result for any other one.
+        if (e.fn.name === 'ifNull' && resolved.result.kind === 'LowCardinality' && resolved.types[0]!.kind === 'LowCardinality' && isNullable(resolved.types[0]!) && e.args[1]!.kind !== 'Param') return `toLowCardinality(ifNull(${args.join(', ')}))`;
         // Retain the permanent naive equality SQL contract.
         return e.fn.name === 'eq' ? `(${args[0]} = ${args[1]})` : `${resolved.sqlName}(${args.join(', ')})`;
       }

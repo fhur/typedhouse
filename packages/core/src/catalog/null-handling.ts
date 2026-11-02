@@ -29,7 +29,13 @@ export const nullHandling = [
     const first = args[0]!;
     if (!isNullable(first)) return first;
     const fallback = args[1]!;
-    const result = commonType(first, fallback);
-    return isNullable(fallback) ? nullable(result) : result;
+    const common = commonType(first, fallback);
+    if (common.kind === 'Unknown') return common;
+    const result = isNullable(fallback) ? nullable(common) : common;
+    // 24.8: a LowCardinality(Nullable(T)) receiver keeps its LowCardinality wrapper
+    // (`ifNull(lc, {p:T})` is LowCardinality(T)); the emitter adds an idempotent
+    // toLowCardinality for non-constant fallbacks, which the server would otherwise
+    // fully materialize. Probe table: TODO.md slice 4e.
+    return first.kind === 'LowCardinality' ? { kind: 'LowCardinality', inner: result } : result;
   }, tsReturns: 'IfNullResult<T, N, M, D, U, B>', nullable: 'never', deterministic: true, origin: 'typed', surface: 'ifNull' }).definition,
 ];

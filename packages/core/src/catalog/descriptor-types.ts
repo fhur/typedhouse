@@ -85,7 +85,10 @@ type Common<A, B> = [A] extends [B] ? [B] extends [A] ? A : CommonDifferent<A, B
 type CommonDifferent<A, B> = A extends { kind: 'scalar'; name: 'Nothing' } ? B : B extends { kind: 'scalar'; name: 'Nothing' } ? A :
   A extends { kind: 'scalar'; name: `${'UInt' | 'Int' | 'Float'}${number}` } ? B extends { kind: 'scalar'; name: `${'UInt' | 'Int' | 'Float'}${number}` } ?
   [CommonNumber<A, B>] extends [never] ? CHType : { readonly kind: 'scalar'; readonly name: CommonNumber<A, B> } : CHType : CHType;
-export type IfNullDescriptor<D, B> = CHType extends D ? CHType : IsNullable<D> extends true ? CHType extends B ? CHType : WithNull<Common<Unwrapped<D>, Unwrapped<B>>, IsNullable<B>> : D;
+/** Slice 4e: a LowCardinality(Nullable(T)) receiver keeps its LowCardinality wrapper (24.8 `meta`). */
+type KeepLowCardinality<D, C, R> = CHType extends C ? R : D extends { kind: 'LowCardinality' } ? { readonly kind: 'LowCardinality'; readonly inner: R } : R;
+type IfNullNullable<D, B, C = Common<Unwrapped<D>, Unwrapped<B>>> = KeepLowCardinality<D, C, WithNull<C, IsNullable<B>>>;
+export type IfNullDescriptor<D, B> = CHType extends D ? CHType : IsNullable<D> extends true ? CHType extends B ? CHType : IfNullNullable<D, B> : D;
 /** Primitive fallbacks are sibling-typed; null alone carries Nullable(Nothing). */
 export type FallbackDescriptor<D, U> = CHType extends D ? CHType : null extends U ? [U] extends [null] ? { readonly kind: 'Nullable'; readonly inner: { readonly kind: 'scalar'; readonly name: 'Nothing' } } : WithNull<Unwrapped<D>, true> : Unwrapped<D>;
 export type IfNullResult<T, N extends string, M extends Mode, D, U, B, R = IfNullDescriptor<D, B>> =
