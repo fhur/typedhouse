@@ -10,8 +10,9 @@ const require = createRequire(import.meta.url);
 const filename = require.resolve('testcontainers/build/generic-container/generic-container.js');
 const localRequire = createRequire(filename);
 const source = readFileSync(filename, 'utf8');
-const { REAPER_IMAGE } = localRequire('../reaper/reaper');
-assert.equal(require('testcontainers/package.json').version, '10.28.0');
+const { getReaperImage } = localRequire('../reaper/reaper');
+const REAPER_IMAGE = getReaperImage();
+assert.equal(require('testcontainers/package.json').version, '12.2.1');
 
 const cases = [
   { name: 'Mac host Desktop', expected: '' },
@@ -108,7 +109,7 @@ for (const scenario of cases) {
         exports,
         process: { platform: scenario.platform ?? 'darwin', env: {} },
         require: (id) => {
-          if (id === 'node:fs') return { existsSync: (path) => {
+          if (id === 'node:fs') return { ...localRequire(id), existsSync: (path) => {
             assert.equal(path, '/.dockerenv');
             return scenario.inContainer ?? false;
           } };
@@ -116,7 +117,7 @@ for (const scenario of cases) {
             ...localRequire(id), getContainerRuntimeClient: async () => client,
           };
           if (id === '../reaper/reaper') return {
-            REAPER_IMAGE,
+            getReaperImage: () => REAPER_IMAGE,
             getReaper: async () => { reaperCalls++; return { sessionId: 'patch-unit' }; },
           };
           if (id === '../port-forwarder/port-forwarder') return {
@@ -128,15 +129,21 @@ for (const scenario of cases) {
       const container = new exports.GenericContainer(image)
         .withExposedPorts(8123, 8080, { container: 9000, host: 19000 }, { container: 9001, host: 0 })
         .withExposedPorts(9002, { container: 9002, host: 19002 })
-        .withExposedPorts({ container: 9003, host: 19003 }, 9003);
+        .withExposedPorts({ container: 9003, host: 19003 }, 9003)
+        // 12.x port strings/protocols: only numeric (TCP) declarations are rewritten, last one wins.
+        .withExposedPorts('9004/tcp', 9005, '9005/tcp', '9006/udp', 9006);
       await assert.rejects(container.start(), (error) => error === stoppedAtCreate);
       assert.deepEqual(JSON.parse(JSON.stringify(captured.HostConfig.PortBindings)), {
-        8123: [{ HostPort: scenario.expected }],
-        8080: [{ HostPort: scenario.expected }],
-        9000: [{ HostPort: '19000' }],
-        9001: [{ HostPort: '0' }],
-        9002: [{ HostPort: '19002' }],
-        9003: [{ HostPort: scenario.expected }],
+        '8123/tcp': [{ HostPort: scenario.expected }],
+        '8080/tcp': [{ HostPort: scenario.expected }],
+        '9000/tcp': [{ HostPort: '19000' }],
+        '9001/tcp': [{ HostPort: '0' }],
+        '9002/tcp': [{ HostPort: '19002' }],
+        '9003/tcp': [{ HostPort: scenario.expected }],
+        '9004/tcp': [{ HostPort: '0' }],
+        '9005/tcp': [{ HostPort: '0' }],
+        '9006/udp': [{ HostPort: '0' }],
+        '9006/tcp': [{ HostPort: scenario.expected }],
       });
       assert.equal(reaperCalls, image === REAPER_IMAGE ? 0 : 1);
     });

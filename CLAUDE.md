@@ -1,6 +1,6 @@
 # TypedHouse
 
-Type-safe ClickHouse query builder for TypeScript: typed builder → relational IR → rewrite passes → flat ClickHouse SQL, plus codegen and a Node client. ESM-only pnpm workspace, strict TypeScript (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`), Node.js 20+. Not an ORM; no DDL/inserts.
+Type-safe ClickHouse query builder for TypeScript: typed builder → relational IR → rewrite passes → flat ClickHouse SQL, plus codegen and a Node client. ESM-only pnpm workspace, strict TypeScript (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`), Node.js 22.22+ (or 24.11+) to develop; the published packages declare no `engines`. Not an ORM; no DDL/inserts.
 
 ## Structure
 - `packages/core/src/` — dependency-free: `ch-type` parser/printer, table descriptors, `Expr` (methods generated from the catalog into `expr-methods.generated.ts`), `catalog/`, query builder (`query`, `join`, `union`, `subquery`, `ordering`), IR (`ir.ts`), known/user functions.

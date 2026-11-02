@@ -423,7 +423,7 @@ The cast preserves descriptor evidence without binding or interpolating a value.
 
 ## Development
 
-Node.js 20+ and Corepack are required. Integration tests require Docker and
+Node.js 22.22+ (or 24.11+) and Corepack are required. Integration tests require Docker and
 use `clickhouse/clickhouse-server:24.8`.
 
 ```sh
