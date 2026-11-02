@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { col, count, max, from, join, leftJoin, rightJoin, fullJoin, table, unionAll, parseCHType, print, type Rel, type CHType } from '@typedhouse/core';
+import { col, count, max, sql, from, join, leftJoin, rightJoin, fullJoin, table, unionAll, parseCHType, print, type Rel, type CHType } from '@typedhouse/core';
 import { compile, emitNaive } from '@typedhouse/compiler';
 
 // Slice 4f (4c Tester Finding 1): descriptor-invisible ALIAS/MATERIALIZED columns. A descriptor may omit columns the
@@ -96,6 +96,26 @@ it('single-table aggregate: HAVING/ORDER BY on an alias equal to a hidden ALIAS 
   // A computed selection named like a hidden column folds when nothing else in the block reads the name.
   const selection = XH.where(r => r.v.ne('z')).map(r => ({ hidden: r.id.plus(1), v: r.v }));
   expect(derived(await check(selection.ir, 'selection alias hidden, unread', "SELECT id + 1, v FROM xh WHERE v != 'z'"))).toBe(false);
+});
+
+it('LIMIT/OFFSET scan projections preserve hidden ALIAS/MATERIALIZED guards and conservative Raw fences', async () => {
+  // id=1 is a unique physical row: offsets do not depend on MergeTree scan order.
+  for (const name of ['hidden', 'mat']) for (const offset of [0, 1]) for (const same of [false, true]) {
+    const source = XH.where(r => r.id.eq(1));
+    const q = source.where(r => same ? r.id.gt(0) : r.v.ne('z'))
+      .map(r => ({ [name]: r.id.plus(1), sibling: same ? r.id : r.v })).limit(1, offset);
+    expect(derived(await check(q.ir, `LIMIT ${name} ${offset} same=${same}`,
+      `SELECT id + 1, ${same ? 'id' : 'v'} FROM xh WHERE id = 1 LIMIT 1 OFFSET ${offset}`))).toBe(false);
+    // Raw reads every physical name conservatively, even when its text only names
+    // id/v, not hidden/mat. Keep the existing false-positive scope; do not special-case LIMIT.
+    const opaque = source.map(r => ({ [name]: r.id.plus(1), sibling: same ? sql`${r.id}`.as(col.UInt32) : sql`${r.v}`.as(col.String) })).limit(1, offset);
+    const opaqueWhere = source.where(r => same ? sql`${r.id} > 0`.as(col.Bool) : sql`${r.v} != 'z'`.as(col.Bool))
+      .map(r => ({ [name]: r.id.plus(1) })).limit(1, offset);
+    expect(derived(await check(opaque.ir, `opaque sibling ${name} ${offset} ${same}`,
+      `SELECT id + 1, ${same ? 'id' : 'v'} FROM xh WHERE id = 1 LIMIT 1 OFFSET ${offset}`))).toBe(true);
+    expect(derived(await check(opaqueWhere.ir, `opaque WHERE ${name} ${offset} ${same}`,
+      `SELECT id + 1 FROM xh WHERE id = 1 LIMIT 1 OFFSET ${offset}`))).toBe(true);
+  }
 });
 
 it('join aggregates over every kind: an output alias equal to a hidden column of a side keeps the join block derived', async () => {

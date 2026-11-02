@@ -379,6 +379,123 @@ it('slice 3b (formerly "PRE-EXISTING … as observed"): a filter outside the tot
   await agree(j.where(x => cast(x.a.s, col.UInt64).gt(0n)).where(x => x.a.id.plus(x.b.v).ne(27n)).map(x => ({ id: x.a.id })).ir, { selects: 3, error: '6', label: '3b join, fallible then total' });
 });
 
+it('issue2: total scan projections under LIMIT have independent native row and metadata anchors', async () => {
+  const q = t.where(a => a.id.eq(2)).map(a => ({ renamed: a.n.plus(1n), nullable: a.nn, flag: a.k.eq('b') })).limit(1);
+  const result = await agree(q.ir, { selects: 1, oracle: "SELECT n + toInt64(1) AS renamed, nn AS nullable, k = 'b' AS flag FROM adv_s3 WHERE id = 2 LIMIT 1" });
+  expect(result.first).toEqual({ meta: [{ name: 'renamed', type: 'Int64' }, { name: 'nullable', type: 'Nullable(String)' }, { name: 'flag', type: 'UInt8' }], data: [{ renamed: '21', nullable: null, flag: 1 }] });
+  const offset = t.where(a => a.id.eq(2)).map(a => ({ renamed: a.n.plus(1n) })).limit(1, 1);
+  expect((await agree(offset.ir, { oracle: 'SELECT n + toInt64(1) AS renamed FROM adv_s3 WHERE id = 2 LIMIT 1 OFFSET 1' })).first.data).toEqual([]);
+});
+
+it('agent2 issue2: empty/nested caps and reordered/dropped outputs have independent anchors', async () => {
+  const shared = val(7n, col.Int64);
+  const projected = t.where(a => a.id.eq(2)).map(a => ({ value: a.n.plus(shared), twin: a.n.minus(shared), nullable: a.nn }));
+  const cases = [
+    [projected.limit(0, 1), 'SELECT n + toInt64(7) AS value, n - toInt64(7) AS twin, nn AS nullable FROM adv_s3 WHERE id = 2 LIMIT 0 OFFSET 1'],
+    [projected.limit(1).limit(1, 1), 'SELECT n + toInt64(7) AS value, n - toInt64(7) AS twin, nn AS nullable FROM adv_s3 WHERE id = 2 LIMIT 0'],
+    [projected.limit(0).limit(1), 'SELECT n + toInt64(7) AS value, n - toInt64(7) AS twin, nn AS nullable FROM adv_s3 WHERE id = 2 LIMIT 0'],
+    [projected.limit(1).map(a => ({ nullable: a.nullable, twin: a.twin, value: a.value })), 'SELECT nn AS nullable, n - toInt64(7) AS twin, n + toInt64(7) AS value FROM adv_s3 WHERE id = 2'],
+    [projected.limit(1).map(a => ({ nullable: a.nullable })), 'SELECT nn AS nullable FROM adv_s3 WHERE id = 2'],
+    [t.where(a => a.id.eq(2)).map(a => ({ n: a.id, sibling: a.n })).limit(1), 'SELECT id AS n, original AS sibling FROM (SELECT id, n AS original FROM adv_s3 WHERE id = 2)'],
+  ] as const;
+  for (const [q, oracle] of cases) {
+    const a = compile(q.ir), b = emitNaive(q.ir);
+    expect(a.params).toEqual(b.params);
+    expect(a.parameterTypes).toEqual(b.parameterTypes);
+    for (const settings of contract) {
+      const expected = await execute(oracle, {}, settings);
+      expect(expected.error).toBeUndefined();
+      expect(await execute(a.sql, a.params, settings)).toEqual(expected);
+      expect(await execute(b.sql, b.params, settings)).toEqual(expected);
+    }
+  }
+});
+
+it('final agent2 LIMIT: tuple/LowCardinality/constant metadata and shared consumers match independent SQL', async () => {
+  const filtered = t.where(a => a.id.eq(2));
+  const projected = filtered.map(a => ({ v: a.n.plus(7n) }));
+  const rich = filtered.map(a => ({ text: a.lc.ifNull(a.k), tupleField: a.tup.element('b'), parts: a.parts.element('id'), nil: val(null, col.Nullable(col.String)), fixed: val(9n, col.Int64) }));
+  const cases = [
+    [rich.limit(1), "SELECT toLowCardinality(ifNull(lc, k)) AS text, tupleElement(tup, 'b') AS tupleField, tupleElement(parts, 'id') AS parts, CAST(NULL AS Nullable(String)) AS nil, toInt64(9) AS fixed FROM adv_s3 WHERE id = 2 LIMIT 1"],
+    [rich.limit(0, Number.MAX_SAFE_INTEGER), "SELECT toLowCardinality(ifNull(lc, k)) AS text, tupleElement(tup, 'b') AS tupleField, tupleElement(parts, 'id') AS parts, CAST(NULL AS Nullable(String)) AS nil, toInt64(9) AS fixed FROM adv_s3 WHERE id = 2 LIMIT 0"],
+    [unionAll(projected.limit(1), projected.limit(1, 1)), 'SELECT n + toInt64(7) AS v FROM adv_s3 WHERE id = 2'],
+    [unionAll(filtered.map(a => ({ v: a.n.plus(7n) })).limit(1), filtered.map(a => ({ v: a.n.minus(7n) })).limit(1)), 'SELECT n + toInt64(7) AS v FROM adv_s3 WHERE id = 2 UNION ALL SELECT n - toInt64(7) AS v FROM adv_s3 WHERE id = 2'],
+    [unionAll(t.where(a => a.id.eq(1)).map(a => ({ v: a.n.plus(7n) })).limit(1), t.where(a => a.id.eq(2)).map(a => ({ v: a.n.minus(7n) })).limit(1)), 'SELECT n + toInt64(7) AS v FROM adv_s3 WHERE id = 1 UNION ALL SELECT n - toInt64(7) AS v FROM adv_s3 WHERE id = 2'],
+    [filtered.map(a => ({ id: a.id.plus(1), original: a.alias_id, stored: a.mat_id })).limit(1), 'SELECT id + toUInt32(1) AS id, original, stored FROM (SELECT id, alias_id AS original, mat_id AS stored FROM adv_s3 WHERE id = 2)'],
+  ] as const;
+  for (const [index, [query, oracle]] of cases.entries()) {
+    const a = compile(query.ir), b = emitNaive(query.ir);
+    expect(a.columns).toEqual(b.columns);
+    if (index < 2) expect(a.sql.match(/SELECT /g)).toHaveLength(1);
+    if (index >= 2 && index <= 4) expect(a.sql).toContain('WITH');
+    for (const settings of contract) {
+      const expected = await execute(oracle, {}, settings);
+      expect(expected.error, oracle).toBeUndefined();
+      expect(await execute(a.sql, a.params, settings), JSON.stringify({ index, settings, sql: a.sql })).toEqual(expected);
+      expect(await execute(b.sql, b.params, settings), JSON.stringify({ index, settings, sql: b.sql })).toEqual(expected);
+    }
+  }
+});
+
+// One physical row per selected id makes LIMIT deterministic without relying on scan order.
+// Expansion recipes retain every expanded row. Error comparisons below are bounded fixture
+// regressions, not a general strengthening of the results-only compiler contract.
+const limitRecipes = fc.record({ shape: fc.integer({ min: 0, max: 9 }), id: fc.integer({ min: 1, max: 3 }), increment: fc.integer({ min: -10, max: 10 }), offset: fc.integer({ min: 0, max: 2 }), setting: fc.integer({ min: 0, max: 7 }) });
+it('issue2: 500 LIMIT recipes cover total folds and retained scopes with native metadata and errors', async () => {
+  const shapes = new Set<number>(), settingsSeen = new Set<number>(), outcomes = new Set<string>();
+  let folded = 0, fenced = 0;
+  const result = await fc.check(fc.asyncProperty(limitRecipes, async r => {
+    const source = t.where(a => a.id.eq(r.id));
+    const shared = val(BigInt(r.increment), col.Int64);
+    const simple = source.map(a => ({ v: a.n.plus(shared), sibling: a.n.minus(shared), nullable: a.nn }));
+    const q = r.shape === 0 ? simple.limit(1, r.offset)
+      : r.shape === 1 ? source.map(a => ({ renamed: a.id, nullable: a.nn })).limit(1, r.offset)
+      : r.shape === 2 ? source.map(a => ({ n: a.n.plus(shared), nullable: a.nn.ifNull('missing') })).limit(1, r.offset)
+      : r.shape === 3 ? simple.cte().limit(1, r.offset)
+      : r.shape === 4 ? simple.orderBy(a => a.v).limit(1, r.offset)
+      : r.shape === 5 ? simple.distinct().limit(1, r.offset)
+      : r.shape === 6 ? source.map(a => ({ v: cast(a.s, col.UInt64) })).limit(3)
+      : r.shape === 7 ? source.map(a => ({ v: sql`intDiv(${a.n}, ${a.n.minus(20n)})`.as(col.Int64) })).limit(3)
+      : r.shape === 8 ? source.leftArrayJoin(a => a.ids, 'element').map(a => ({ v: a.id, element: a.element })).limit(10)
+      : simple.limit(3).limit(1, r.offset);
+    const a = compile(q.ir), b = emitNaive(q.ir), settings = contract[r.setting]!;
+    const actual = await execute(a.sql, a.params, settings), expected = await execute(b.sql, b.params, settings);
+    expect(a.columns).toEqual(b.columns);
+    expect(Object.values(a.params).sort()).toEqual(Object.values(b.params).sort());
+    expect(actual, JSON.stringify({ r, optimized: a.sql, naive: b.sql })).toEqual(expected);
+    if (r.shape < 3) {
+      expect(a.sql.match(/SELECT /g)?.length).toBe(1);
+      const items = r.shape === 0 ? `n + toInt64(${r.increment}) AS v, n - toInt64(${r.increment}) AS sibling, nn AS nullable`
+        : r.shape === 1 ? 'id AS renamed, nn AS nullable' : `n + toInt64(${r.increment}) AS n, ifNull(nn, 'missing') AS nullable`;
+      expect(actual).toEqual(await execute(`SELECT ${items} FROM adv_s3 WHERE id = ${r.id} LIMIT 1 OFFSET ${r.offset}`, {}, settings));
+      folded++;
+    } else { expect(a.sql.match(/SELECT /g)!.length).toBeGreaterThan(1); fenced++; }
+    if ((r.shape === 6 || r.shape === 7) && r.id === 2) expect(actual.error).toBe(r.shape === 6 ? '6' : '153');
+    else expect(actual.error).toBeUndefined();
+    shapes.add(r.shape); settingsSeen.add(r.setting); outcomes.add(actual.error ?? 'rows');
+  }), { seed: 20261205, numRuns: 500 });
+  if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks}\n${String(result.errorInstance)}`);
+  expect(result.numRuns).toBe(500); expect(shapes.size).toBe(10); expect(settingsSeen.size).toBe(8);
+  expect(folded).toBeGreaterThan(100); expect(fenced).toBeGreaterThan(250);
+  expect([...outcomes].sort()).toEqual(['153', '6', 'rows']);
+  console.info('project-limit differential', { runs: result.numRuns, seed: result.seed, shapes: shapes.size, folded, fenced, outcomes: [...outcomes].sort() });
+}, 120000);
+it('issue2: removing the folded OFFSET is detected, genuinely shrunk and replayed', async () => {
+  const property = fc.asyncProperty(fc.integer({ min: 1, max: 20 }), async offset => {
+    const root = t.where(a => a.id.eq(1)).map(a => ({ renamed: a.n.plus(1n) })).limit(1, offset).ir;
+    const a = compile(root), b = emitNaive(root);
+    expect(a.sql.match(/SELECT /g)?.length).toBe(1);
+    const faulty = a.sql.replace(/ OFFSET [0-9]+$/, '');
+    expect(faulty).not.toBe(a.sql);
+    expect(await execute(faulty, a.params)).toEqual(await execute(b.sql, b.params));
+  });
+  const result = await fc.check(property, { seed: 20261205, numRuns: 500 });
+  expect(result.failed).toBe(true); expect(result.numShrinks).toBeGreaterThan(0);
+  const replay = await fc.check(property, { seed: result.seed, path: result.counterexamplePath!, numRuns: 500 });
+  expect(replay.failed).toBe(true); expect(replay.counterexample).toEqual(result.counterexample);
+  console.info('project-limit fault', { seed: result.seed, shrinks: result.numShrinks, path: result.counterexamplePath });
+}, 120000);
+
 it('records old-analyzer (allow_experimental_analyzer = 0) behaviour, outside the spec contract', () => {
   console.info('slice3 probe: old analyzer disagreements', legacyNotes.length ? legacyNotes : 'none');
 });

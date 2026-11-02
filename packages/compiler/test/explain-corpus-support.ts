@@ -3,7 +3,7 @@ import { validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
 import { fallibleBelowFilters, planSelects, type SelectBlock, type SqlPlan } from '../src/plan-selects.js';
 import { pruneColumns, type ColumnDemand } from '../src/prune-columns.js';
-import { mapExpression, totalPredicate } from '../src/rewrite-expressions.js';
+import { mapExpression, totalExpression, totalPredicate } from '../src/rewrite-expressions.js';
 import { rewriteRel } from '../src/rewrite-rel.js';
 import type { FenceKind } from './fixtures/corpus/explain-corpus.js';
 
@@ -73,7 +73,18 @@ export function structure(root: Rel): Structure {
       case 'subquery': return 'Subquery';
       case 'union-branch': case 'union-input': return 'Union';
       case 'join-input': return 'Join';
-      case 'derived': return filterFence(rel, consumer!) ? 'Filter' : fenceNodes.has(consumer!.kind) ? consumer!.kind as FenceKind : fenceNodes.has(rel.kind) ? rel.kind as FenceKind : 'unfenced';
+      case 'derived': {
+        const child = plan.blocks.get(rel);
+        // The bounded LIMIT fold must disappear, not get a blanket consumer exemption.
+        // Other consumer/header/occurrence proofs remain outside this scoped check.
+        if (consumer?.kind === 'Limit' && consumer.input === rel && child?.project
+          && child.source.kind === 'table' && !child.arrayJoin && !child.aggregate && !child.distinct
+          && child.clauses.every(n => n.kind === 'Filter' && totalPredicate(n.pred))
+          && Object.getOwnPropertyNames(child.project.exprs).every(name => totalExpression(child.project!.exprs[name]!))
+          && (columns.get(child.project) ?? outputLeaves(child.project.output)).every(l =>
+            (columns.get(consumer) ?? outputLeaves(consumer.output)).some(w => w.name === l.name))) return 'unfenced';
+        return filterFence(rel, consumer!) ? 'Filter' : fenceNodes.has(consumer!.kind) ? consumer!.kind as FenceKind : fenceNodes.has(rel.kind) ? rel.kind as FenceKind : 'unfenced';
+      }
     }
   };
   const push = (rel: Rel, role: Role, consumer?: Rel) => selects.push({ rel, role, ...(consumer ? { consumer } : {}), fence: fenceOf(rel, role, consumer) });

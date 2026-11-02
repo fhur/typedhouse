@@ -1,5 +1,5 @@
 import { outputLeaves, type ExprNode, type Rel } from '@typedhouse/core';
-import { deterministicExpression, safePredicate, totalPredicate } from './rewrite-expressions.js';
+import { deterministicExpression, safePredicate, totalExpression, totalPredicate } from './rewrite-expressions.js';
 import { directSelection, type ColumnDemand } from './prune-columns.js';
 import { fallibleComputation } from './rewrite-rel.js';
 import type { CtePlan } from './plan-ctes.js';
@@ -222,8 +222,18 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       // Also retain the boundary over fallible computations below the earlier filters (upstream slice 4d).
       const isolated = rel.kind !== 'Filter' || !child?.clauses.some(n => n.kind === 'Filter')
         || totalPredicate(rel.pred) && child.clauses.every(n => n.kind !== 'Filter' || totalPredicate(n.pred)) && !fallibleBelowFilters(child);
+      // LIMIT needs no alias substitution. A child.project exists only after the
+      // scan Project arm's full physical-name (including hiddenColumns) guard passed.
+      // Only total scan projections and preceding WHEREs may share the cap; retain
+      // the full demanded interface, including computed items and their Params.
+      const limitProject = rel.kind === 'Limit' && child?.project && child.source.kind === 'table'
+        && !child.arrayJoin && !child.aggregate && !child.distinct
+        && Object.getOwnPropertyNames(child.project.exprs).every(name => totalExpression(child.project!.exprs[name]!))
+        && child.clauses.every(n => n.kind === 'Filter' && totalPredicate(n.pred))
+        && (columns?.get(child.project) ?? outputLeaves(child.project.output)).every(l =>
+          (columns?.get(rel) ?? outputLeaves(rel.output)).some(w => w.name === l.name));
       // WHERE precedes DISTINCT; a Filter above a folded Distinct opens a new block.
-      block = child && !child.project && safe && isolated && !(child.distinct && rel.kind === 'Filter') && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
+      block = child && (!child.project || limitProject) && safe && isolated && !(child.distinct && rel.kind === 'Filter') && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
         ? { ...child, clauses: Object.freeze([...child.clauses, rel]) }
         : { source: Object.freeze({ kind: ctes?.names.has(rel.input) ? 'cte' : 'derived', rel: rel.input }), clauses: Object.freeze([rel]) };
     } else return undefined;

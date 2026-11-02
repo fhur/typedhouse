@@ -170,6 +170,22 @@ it('slice 4f: --skip-alias declares skipped ALIAS columns as hiddenColumns, the 
       try { return JSON.stringify(await (await client.query({ query: sql, query_params: params, format: 'JSONCompactEachRow', clickhouse_settings: settings })).json()); } catch (error) { return `E${(error as { code?: string }).code}`; }
     };
     const shape = (d: typeof descriptor) => from(d as Parameters<typeof from>[0]).groupBy((r: any) => ({ id: r.id })).aggregate((g: any) => ({ hidden: count(), top: max(g.v) })).where((r: any) => r.hidden.gt(1n)).ir;
+    // LIMIT uses the generated skip-alias metadata without exposing the hidden column.
+    for (const offset of [0, 1]) {
+      const limited = from(localDescriptor as Parameters<typeof from>[0]).where((r: any) => r.id.eq(1))
+        .map((r: any) => ({ hidden: r.id.plus(1), sibling: r.v })).limit(1, offset);
+      const optimized = compile(limited.ir), naive = emitNaive(limited.ir);
+      expect(optimized.sql.match(/SELECT /g)).toHaveLength(1);
+      expect(optimized.columns).toEqual(naive.columns);
+      for (const prefer of [0, 1]) for (const prewhere of [0, 1]) {
+        const settings = { prefer_column_name_to_alias: prefer, optimize_move_to_prewhere: prewhere };
+        // UInt32 + UInt32 widens to UInt64, quoted by JSONCompactEachRow.
+        const expected = offset ? '[]' : '[["2","a"]]';
+        expect(await run(`SELECT id + toUInt32(1), v FROM adversarial_hidden WHERE id = 1 LIMIT 1 OFFSET ${offset}`, {}, settings)).toBe(expected);
+        expect(await run(optimized.sql, optimized.params, settings)).toBe(expected);
+        expect(await run(naive.sql, naive.params, settings)).toBe(expected);
+      }
+    }
     const { hiddenColumns: _, ...bare } = localDescriptor;
     const outcomes: Record<string, string[]> = { declared: [], bare: [] };
     for (const [label, d] of [['declared', localDescriptor], ['bare', table('adversarial_hidden', Object.fromEntries(Object.entries(bare.columns).map(([k, type]) => [k, { type }])) as never, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] })]] as const) {
