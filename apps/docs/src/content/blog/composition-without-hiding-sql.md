@@ -25,4 +25,4 @@ Generated descriptors only help with schema drift when you refresh them and type
 
 Each documentation page has a Markdown endpoint generated from its source. Technical contracts, examples, and limitations survive without JavaScript or a visual interface. [The agent index](/llms.txt) is a starting point, not a claim that agents automatically produce correct code.
 
-This is a bounded implementation preview. Start with [one query](/docs/getting-started/), inspect its SQL, and validate it against your own schema before expanding adoption.
+Start with [one query](/docs/getting-started/), inspect its SQL, and validate it against your own schema before expanding adoption.

@@ -21,5 +21,5 @@ export function markdown(page: Awaited<ReturnType<typeof publishedPages>>[number
   const body = page.body.replace(/\]\((\/(?:docs|blog)\/[^)\s#]+?)(?:\/)?(#[^)\s]*)?\)/g,
     (_, path: string, hash: string = '') => `](${new URL(withBase(`${path.replace(/\/$/, '')}.md${hash}`), base).href})`)
     .replace(/\]\((\/[^)\s]+)\)/g, (_, path: string) => `](${new URL(withBase(path), base).href})`);
-  return `# ${page.title}\n\nCanonical: ${canonical}\n\nVersion: current workspace preview (not complete v1).\n\n${body.trim()}\n`;
+  return `# ${page.title}\n\nCanonical: ${canonical}\n\n${body.trim()}\n`;
 }

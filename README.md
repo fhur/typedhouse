@@ -4,8 +4,6 @@
 
 [Documentation](https://fhur.github.io/typedhouse/) · [Getting started](https://fhur.github.io/typedhouse/docs/getting-started/) · [Playground](https://fhur.github.io/typedhouse/playground/) · [API reference](https://fhur.github.io/typedhouse/docs/query-builder/overview/)
 
-> **Status: workspace preview.** The supported API is evolving; this is not a claim of complete ClickHouse support or production readiness.
-
 ## Why TypedHouse?
 
 SQL is good at describing a query. Application code often needs to reuse part of that query across a dashboard, a report, and an export—without copying SQL strings or losing track of the result shape.

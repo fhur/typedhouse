@@ -3,7 +3,7 @@ title: ClickHouse data types in TypeScript
 description: How each ClickHouse type maps to a TypeScript type, what ClickHouse sends over JSON, and the JavaScript precision and time-zone pitfalls to avoid.
 ---
 
-**API context:** current workspace preview. The JSON behaviour below was checked against ClickHouse 24.8.14.39 with `FORMAT JSONEachRow`; it applies to any HTTP client, including the official `@clickhouse/client`.
+This page shows which TypeScript type each ClickHouse type becomes, and which values JavaScript silently corrupts when it parses ClickHouse JSON: 64-bit integers, decimals, `NaN` and date-times.
 
 Every column descriptor (`col.UInt64`, `col.Nullable(col.String)`, …) carries a ClickHouse type, and TypedHouse derives the TypeScript type of each result row from it. `typedhouse generate` writes the same descriptors from `system.columns`. `@typedhouse/client` then decodes each JSON value into that TypeScript type.
 
@@ -38,7 +38,7 @@ A query whose **output** contains a type the client cannot decode yet fails befo
 
 ## What ClickHouse sends over JSON
 
-Most bugs come from the wire, not from the type mapping. With default settings, `JSONEachRow` sends:
+This section applies to any HTTP client, including the official `@clickhouse/client`. With default settings, `JSONEachRow` sends:
 
 | Value | ClickHouse default output | What goes wrong in JavaScript | Setting that fixes it |
 | --- | --- | --- | --- |
@@ -48,6 +48,8 @@ Most bugs come from the wire, not from the type mapping. With default settings, 
 | `DateTime64(6)` `12:00:00.123456` | `"2026-10-27 12:00:00.123456"` | A `Date` keeps only milliseconds | Keep the string, or reduce precision in SQL |
 | `Decimal64(4)` `12345678901234.5678` | `12345678901234.5678` (an unquoted number) | `JSON.parse` rounds it to `12345678901234.568` | `output_format_json_quote_decimals = 1` sends `"12345678901234.5678"` |
 | `Tuple(name String, n UInt8)` | `{"name":"x","n":1}` | Fine; an unnamed tuple arrives as an array | `output_format_json_named_tuples_as_objects = 1` (the default) |
+
+Checked against ClickHouse 24.8.14.39; defaults may differ in other versions.
 
 `@typedhouse/client` sends `date_time_output_format = 'iso'`, `output_format_json_quote_64bit_integers = 1`, `output_format_json_quote_denormals = 1` and `output_format_json_quote_decimals = 1` with every query, so the 64-bit, NaN, time-zone and Decimal problems above cannot happen there. If you use `@clickhouse/client` directly, pass the same values in `clickhouse_settings`.
 

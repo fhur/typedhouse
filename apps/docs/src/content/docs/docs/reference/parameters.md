@@ -3,7 +3,7 @@ title: Parameters and compiler outputs
 description: Keep values separate from SQL and inspect the actual compiler result.
 ---
 
-**API context:** current workspace preview. Use the full `events` fixture and imports from [Getting started](/docs/getting-started/).
+Examples use the `events` fixture and imports from [Getting started](/docs/getting-started/).
 
 ## Bind values through expressions
 
