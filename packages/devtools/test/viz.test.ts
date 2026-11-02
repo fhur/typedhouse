@@ -45,6 +45,24 @@ it('defaults to graph.svg without creating files on graph construction', async (
   expect(write).toHaveBeenCalledWith('graph.svg', expect.stringContaining('<svg'), 'utf8');
 });
 
+it('defaults Mermaid output to graph.md', async () => {
+  const fs = await import('node:fs/promises');
+  vi.mocked(fs.mkdir).mockResolvedValueOnce(undefined);
+  const write = vi.mocked(fs.writeFile).mockResolvedValueOnce(undefined);
+  expect(await dataflow(source.ir).mermaid()).toBe('graph.md');
+  expect(write).toHaveBeenCalledWith('graph.md', expect.stringContaining('flowchart TD'), 'utf8');
+});
+
+it('lays out SVG producers above consumers', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'typedhouse-viz-'));
+  dirs.push(dir);
+  const path = await dataflow(source.limit(20).ir).viz(join(dir, 'vertical.svg'));
+  const image = await readFile(path, 'utf8');
+  const edge = image.match(/d="M ([\d.]+) ([\d.]+) C [^"]*, ([\d.]+) ([\d.]+)"/)!;
+  expect(Number(edge[4])).toBeGreaterThan(Number(edge[2]));
+  expect(Number(edge[1])).toBe(Number(edge[3]));
+});
+
 it('shows at most five attributes while retaining all graph columns', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'typedhouse-viz-'));
   dirs.push(dir);

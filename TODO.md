@@ -1,3 +1,9 @@
+## Devtools — vertical SVG and Mermaid Markdown
+
+Added `dataflow(ir).mermaid(path = 'graph.md')` alongside `.viz()`. Both are async Node file writers with directory creation/overwrite behavior. Mermaid output is a fenced `flowchart TD` with escaped labels, shared nodes, repeated input edges and dashed subquery edges. SVG layout now flows top-to-bottom. Both share compact labels (five attributes max; filter/sort/limit descriptions only).
+
+Verification: all 21 devtools tests pass; nonincremental root typecheck and devtools build pass; built SVG + Mermaid file export smoke passes. Tests cover default/custom paths, escaping, sharing, styling and vertical SVG edge coordinates. Actual Mermaid preview rendering, full gate and docs suite not run.
+
 ## Issue 1 final acceptance — owner-approved wall-only advisory; remaining gates complete
 
 Owner explicitly approved treating wall-time failures as advisory **only after the complete benchmark input closures are verified unchanged**. Instantiation ceilings remain hard for every compiler/input; no benchmark, threshold, default CLI policy or test assertion changed. This supersedes the acceptance block below, not its historical failed exit status or unknown timing cause. No claim that `check:all` on 5.5.4 exited zero.

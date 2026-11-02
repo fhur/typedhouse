@@ -1,16 +1,22 @@
 import type { Rel } from '@typedhouse/core';
 import { toDataflowGraph, type DataflowGraph } from './dataflow.js';
+import { nodeLabel } from './node-label.js';
+import { mermaidMarkdown } from './mermaid.js';
 
 export interface Dataflow extends DataflowGraph {
   /** Write an SVG (Node.js only), creating parent directories. Replaces an existing file.
    * @returns The supplied output path, after the file has been written.
    */
   viz(path?: string): Promise<string>;
+  /** Write a top-to-bottom Mermaid diagram in Markdown (default graph.md).
+   * Node.js only; creates parent directories and replaces an existing file.
+   */
+  mermaid(path?: string): Promise<string>;
 }
 
 const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
 
-/** Render a left-to-right, layered relational DAG without external tools. */
+/** Render a top-to-bottom, layered relational DAG without external tools. */
 function svg(graph: DataflowGraph): string {
   const outgoing = new Map(graph.nodes.map(n => [n.id, [] as string[]]));
   const incoming = new Map(graph.nodes.map(n => [n.id, 0]));
@@ -30,34 +36,38 @@ function svg(graph: DataflowGraph): string {
   }
   if (ready.length !== graph.nodes.length) throw new Error('cyclic_dataflow');
 
-  const lines = new Map(graph.nodes.map(n => [n.id, [
-    n.kind === 'Limit' || n.kind === 'Filter' || n.kind === 'Sort' ? n.label : `${n.id}: ${n.label}`,
-    ...(n.kind === 'Limit' || n.kind === 'Filter' || n.kind === 'Sort' ? [] : [
-      ...n.columns.slice(0, 5).map(c => `${c.path.map(p => JSON.stringify(p)).join('.')} : ${c.type ?? '?'}`),
-      ...(n.columns.length > 5 ? [`… ${n.columns.length - 5} more attributes`] : []),
-    ]),
-  ]]));
-  const widths = new Map<number, number>();
-  for (const node of graph.nodes) {
-    const width = Math.max(240, ...lines.get(node.id)!.map(line => line.length * 8 + 32));
-    widths.set(ranks.get(node.id)!, Math.max(widths.get(ranks.get(node.id)!) ?? 0, width));
-  }
-  const xs = new Map<number, number>();
-  let totalWidth = 32;
-  for (let rank = 0; rank < widths.size; rank++) {
-    xs.set(rank, totalWidth);
-    totalWidth += widths.get(rank)! + 100;
-  }
-  const bottoms = new Map<number, number>();
+  const lines = new Map(graph.nodes.map(n => [n.id, nodeLabel(n)]));
+  const levels = new Map<number, string[]>();
   const boxes = new Map<string, { x: number; y: number; width: number; height: number }>();
   for (const node of graph.nodes) {
     const rank = ranks.get(node.id)!;
-    const y = bottoms.get(rank) ?? 32;
-    const height = lines.get(node.id)!.length * 20 + 24;
-    boxes.set(node.id, { x: xs.get(rank)!, y, width: widths.get(rank)!, height });
-    bottoms.set(rank, y + height + 40);
+    const level = levels.get(rank) ?? [];
+    level.push(node.id);
+    levels.set(rank, level);
+    boxes.set(node.id, {
+      x: 0, y: 0,
+      width: Math.max(240, ...lines.get(node.id)!.map(line => line.length * 8 + 32)),
+      height: lines.get(node.id)!.length * 20 + 24,
+    });
   }
-  const height = Math.max(100, ...bottoms.values());
+  const levelWidths = new Map([...levels].map(([rank, ids]) => [rank,
+    ids.reduce((width, id) => width + boxes.get(id)!.width, 0) + (ids.length - 1) * 40,
+  ]));
+  const totalWidth = Math.max(240, ...levelWidths.values()) + 64;
+  let height = 32;
+  for (let rank = 0; rank < levels.size; rank++) {
+    const ids = levels.get(rank)!;
+    let x = (totalWidth - levelWidths.get(rank)!) / 2;
+    let levelHeight = 0;
+    for (const id of ids) {
+      const box = boxes.get(id)!;
+      box.x = x;
+      box.y = height;
+      x += box.width + 40;
+      levelHeight = Math.max(levelHeight, box.height);
+    }
+    height += levelHeight + 80;
+  }
   const targetCounts = new Map<string, number>();
   for (const edge of graph.edges) targetCounts.set(edge.target, (targetCounts.get(edge.target) ?? 0) + 1);
   const sourcePorts = new Map<string, number>();
@@ -69,11 +79,11 @@ function svg(graph: DataflowGraph): string {
     const targetPort = (targetPorts.get(edge.target) ?? 0) + 1;
     sourcePorts.set(edge.source, sourcePort);
     targetPorts.set(edge.target, targetPort);
-    const x1 = a.x + a.width, y1 = a.y + a.height * sourcePort / (outgoing.get(edge.source)!.length + 1);
-    const x2 = b.x, y2 = b.y + b.height * targetPort / (targetCounts.get(edge.target)! + 1);
-    const mid = (x1 + x2) / 2;
+    const x1 = a.x + a.width * sourcePort / (outgoing.get(edge.source)!.length + 1), y1 = a.y + a.height;
+    const x2 = b.x + b.width * targetPort / (targetCounts.get(edge.target)! + 1), y2 = b.y;
+    const mid = (y1 + y2) / 2;
     const title = escape(`${edge.kind}: ${JSON.stringify(edge.path)}`);
-    return `<path d="M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}" fill="none" stroke="${edge.kind === 'input' ? '#64748b' : '#9333ea'}" stroke-width="2"${edge.kind === 'input' ? '' : ' stroke-dasharray="6 4"'} marker-end="url(#arrow)"><title>${title}</title></path>`;
+    return `<path d="M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}" fill="none" stroke="${edge.kind === 'input' ? '#64748b' : '#9333ea'}" stroke-width="2"${edge.kind === 'input' ? '' : ' stroke-dasharray="6 4"'} marker-end="url(#arrow)"><title>${title}</title></path>`;
   }).join('\n');
   const nodes = graph.nodes.map(node => {
     const box = boxes.get(node.id)!;
@@ -87,11 +97,21 @@ function svg(graph: DataflowGraph): string {
 </svg>\n`;
 }
 
-/** Build an inspectable graph with an SVG file writer.
+async function writeOutput(path: string, content: string): Promise<string> {
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  const { dirname } = await import('node:path');
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content, 'utf8');
+  return path;
+}
+
+/** Build an inspectable graph with SVG and Mermaid Markdown file writers.
  * @example
  * ```ts
  * await dataflow(query.ir).viz(); // graph.svg in the working directory
  * await dataflow(query.ir).viz('debug/offers.svg');
+ * await dataflow(query.ir).mermaid(); // graph.md
+ * await dataflow(query.ir).mermaid('debug/offers.md');
  * ```
  */
 export function dataflow(ir: Rel): Dataflow {
@@ -99,12 +119,10 @@ export function dataflow(ir: Rel): Dataflow {
   return {
     ...graph,
     async viz(path = 'graph.svg') {
-      const image = svg(graph);
-      const { mkdir, writeFile } = await import('node:fs/promises');
-      const { dirname } = await import('node:path');
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, image, 'utf8');
-      return path;
+      return writeOutput(path, svg(graph));
+    },
+    async mermaid(path = 'graph.md') {
+      return writeOutput(path, mermaidMarkdown(graph));
     },
   };
 }

@@ -6,6 +6,9 @@ const source = from(table('graph_types', { id: col.UInt64 }, { engine: 'Memory',
 const inspector = dataflow(source.ir);
 expectTypeOf(inspector).toEqualTypeOf<Dataflow>();
 expectTypeOf(inspector.viz()).toEqualTypeOf<Promise<string>>();
+expectTypeOf(inspector.mermaid()).toEqualTypeOf<Promise<string>>();
+// @ts-expect-error output path must be a string
+inspector.mermaid(123);
 // @ts-expect-error output path must be a string
 inspector.viz(123);
 const graph = toDataflowGraph(source.ir);

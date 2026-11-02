@@ -26,18 +26,28 @@ const query = from(offers)
 const graph = dataflow(query.ir);
 await graph.viz(); // graph.svg in the working directory
 await graph.viz('debug/offers.svg'); // custom path
+await graph.mermaid(); // graph.md in the working directory
+await graph.mermaid('debug/offers.md');
 console.table(graph.nodes);
 console.table(graph.edges);
 console.log(JSON.stringify(graph, null, 2));
 ```
 
-`viz()` is asynchronous and requires Node.js. It writes a self-contained SVG,
-creates missing parent directories, and replaces an existing file at the chosen
-path. No Graphviz installation is needed. Operators flow left to right; dashed
-purple edges indicate subqueries. Hover an edge to inspect its IR path. Rendering
-does not execute the query. Nodes show up to five attributes with an overflow
-count; limits show only their label (such as `Limit 20`), and filters show their
-condition.
+Both writers are asynchronous and require Node.js. They create missing parent
+directories and replace an existing file at the chosen path. Both diagrams flow
+**top to bottom**, from producers to consumers, and neither executes the query.
+
+`viz()` writes a self-contained SVG without Graphviz. Dashed purple edges indicate
+subqueries; hover an edge to inspect its IR path.
+
+`mermaid()` writes Markdown containing a fenced `mermaid` block with `flowchart TD`.
+Preview it on GitHub or with a Mermaid-capable Markdown viewer, such as an enabled
+VS Code extension. No Mermaid installation is needed to generate the file. Edges
+are labelled with their kind and IR path; subquery edges are dashed.
+
+Both formats show up to five attributes with an overflow count. Limits show only
+their label (such as `Limit 20`), filters show their condition, and sorts show their
+keys, directions and null ordering.
 
 `toDataflowGraph(ir)` remains available for plain graph data without the writer.
 
