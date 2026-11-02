@@ -120,6 +120,6 @@ it('shares compilation/decoders with run and uses identical transport settings',
     expect(compile).toHaveBeenCalledTimes(1);
     expect(warn).not.toHaveBeenCalled();
     expect(driver.query.mock.calls[0]).toEqual(driver.query.mock.calls[1]);
-    expect(driver.query.mock.calls[0]![0]).toMatchObject({ format: 'JSONEachRow', query_params: {}, clickhouse_settings: { param_p0: '[1,2]', date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1 } });
+    expect(driver.query.mock.calls[0]![0]).toMatchObject({ format: 'JSONEachRow', query_params: {}, clickhouse_settings: { param_p0: '[1,2]', date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1, output_format_json_quote_decimals: 1 } });
   } finally { warn.mockRestore(); compile.mockRestore(); }
 });
