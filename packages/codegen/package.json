@@ -2,6 +2,9 @@
   "name": "@typedhouse/codegen",
   "version": "0.1.0",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": { "typedhouse": "./dist/cli.js" },
   "files": [
     "dist"

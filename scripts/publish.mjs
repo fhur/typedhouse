@@ -61,6 +61,36 @@ function publishedVersions(name) {
   const parsed = JSON.parse(r.stdout || '[]');
   return Array.isArray(parsed) ? parsed : [parsed];
 }
+// Tarball policy: an allowlist of paths plus content checks. `files: ["dist"]` in each
+// package.json is the first line of defence; this re-checks the packed artifact itself.
+const ALLOWED = [/^package\/package\.json$/, /^package\/(README|LICENSE|LICENCE)(\.md|\.txt)?$/i, /^package\/dist\/[\w.-]+\.(js|d\.ts)$/];
+const MAX_UNPACKED_BYTES = 2 * 1024 * 1024;
+const LIFECYCLE = ['preinstall', 'install', 'postinstall', 'prepare', 'preprepare', 'postprepare', 'prepublish', 'prepublishOnly', 'prepack', 'postpack', 'publish', 'postpublish'];
+const SECRETS = [
+  [/npm_[A-Za-z0-9]{36}/, 'npm token'], [/gh[pousr]_[A-Za-z0-9]{36,}/, 'GitHub token'], [/AKIA[0-9A-Z]{16}/, 'AWS access key'],
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, 'private key'], [/_authToken\s*=/, 'npm auth token'], [/xox[baprs]-[A-Za-z0-9-]{10,}/, 'Slack token'],
+  [/(?:^|[\s"'=:(])\/(?:home|Users)\/[^\s"'/]+\//, 'absolute local path'], [/sourceMappingURL=/, 'source map reference'],
+];
+function inspectTarball(name, file) {
+  const listing = out('tar', ['-tzvf', file]).split('\n').map(line => line.trim().split(/\s+/));
+  let unpacked = 0;
+  for (const cols of listing) {
+    const path = cols.at(-1);
+    if (!ALLOWED.some(r => r.test(path))) throw new Error(`${name} tarball contains a disallowed path: ${path}`);
+    unpacked += Number(cols[2]) || 0;
+  }
+  if (unpacked > MAX_UNPACKED_BYTES) throw new Error(`${name} tarball unpacks to ${unpacked} bytes (limit ${MAX_UNPACKED_BYTES})`);
+  for (const cols of listing) {
+    const path = cols.at(-1);
+    const text = execFileSync('tar', ['-xzOf', file, path], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    for (const [pattern, label] of SECRETS) if (pattern.test(text)) throw new Error(`${name} tarball ${path} matches the ${label} pattern`);
+  }
+  const manifest = JSON.parse(out('tar', ['-xzOf', file, 'package/package.json']));
+  const hooks = LIFECYCLE.filter(h => manifest.scripts?.[h]);
+  if (hooks.length) throw new Error(`${name} manifest declares lifecycle scripts: ${hooks.join(', ')}`);
+  if (manifest.publishConfig?.access !== 'public') throw new Error(`${name} manifest lacks publishConfig.access "public"`);
+  return { manifest, files: listing.map(c => c.at(-1)), unpacked };
+}
 function patch(v) { return Number(VERSION.exec(v)?.[1] ?? -1); }
 
 // 1. Preflight: a release is cut only from an up-to-date, clean master.
@@ -70,6 +100,25 @@ if (branch !== 'master' && !dryRun) fail(`must run on master (current branch: ${
 if (out('git', ['status', '--porcelain'])) fail('working tree is not clean; commit or remove changes first.');
 out('git', ['fetch', '--quiet', '--tags', 'origin']);
 if (!dryRun && out('git', ['rev-parse', 'HEAD']) !== out('git', ['rev-parse', 'origin/master'])) fail('HEAD does not match origin/master; pull or push first.');
+for (const f of out('git', ['ls-files']).split('\n').filter(f => /(^|\/)\.npmrc$/.test(f))) {
+  if (/_auth|_password|\/\/[^\s]*:_/.test(readFileSync(join(root, f), 'utf8'))) fail(`tracked ${f} contains credentials; remove them and rotate the token.`);
+}
+log('Auditing the published packages\' production dependencies (high and critical fail the release)');
+{
+  // pnpm audit covers the whole workspace; keep only advisories reachable from a published package
+  // (path prefix `packages__<dir>`), so the private docs app cannot block or mask a release.
+  const r = spawnSync('pnpm', ['audit', '--prod', '--json'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  let report;
+  try { report = JSON.parse(r.stdout); } catch { fail(`pnpm audit did not return JSON (exit ${r.status}):\n${r.stderr}`); }
+  const importers = order.map(p => `packages__${p.dir.split(/[\\/]/).at(-1)}`);
+  const hits = Object.values(report.advisories ?? {}).flatMap(a => (a.findings ?? []).flatMap(f => f.paths)
+    .filter(path => importers.some(i => path === i || path.startsWith(`${i}>`)))
+    .map(path => ({ severity: a.severity, module: a.module_name, url: a.url, path })));
+  for (const h of hits) console.log(`${h.severity.padEnd(8)} ${h.module} via ${h.path} ${h.url ?? ''}`);
+  const blocking = hits.filter(h => h.severity === 'high' || h.severity === 'critical');
+  if (blocking.length) fail(`${blocking.length} high/critical advisories affect published packages.`);
+  console.log(hits.length ? `${hits.length} low/moderate advisories in published dependencies (not blocking).` : 'No advisories in published dependencies.');
+}
 if (!dryRun) {
   const who = spawnSync('npm', ['whoami'], { cwd: root, encoding: 'utf8' });
   if (who.status !== 0) fail('not logged in to npm; run `npm login` first.');
@@ -120,15 +169,14 @@ try {
       const [tgz] = readdirSync(dest).filter(f => f.endsWith('.tgz'));
       if (!tgz) throw new Error(`pnpm pack produced no tarball for ${p.json.name}`);
       const file = join(dest, tgz);
-      const manifest = JSON.parse(out('tar', ['-xzOf', file, 'package/package.json']));
+      const { manifest, files, unpacked } = inspectTarball(p.json.name, file);
       if (manifest.version !== version) throw new Error(`${p.json.name} tarball has version ${manifest.version}`);
       for (const [dep, range] of Object.entries(manifest.dependencies ?? {})) {
         if (String(range).startsWith('workspace:')) throw new Error(`${p.json.name} tarball still depends on ${dep}@${range}`);
         if (names.includes(dep) && range !== version) throw new Error(`${p.json.name} depends on ${dep}@${range}, expected ${version}`);
       }
-      const files = out('tar', ['-tzf', file]).split('\n');
       if (!files.some(f => f.startsWith('package/dist/'))) throw new Error(`${p.json.name} tarball has no dist/ files`);
-      console.log(`${p.json.name}@${version}: ${files.length} files, deps ${JSON.stringify(manifest.dependencies ?? {})}`);
+      console.log(`${p.json.name}@${version}: ${files.length} files, ${unpacked} bytes, deps ${JSON.stringify(manifest.dependencies ?? {})}`);
       tarballs.set(p.json.name, file);
     }
 

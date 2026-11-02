@@ -2,6 +2,9 @@
   "name": "@typedhouse/client",
   "version": "0.1.0",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist"
   ],
