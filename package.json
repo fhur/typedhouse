@@ -24,6 +24,7 @@
     "verify:core-package": "node scripts/verify-core-package.mjs",
     "test:codegen-integration": "vitest run --config vitest.codegen.config.ts",
     "verify:codegen-package": "node scripts/verify-codegen-package.mjs",
+    "check:publish": "node scripts/publish.mjs",
     "check:all": "node scripts/test-testcontainers-port-patch.mjs && node scripts/smoke-testcontainers-port-patch.mjs && pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm verify:query-package && pnpm verify:expr-surface && pnpm test:codegen-integration && pnpm verify:codegen-package && pnpm verify:fixture-seed && pnpm test:compiler-integration"
   },
   "devDependencies": {
