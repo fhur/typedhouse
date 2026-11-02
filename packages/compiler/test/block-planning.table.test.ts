@@ -43,6 +43,46 @@ const fallibleRows = (['inner', 'left', 'right', 'full'] as const).flatMap(kind 
     { name: `4d ${kind}: two total filters over a join whose inputs are total share WHERE`, build: () => twice(totalInput), blocks: [['Filter', 'Filter', 'Join']] },
   ];
 });
+// Slice 4f: descriptor-invisible columns. `h` and `hb` declare shadow-only `hiddenColumns` (ALIAS/MATERIALIZED columns the
+// descriptor omits); every alias guard counts them as physical columns. `t`/`u` are the same shapes without the option.
+const h = from(table('h', { id: col.UInt64, k: col.String, ids: col.Array(col.String) }, { ...meta, hiddenColumns: ['hid', 'mat'] }));
+const hb = from(table('hb', { id: col.UInt64, v: col.UInt64 }, { ...meta, hiddenColumns: ['hid'] }));
+const hiddenJoins = {
+  inner: () => join({ a: t, b: hb }).on(r => r.a.id.eq(r.b.id)),
+  left: () => leftJoin({ a: t }, { b: hb }).on(r => r.a.id.eq(r.b.id)),
+  right: () => rightJoin({ a: t }, { b: hb }).on(r => r.a.id.eq(r.b.id)),
+  full: () => fullJoin({ a: t }, { b: hb }).on(r => r.a.id.eq(r.b.id)),
+} as const;
+const hiddenRows = [
+  { name: '4f: scan aggregate alias equal to a hidden column (hid = count(), HAVING hid) keeps its scope', build: () => h.groupBy(r => ({ id: r.id })).aggregate(() => ({ hid: count() })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['Scan']] },
+  { name: '4f: the same aggregate over a descriptor without hiddenColumns folds (behaviour unchanged)', build: () => t.groupBy(r => ({ id: r.id })).aggregate(() => ({ hid: count() })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter', 'Aggregate', 'Scan']] },
+  { name: '4f: scan aggregate alias equal to a hidden column with no clause is fenced like a declared column', build: () => h.groupBy(r => ({ id: r.id })).aggregate(() => ({ mat: count() })).ir, blocks: [['Aggregate'], ['Scan']] },
+  { name: '4f: non-colliding aggregate over a hidden-column table folds', build: () => h.groupBy(r => ({ id: r.id })).aggregate(() => ({ n: count() })).where(r => r.n.gt(1n)).ir, blocks: [['Filter', 'Aggregate', 'Scan']] },
+  { name: '4f: aggregate over a filtered hidden-column scan (mat, ORDER BY mat) keeps its scope', build: () => h.where(safe).groupBy(r => ({ id: r.id })).aggregate(() => ({ mat: count() })).orderBy(r => r.mat).ir, blocks: [['Sort'], ['Aggregate'], ['Filter', 'Scan']] },
+  { name: '4f: aggregate over an expanded hidden-column scan (hid, HAVING hid) keeps its scope', build: () => h.arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ hid: count() })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['ArrayJoin', 'Scan']] },
+  { name: '4f: aggregate over a CTE of a hidden-column scan folds onto the CTE (the CTE exposes only its select list)', build: () => h.cte().groupBy(r => ({ id: r.id })).aggregate(() => ({ hid: count() })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter', 'Aggregate', 'CTE']] },
+  { name: '4f: computed selection alias equal to a hidden column that nothing else reads folds', build: () => h.where(safe).map(r => ({ hid: r.id.plus(1n), k: r.k })).ir, blocks: [['Project', 'Filter', 'Scan']] },
+  // 4f fix round 1 (Tester D1/D2): an identity selection is a transparent block, so the Aggregate folds onto the bare table
+  // and every name the table resolves (declared output and hiddenColumns) is a source name, whatever the selection keeps.
+  { name: '4f fix 1: map(identity) then aggregate alias = hidden column (HAVING) keeps its scope', build: () => h.map(r => ({ id: r.id, k: r.k })).groupBy(r => ({ id: r.id })).aggregate(() => ({ hid: count() })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['Project', 'Scan']] },
+  { name: '4f fix 1: where then map(identity) then aggregate alias = hidden column keeps its scope', build: () => h.where(safe).map(r => ({ id: r.id, k: r.k })).groupBy(r => ({ id: r.id })).aggregate(() => ({ hid: count() })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['Project', 'Filter', 'Scan']] },
+  { name: '4f fix 1: map(identity) then where then aggregate alias = hidden column keeps its scope', build: () => h.map(r => ({ id: r.id, k: r.k })).where(r => r.k.ne('z')).groupBy(r => ({ id: r.id })).aggregate(() => ({ hid: count() })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['Filter', 'Project', 'Scan']] },
+  { name: '4f fix 1: map(identity) then aggregate alias = hidden column (ORDER BY) keeps its scope', build: () => h.map(r => ({ id: r.id, k: r.k })).groupBy(r => ({ id: r.id })).aggregate(() => ({ mat: count() })).orderBy(r => r.mat).ir, blocks: [['Sort'], ['Aggregate'], ['Project', 'Scan']] },
+  { name: '4f fix 1: map(identity) then arrayJoin then aggregate alias = hidden column keeps its scope', build: () => h.map(r => ({ id: r.id, ids: r.ids })).arrayJoin(r => r.ids, 'x').groupBy(r => ({ id: r.id })).aggregate(() => ({ hid: count() })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['ArrayJoin', 'Project', 'Scan']] },
+  { name: '4f fix 1 (D2): map(identity) dropping a declared column, aggregate alias = that column (HAVING) keeps its scope', build: () => t.map(r => ({ id: r.id, k: r.k })).groupBy(r => ({ id: r.id })).aggregate(() => ({ ids: count() })).where(r => r.ids.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['Project', 'Scan']] },
+  { name: '4f fix 1 (D2): where, map(identity) dropping a declared column, ORDER BY that alias keeps its scope', build: () => t.where(safe).map(r => ({ id: r.id })).groupBy(r => ({ id: r.id })).aggregate(() => ({ k: count() })).orderBy(r => r.k).ir, blocks: [['Sort'], ['Aggregate'], ['Project', 'Filter', 'Scan']] },
+  { name: '4f fix 1: map(identity) then a non-colliding aggregate still folds', build: () => h.map(r => ({ id: r.id, k: r.k })).groupBy(r => ({ id: r.id })).aggregate(() => ({ n: count() })).where(r => r.n.gt(1n)).ir, blocks: [['Filter', 'Aggregate', 'Project', 'Scan']] },
+  { name: '4f fix 1: a computed selection under the aggregate stays a derived table (only its outputs are source names)', build: () => t.map(r => ({ id: r.id.plus(1n) })).groupBy(r => ({ id: r.id })).aggregate(() => ({ ids: count() })).where(r => r.ids.gt(1n)).ir, blocks: [['Filter', 'Aggregate'], ['Project', 'Scan']] },
+  ...(['inner', 'left', 'right', 'full'] as const).flatMap(kind => {
+    const hj = hiddenJoins[kind] as () => ReturnType<typeof hiddenJoins.inner>;
+    const j = joins[kind] as () => ReturnType<typeof joins.inner>;
+    return [
+      { name: `4f ${kind}: aggregate alias equal to a side's hidden column (hid = count(), HAVING hid) keeps the aggregate off the join block`, build: () => hj().groupBy(r => ({ key: r.a.id })).aggregate(g => ({ hid: count(), m: max(g.b.v) })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter', 'Aggregate'], ['Join']] },
+      { name: `4f ${kind}: key alias equal to a side's hidden column (hid = a.k, ORDER BY hid) keeps the aggregate off the join block`, build: () => hj().groupBy(r => ({ hid: r.a.k })).aggregate(() => ({ c: count() })).orderBy(r => r.hid).ir, blocks: [['Sort', 'Aggregate'], ['Join']] },
+      { name: `4f ${kind}: the same aggregate over sides without hiddenColumns folds (behaviour unchanged)`, build: () => j().groupBy(r => ({ key: r.a.id })).aggregate(g => ({ hid: count(), m: max(g.b.v) })).where(r => r.hid.gt(1n)).ir, blocks: [['Filter', 'Aggregate', 'Join']] },
+    ];
+  }),
+];
 const fenced = [['Filter', 'Aggregate'], ['Join']], sortedFence = [['Sort', 'Aggregate'], ['Join']];
 const aliasRows = (['inner', 'left', 'right', 'full'] as const).flatMap(kind => {
   const j = joins[kind] as () => ReturnType<typeof joins.inner>;
@@ -182,6 +222,7 @@ const rows: { readonly name: string; readonly build: () => Rel; readonly blocks:
   { name: 'distinct over a join block folds', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).map(r => ({ id: r.a.id })).distinct().ir, blocks: [['Distinct', 'Project', 'Join']] },
   { name: 'union always opens a block', build: () => unionAll(t, t).where(safe).ir, blocks: [['Filter'], ['Union']] },
   ...aliasRows,
+  ...hiddenRows,
   ...fallibleRows,
   { name: '4d: two total filters over a fallible ARRAY JOIN expansion keep apart', build: () => t.arrayJoin(r => known.array(cast(r.k, col.UInt64)).as(col.Array(col.UInt64)), 'x').where(r => r.x.gt(0n)).where(safe).ir, blocks: [['Filter'], ['Filter', 'ArrayJoin', 'Scan']] },
   { name: '4d: two total filters over a total ARRAY JOIN expansion share WHERE', build: () => t.arrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).where(safe).ir, blocks: [['Filter', 'Filter', 'ArrayJoin', 'Scan']] },

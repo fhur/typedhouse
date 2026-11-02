@@ -14,11 +14,13 @@ try {
   for (const name of ['core', 'codegen']) symlinkSync(resolve(`packages/${name}`), join(directory, `node_modules/@typedhouse/${name}`), 'dir');
   writeFileSync(join(directory, 'package.json'), JSON.stringify({ type: 'module' }));
   for (const name of ['schema.ts', 'functions.ts']) copyFileSync(resolve('packages/codegen/test/snapshots', name), join(directory, name));
+  copyFileSync(resolve('packages/codegen/test/snapshots/schema.skip-alias.ts'), join(directory, 'skipped.ts')); // slice 4f
   const types = ['Nothing', 'Bool', 'UUID', 'IPv4', 'IPv6', 'JSON', 'Date', 'Date32', "DateTime('UTC')", 'DateTime64(9)', 'Decimal256(10)', "Enum16('__proto__' = 1, '42' = 2)", 'LowCardinality(String)', 'Map(UInt64, String)', 'Tuple(`__proto__` String, `a-b` UInt64)', 'Variant(String, UInt64)', 'Dynamic', 'Future(7)', 'AggregateFunction(sum, UInt64)', 'SimpleAggregateFunction(sum, UInt64)', 'Tuple()', 'FixedString(2)', 'Tuple(`42` String, `0` UInt64, z UInt8)', 'Array(Tuple(`42` String, `0` UInt64, z UInt8))'];
   writeFileSync(join(directory, 'hostile.ts'), renderSchema({ tables: [{ name: '__proto__', engine: 'Memory', sortingKey: [], partitionKey: [], primaryKey: [], columns: types.map((type, i) => ({ name: i === 0 ? '__proto__' : `c${i}`, type: parseCHType(type), position: i + 1, defaultKind: '', comment: '*/\n" Unicode é' })) }], functions: [] }));
   writeFileSync(join(directory, 'consumer.ts'), `
 import { db, type ComponentRow, type PartRow, type ComponentIndicesRow } from './schema.js';
 import { db as hostile } from './hostile.js';
+import { db as skipped } from './skipped.js';
 import { functions, fn, agg } from './functions.js';
 import { col, from, type Infer, type Decimal, type AggregateState, type ExprValue } from '@typedhouse/core';
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
@@ -45,6 +47,14 @@ const unknownValue: Equal<ExprValue<typeof unknown>, unknown> = true;
 const zeroName: Equal<typeof unknown.name, 'version'> = true;
 void [knownRow, knownAggregateRow, unknownValue, zeroName];
 const sum: true = functions.sum.isAggregate;
+// Slice 4f: a --skip-alias descriptor declares alias_id as shadow-only hiddenColumns: never a row field or selectable.
+type Skipped = Infer<typeof skipped.coverage>;
+const hiddenNotRow: Equal<'alias_id' extends keyof Skipped ? true : false, false> = true;
+const materializedRow: Equal<Skipped['materialized_id'], number> = true;
+const sameOtherwise: Equal<Omit<Coverage, 'alias_id'>, Skipped> = true;
+// @ts-expect-error alias_id is hidden: not a field of the typed row
+from(skipped.coverage).map(r => ({ x: r.alias_id }));
+void [hiddenNotRow, materializedRow, sameOtherwise];
 void [component, part, indices, precision, decimal, dotted, enumNames, aggregate, orderedTuple, nestedOrderedTuple, sum];
 `);
   writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, outDir: 'output', types: [] }, include: ['*.ts'] }));
@@ -64,6 +74,11 @@ assert.equal(Object.hasOwn(hostile, '__proto__'), true);
 assert.equal(Object.hasOwn(db.entity_ots_component, 'source'), false);
 assert.equal(Object.isFrozen(db.entity_ots_component.columns), true);
 assert.equal(functions.sum.isAggregate, true);
+const { db: skippedDb } = await import('./output/skipped.js');
+assert.deepEqual(skippedDb.coverage.hiddenColumns, ['alias_id']);
+assert.equal(Object.isFrozen(skippedDb.coverage.hiddenColumns), true);
+assert.equal(Object.hasOwn(skippedDb.coverage.columns, 'alias_id'), false);
+assert.equal(Object.hasOwn(db.coverage, 'hiddenColumns'), false);
 assert.equal(typeof fn.cityHash64, 'function');
 assert.equal(typeof agg.uniqExact, 'function');
 assert.equal(Object.hasOwn(fn, 'uniqExact'), false);

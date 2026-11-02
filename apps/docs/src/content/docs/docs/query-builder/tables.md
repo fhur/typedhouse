@@ -62,4 +62,10 @@ Parameters:
 
 <!-- generated-sql:end -->
 
+## Columns the descriptor leaves out
+
+A descriptor must list every column ClickHouse can resolve by name in a `SELECT` over the table, including `ALIAS` and `MATERIALIZED` columns, or name the ones it omits in the metadata option `hiddenColumns`, for example `{ engine: 'MergeTree', sortingKey: ['id'], partitionKey: [], hiddenColumns: ['tenantHash'] }` for a table with `tenantHash UInt64 ALIAS cityHash64(tenant)`.
+
+Hidden names are never row fields and are never selected. The compiler uses them only to keep an output alias with the same name in its own scope: with `prefer_column_name_to_alias = 1`, `count() AS tenantHash … HAVING tenantHash > 1` would otherwise bind the table column. `typedhouse generate --skip-alias` writes skipped `ALIAS` columns here, and `typedhouse check` warns about live columns a generated descriptor neither declares nor hides.
+
 Callbacks on this query receive typed expression proxies, not actual rows. Building and compiling a query does not connect to ClickHouse. To refresh descriptors from a real database, see [getting started](/docs/getting-started/#refresh-your-schema).

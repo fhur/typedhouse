@@ -1,7 +1,7 @@
-# testcontainers 10.28.0: Docker Desktop for Mac dynamic TCP ports
+# testcontainers 12.2.1: Docker Desktop for Mac dynamic TCP ports
 
 This is a pnpm-managed patch of the published JavaScript, not an ad-hoc
-`node_modules` edit. The root dependency is pinned to **10.28.0**;
+`node_modules` edit. The root dependency is pinned to **12.2.1**;
 `pnpm-workspace.yaml` registers the patch and `pnpm-lock.yaml` records its hash.
 `pnpm install --frozen-lockfile` installs the patched artifact without an upgrade.
 
@@ -15,7 +15,10 @@ limits cannot fix that allocation failure. The historical inspect payload was
 not retained, so the empty binding array remains inferred, not directly observed.
 
 [Upstream PR #1602](https://github.com/testcontainers/testcontainers-node/pull/1602)
-was open at review, head `764fda89f277db78e9ce6cae6678ff3176092b75`.
+was open at review, head `764fda89f277db78e9ce6cae6678ff3176092b75`, and is
+still open (same head, unmerged) when this patch was re-created for 12.2.1 on
+2026-11-02. 12.2.1's `GenericContainer.withExposedPorts` still requests
+`HostPort: "0"` for every dynamic port, so upstream has not fixed this.
 Its full diff changes all host-side non-UDP allocations, using `/.dockerenv`
 as its only environment guard. We deliberately do **not** adopt that broad scope.
 The [Docker explanation](https://github.com/docker/for-mac/issues/5588#issuecomment-934600089)
@@ -28,8 +31,10 @@ Our patch acts after runtime discovery, before creation (including Ryuk):
   **Docker Desktop**, resolved host must be localhost/127.0.0.1/::1, and
   `/.dockerenv` must be absent.
 - Only numeric dynamic port declarations whose current binding is `"0"` become
-  `""`. 10.28.0's public port API supports numbers or `{ container, host }`,
-  not the newer upstream protocol API; numeric declarations mean TCP.
+  `""`. 12.x also accepts `"N"`/`"N/tcp"`/`"N/udp"` strings and
+  `{ container, host?, protocol? }` objects and keys bindings as `"N/proto"`;
+  numeric declarations mean TCP, and string/object declarations are untouched.
+  The last declaration for each `"N/proto"` binding decides.
 - Explicit bindings, including explicit `host: 0`, retain their exact behavior.
   Repeated declarations still use the last binding.
 - Linux (including Linux Desktop and container execution), Windows, other
@@ -45,6 +50,12 @@ sleep. The published source map is unchanged; the executable JS is patched.
 Reassess/remove the patch when upgrading testcontainers after reviewing the
 upstream fix; do not silently move this patch to another version.
 
+History: first written against 10.28.0. Re-created (same guards and placement,
+before image pull, Ryuk and reuse) for 12.2.1 when upgrading to clear dev-only
+`undici`/`@fastify/busboy`/`uuid` advisories. 12.x differences handled: bindings
+are keyed `"N/tcp"`, `node:fs` was already imported, and the Ryuk image is read
+lazily via `getReaperImage()` (was `REAPER_IMAGE`).
+
 ## Focused verification (not full matrix acceptance)
 
 ```sh
@@ -59,8 +70,8 @@ node scripts/test-smoke-testcontainers-repeat.mjs
 The 22 unit cases execute the **installed** GenericContainer implementation with
 mocked runtime discovery and capture its actual create options. They cover Mac
 Desktop loopback forms, Linux, Windows, non-Desktop/missing identity, remote
-hosts, container markers, explicit bindings and overwrite order, for both
-ClickHouse and Ryuk images. They do not contact Docker.
+hosts, container markers, explicit bindings, overwrite order and 12.x
+string/UDP declarations (never rewritten), for both ClickHouse and Ryuk images. They do not contact Docker.
 
 The smoke runs in a fresh process. Until its own Ryuk is created, a process-local
 list wrapper excludes only running, unlabelled-for-test Ryuks from no-argument

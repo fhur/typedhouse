@@ -6,7 +6,9 @@ import { GenericContainer, Wait } from 'testcontainers';
 
 const require = createRequire(import.meta.url);
 const { getContainerRuntimeClient } = require('testcontainers/build/container-runtime');
-const { REAPER_IMAGE } = require('testcontainers/build/reaper/reaper');
+const { getReaperImage } = require('testcontainers/build/reaper/reaper');
+// RYUK_CONTAINER_IMAGE must be unset (assertSmokeEnvironment), so this is the default image.
+const REAPER_IMAGE = getReaperImage();
 
 export function expectedDynamicPort(platform, runtime, inContainer) {
   return platform === 'darwin' && runtime.operatingSystem === 'Docker Desktop' &&
@@ -69,7 +71,7 @@ export async function smoke() {
     for (const { container, options } of owned) {
       const port = options.Image === REAPER_IMAGE ? 8080 : 8123;
       if (options.Image === REAPER_IMAGE) assert.equal(options.Labels.TESTCONTAINERS_RYUK_TEST_LABEL, 'true');
-      assert.equal(options.HostConfig.PortBindings[port][0].HostPort, expected);
+      assert.equal(options.HostConfig.PortBindings[`${port}/tcp`][0].HostPort, expected);
       const inspect = await client.container.inspect(container);
       assert.ok(Number(inspect.NetworkSettings.Ports[`${port}/tcp`][0].HostPort) > 0);
       console.log(JSON.stringify({ id: container.id, image: options.Image,

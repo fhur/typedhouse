@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.11.0",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": "^22.22.0 || ^24.11.0 || >=26.0.0"
+  },
   "nx": { "includedScripts": [] },
   "scripts": {
     "count:typescript": "node scripts/count-package-typescript.mjs",
@@ -26,6 +28,7 @@
     "verify:core-package": "node scripts/verify-core-package.mjs",
     "test:codegen-integration": "vitest run --config vitest.codegen.config.ts",
     "verify:codegen-package": "node scripts/verify-codegen-package.mjs",
+    "check:publish": "node scripts/publish.mjs",
     "check:all": "nx run chql-checks:check-all --outputStyle=static",
     "check:all:uncached-baseline": "node scripts/test-testcontainers-port-patch.mjs && node scripts/smoke-testcontainers-port-patch.mjs && pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm verify:query-package && pnpm verify:expr-surface && pnpm test:codegen-integration && pnpm verify:codegen-package && pnpm verify:fixture-seed && pnpm test:compiler-integration"
   },
@@ -34,9 +37,10 @@
     "expect-type": "^1.2.1",
     "fast-check": "^4.1.1",
     "nx": "^24.0.2",
-    "testcontainers": "10.28.0",
-    "tsup": "^8.4.0",
+    "testcontainers": "12.2.1",
+    "tsup": "^9.0.0",
     "typescript": "^5.8.3",
-    "vitest": "^3.1.3"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   }
 }

@@ -111,3 +111,25 @@ it.each([
   ['AggregateFunction(sum, UInt64)', 'col.AggregateFunction("sum", col.UInt64)'],
   ['SimpleAggregateFunction(sum, UInt64)', 'col.SimpleAggregateFunction("sum", col.UInt64)'],
 ])('renders %s', (type, result) => expect(renderColumn(parseCHType(type))).toBe(result));
+
+// Slice 4f: skipped ALIAS columns become shadow-only `hiddenColumns`; `check` reads declared + hidden names back.
+it('renders hiddenColumns only when columns were skipped, and declaredColumns reads every table back exactly', async () => {
+  const { declaredColumns, undeclaredColumns } = await import('../src/check.js');
+  const hostile = ['__proto__', 'odd\n*/"', 'hiddenColumns: ["x"]', '}, {', 'a]b', 'id'];
+  const t = (name: string, columns: string[], hiddenColumns?: string[]): DatabaseSchema['tables'][number] => ({ name, engine: 'MergeTree', sortingKey: ['hiddenColumns: ["k"]'], partitionKey: [], primaryKey: [], columns: columns.map((c, i) => ({ name: c, type: parseCHType('UInt8'), position: i + 1, defaultKind: '', comment: 'hiddenColumns: ["c"]' })), ...(hiddenColumns ? { hiddenColumns } : {}) });
+  const without = renderSchema({ tables: [t('plain', ['id', 'v'])], functions: [] });
+  expect(without).not.toContain(', hiddenColumns: [');
+  expect(renderSchema({ tables: [t('plain', ['id', 'v'], [])], functions: [] })).toBe(without); // empty list = no option
+  const schema: DatabaseSchema = { tables: [t('plain', ['id', 'v']), t('skipped', ['id'], ['hidden', 'x y']), t('hostile "name"', hostile, ['hiddenColumns', '"q"'])], functions: [] };
+  const text = renderSchema(schema);
+  expect(text).toContain('primaryKey: [], hiddenColumns: ["hidden","x y"], columnMetadata:');
+  expect(Object.fromEntries([...declaredColumns(text)].map(([k, v]) => [k, [...v]]))).toEqual({
+    'hostile "name"': [...hostile, 'hiddenColumns', '"q"'], plain: ['id', 'v'], skipped: ['id', 'hidden', 'x y'],
+  });
+  expect(undeclaredColumns(schema, text)).toEqual([]);
+  // A descriptor rendered before the column existed (or without hiding it) is reported, table by table.
+  const older = renderSchema({ tables: [t('plain', ['id']), t('skipped', ['id'])], functions: [] });
+  expect(undeclaredColumns(schema, older)).toEqual([{ table: 'plain', columns: ['v'] }, { table: 'skipped', columns: ['hidden', 'x y'] }]);
+  // Tables absent from the file are not reported (the stale check already fails for them).
+  expect(undeclaredColumns(schema, '')).toEqual([]);
+});

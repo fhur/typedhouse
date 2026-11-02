@@ -9,7 +9,7 @@ import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { createClickHouseBackend, QueryError } from '../src/index.js';
 import { rowDecoder } from '../src/decode.js';
 import { collect, keys } from './backend-harness.js';
-import { prefetchedCheck } from './prefetch-check.js';
+import { prefetchedCheck, reportSlowestQuery } from './prefetch-check.js';
 import { build, ddl, inserts, native, recipes, seed, shape, type Recipe } from './outer-join-arbitrary.js';
 import { components, db, forTenant, latest } from '../../compiler/test/fixtures/corpus/low-stock.js';
 let container: StartedTestContainer;
@@ -36,7 +36,7 @@ beforeAll(async () => {
   // The seed matches every acme component; one orphan makes the spec example's NULL stock observable.
   await driver.command({ query: "INSERT INTO entity_ots_component (tenantId, entityId, category, state) VALUES ('acme', 'cmp_orphan', NULL, 'active')" });
 }, 180000);
-afterAll(async () => { for (const backend of backends) await backend.close(); await driver?.close(); await container?.stop(); });
+afterAll(async () => { await reportSlowestQuery(driver, 'outer-join'); for (const backend of backends) await backend.close(); await driver?.close(); await container?.stop(); });
 
 // 4b: `wait_end_of_query = 1` (as the slice 3/3b/4a probes do): a failure after the first streamed block (a FULL
 // join's non-joined rows come last) is otherwise a 200 with partial JSON, not an error with its code.

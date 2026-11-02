@@ -1,0 +1,25 @@
+diff --git a/build/generic-container/generic-container.js b/build/generic-container/generic-container.js
+index 4174d4bc5b78049145107c8b738072036563e01c..ba0f1b4dabbd547ae021c4324cdee2e42e4b456c 100644
+--- a/build/generic-container/generic-container.js
++++ b/build/generic-container/generic-container.js
+@@ -65,6 +65,20 @@ class GenericContainer {
+     async start() {
+         const shouldPull = this.pullPolicy.shouldPull();
+         const client = await (0, container_runtime_1.getContainerRuntimeClient)();
++        // typedhouse: Docker Desktop for Mac must allocate dynamic TCP ports on the host,
++        // not in its Linux VM (testcontainers-node#1602). Keep other runtimes intact.
++        if (process.platform === "darwin" &&
++            client.info.containerRuntime.operatingSystem === "Docker Desktop" &&
++            ["localhost", "127.0.0.1", "::1"].includes(client.info.containerRuntime.host) &&
++            !(0, node_fs_1.existsSync)("/.dockerenv")) {
++            // Last declaration wins, including explicit { container, host: 0 } and "N/tcp" strings.
++            const ports = new Map(this.exposedPorts.map((port) => [`${(0, port_1.getContainerPort)(port)}/${(0, port_1.getProtocol)(port)}`, port]));
++            for (const [binding, port] of ports) {
++                if (typeof port === "number" && this.hostConfig.PortBindings?.[binding]?.[0]?.HostPort === "0") {
++                    this.hostConfig.PortBindings[binding][0].HostPort = "";
++                }
++            }
++        }
+         if (shouldPull === "never") {
+             if (!(await client.image.exists(this.imageName))) {
+                 throw new Error(`Image "${this.imageName.string}" does not exist locally and pull policy is "never"`);

@@ -1,6 +1,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
+import { unified } from '@astrojs/markdown-remark';
 import rehypeBaseLinks from './scripts/rehype-base-links.mjs';
 
 const base = process.env.BASE_PATH || '/';
@@ -9,7 +10,7 @@ export default defineConfig({
   site: process.env.SITE_URL || 'https://fhur.github.io',
   output: 'static',
   base,
-  markdown: { rehypePlugins: [[rehypeBaseLinks, { base }]] },
+  markdown: { processor: unified({ rehypePlugins: [[rehypeBaseLinks, { base }]] }) },
   devToolbar: { enabled: false },
   trailingSlash: 'ignore',
   integrations: [
@@ -27,10 +28,10 @@ export default defineConfig({
             { label: 'Advanced example', slug: 'docs/tutorials/advanced-example' },
           ],
         },
-        { label: 'Query Builder', autogenerate: { directory: 'docs/query-builder' } },
-        { label: 'Functions', autogenerate: { directory: 'docs/functions' } },
-        { label: 'Reference', autogenerate: { directory: 'docs/reference' } },
-        { label: 'Simplifying Compiler', autogenerate: { directory: 'docs/compiler' } },
+        { label: 'Query Builder', items: [{ autogenerate: { directory: 'docs/query-builder' } }] },
+        { label: 'Functions', items: [{ autogenerate: { directory: 'docs/functions' } }] },
+        { label: 'Reference', items: [{ autogenerate: { directory: 'docs/reference' } }] },
+        { label: 'Simplifying Compiler', items: [{ autogenerate: { directory: 'docs/compiler' } }] },
         { label: 'Playground', link: '/playground/' },
         { label: 'Engineering blog', link: '/blog/' },
         { label: 'Agent index', link: '/llms.txt' },

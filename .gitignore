@@ -7,6 +7,8 @@ coverage/
 # Ignore local credentials at every directory depth.
 .env.local
 !.env.example
+# npm credentials belong in ~/.npmrc, never in the repository.
+.npmrc
 .pi/
 .worktrees/
 .nx/

@@ -1,6 +1,6 @@
 # TypedHouse
 
-Type-safe ClickHouse query builder for TypeScript: typed builder → relational IR → rewrite passes → flat ClickHouse SQL, plus codegen and a Node client. ESM-only pnpm workspace, strict TypeScript (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`), Node.js 20+. Not an ORM; no DDL/inserts.
+Type-safe ClickHouse query builder for TypeScript: typed builder → relational IR → rewrite passes → flat ClickHouse SQL, plus codegen and a Node client. ESM-only pnpm workspace, strict TypeScript (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`), Node.js 22.22+ (or 24.11+) to develop; the published packages declare no `engines`. Not an ORM; no DDL/inserts.
 
 ## Structure
 - `packages/core/src/` — dependency-free: `ch-type` parser/printer, table descriptors, `Expr` (methods generated from the catalog into `expr-methods.generated.ts`), `catalog/`, query builder (`query`, `join`, `union`, `subquery`, `ordering`), IR (`ir.ts`), known/user functions.
@@ -22,6 +22,7 @@ Type-safe ClickHouse query builder for TypeScript: typed builder → relational 
 - Expr surface is generated: edit the catalog, then `pnpm generate:expr-surface`; `verify:expr-surface` fails on drift.
 - CI runs `check:all` on TypeScript 5.5.4 and latest via `TYPEDHOUSE_TYPESCRIPT_VERSION`; type snapshots exist per version (5.5.4 / 5.8.3 / 7.0.2). Run the matrix locally when touching types.
 - Type-performance budget: `node scripts/check-type-performance.mjs [--all]` — instantiation ceilings (`test/types/bench/budget.json`) are hard on every host; wall ceilings are advisory on every host class, retaining measurements and reference budgets (`budget.<slug>.json`, or `budget.json` on its own M3 Max host); record a runner budget with the manual `type-budget.yml` workflow (`--record-host-budget`), see `test/types/bench/README.md`.
+- Release: `pnpm check:publish` publishes all public packages (`@typedhouse/core`, `compiler`, `codegen`, `client`) at one shared `0.0.X` version: clean up-to-date master + `npm login` → `check:all` → audit published deps (high/critical block) → pack and inspect tarballs (path allowlist `package.json`/README/LICENSE/`dist/*.js|.d.ts`, size cap, secret/local-path/source-map scan, no lifecycle scripts, `publishConfig.access: public`) → `npm publish` → commit `release: v0.0.X`, tag, push. The version comes from the registry, so a failed run resumes the same version on rerun. Rehearse with `pnpm check:publish --dry-run [--skip-checks]`.
 - Integration tests use Docker image `clickhouse/clickhouse-server:24.8` (`testcontainers` is patched via `patches/`; see `patches/README.md`).
 
 ## Conventions

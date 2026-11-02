@@ -431,20 +431,14 @@ unionAll(                                                                       
 //    .as() declares the type for inference and decoding; it emits no CAST
 components.map(c => ({ h: fn.cityHash64(c.entityId).as(col.UInt64) }))
 
-// 2. a raw expression; interpolated Exprs become column references, JS values become parameters
-components.map(c => ({ depth: sql<number | null>`length(splitByChar('/', ${c.category}))` }))
+// 2. a trusted scalar snippet; row Exprs bind references, JS values become parameters.
+//    .as() declares the runtime result descriptor; it neither casts nor verifies the result.
+components.map(c => ({ categoryLength: sql`length(${c.category})`.as(col.Nullable(col.UInt64)) }))
 
-// 3. a raw predicate
-parts.where(p => sql<boolean>`match(${p.mpn}, '^GRM[0-9]')`)
+// 3. a predicate uses the same scalar-snippet API
+parts.where(p => sql`match(${p.mpn}, ${'^GRM[0-9]'})`.as(col.Bool))
 
-// 4. a raw relation, which composes like any other query
-const warned = sql.relation<{ entityId: string; warnings: bigint }>`
-  SELECT entityId, countIf(notEmpty(stock_index_warnings)) AS warnings
-  FROM metric_group_ots_component_indices FINAL
-  WHERE tenantId = ${'acme'}
-  GROUP BY entityId
-`
-join({ c: components, w: warned }).on(r => r.c.entityId.eq(r.w.entityId))
+// No public sql<T> or sql.relation API. Compose relations with the query builder.
 ```
 
 ### ClickHouse hints
@@ -521,7 +515,7 @@ WHERE c.database = {db:String}
 ORDER BY c.table, c.position
 ```
 
-Include tables, views and materialized views (`t.engine` tells them apart; all three are queryable). Skip `default_kind = 'ALIAS'` columns only if `--skip-alias` is passed; by default they are included and marked. Columns whose name contains a dot are the flattened members of a `Nested(...)` column; keep them as-is under their dotted name.
+Include tables, views and materialized views (`t.engine` tells them apart; all three are queryable). Skip `default_kind = 'ALIAS'` columns only if `--skip-alias` is passed; by default they are included and marked. Skipped names are still emitted, as the descriptor's shadow-only `hiddenColumns` (see "Descriptor completeness" below). Columns whose name contains a dot are the flattened members of a `Nested(...)` column; keep them as-is under their dotted name.
 
 ### Type grammar
 
@@ -563,12 +557,12 @@ Parsing details that bite: string literals inside `Enum8('a b' = 1)` and `DateTi
 | `UUID`, `IPv4`, `IPv6` | `string` (branded: `UUID & string`) | As is |
 | `Date`, `Date32`, `DateTime` | `Date` | Execution sets `date_time_output_format = 'iso'`, so a DateTime arrives as `2026-10-27T12:00:00Z` and decodes with `new Date(s)`; a Date arrives as `2026-10-27` and decodes the same way, as UTC midnight |
 | `DateTime64(p)` | `Date` when p <= 3, else `string` | ISO with fractional seconds, `new Date(s)`; precision above milliseconds cannot survive `Date`, and the generated comment says so |
-| `Decimal(p, s)` | `Decimal<p, s>` = `string & { __p: p; __s: s }` | String on the wire; no arithmetic in TS, arithmetic stays in `Expr` |
+| `Decimal(p, s)` | `Decimal<p, s>` = `string & { __p: p; __s: s }` | Exact string on the wire (`output_format_json_quote_decimals = 1`); no arithmetic in TS, arithmetic stays in `Expr` |
 | `Enum8/16` | a union of the names as string literals | String on the wire |
 | `Nullable(T)` | `T` or `null` | JSON null |
 | `LowCardinality(T)` | `T` | Transparent |
 | `Array(T)` | `T[]` | JSON array, decode elements recursively |
-| `Map(K, V)` | `Record<K, V>` when K is string-like, else `Array<[K, V]>` | `JSONEachRow` emits an object for maps |
+| `Map(K, V)` | `Record<string, unknown>` | Preserve the driver's parsed object, including nested wire values; no recursive bigint/Date conversion inside Maps or entry-array reshaping |
 | `Tuple(T1, T2)` unnamed | `readonly [T1, T2]` | JSON array |
 | `Tuple(a T1, b T2)` named | `{ a: T1; b: T2 }` | JSON object (`output_format_json_named_tuples_as_objects`, on by default) |
 | `JSON`, `Variant`, `Dynamic`, `Unknown` | `unknown` | Passed through |
@@ -717,39 +711,9 @@ The v1 typed set:
 
 **Tier 2, known.** `typedhouse generate` also reads `system.functions` and writes `functions.ts`: `fn.<name>(...args: Expr<any>[]): Expr<unknown>` for every non-aggregate function and `agg.<name>(...)` returning `AggExpr<unknown>` for every aggregate, each entry carrying `deterministic` and `alias_to` from the table. The `deterministic` column is newer than the 24.3 minimum, so the generator first checks `system.columns` for it and, when it is absent, writes `deterministic: null`, which the live-capability computation treats as non-deterministic. The validator uses this file to reject names ClickHouse does not have and to compute the live capability. `.as(col.X)` declares the result type for inference and decoding and emits no CAST; `cast(x, col.X)` emits one. Nothing in this tier is hand-written, and it regenerates with the schema.
 
-**Tier 3, raw.** `sql` at expression, predicate and relation level, as in the examples.
+**Tier 3, trusted scalar SQL.** Finish a `sql` tagged template with `.as(descriptor)` before using it as an expression or predicate. The descriptor supplies inference and runtime conversion metadata; it neither emits a CAST nor verifies the server's result. Template text is trusted SQL, not parsed or sanitized. Interpolations occupy expression positions: supported JS values become parameters and row expressions bind references. They cannot supply identifiers, keywords or SQL fragments; grouped and aggregate operands are rejected. Snippets are opaque and remove live capability. There is no public generic `sql<T>` or `sql.relation` API.
 
-**Extension by users.** The same `defineFunction` and `defineAggregate` as tier 1, in application code, with no registration step and no fork; the result is a typed free function that the compiler emits by its `name`:
-
-```ts
-// src/db/functions.ts
-import { defineFunction, defineAggregate, col, stringLike } from '@typedhouse/core'
-
-export const editDistance = defineFunction({
-  name: 'editDistance', args: [stringLike, stringLike], returns: col.UInt64, deterministic: true,
-})
-export const topK = defineAggregate({
-  name: 'topK', params: [col.UInt64], args: [stringLike], returns: col.Array(col.String), linear: false,
-})
-
-parts.map(p => ({ mpn: p.mpn, distance: editDistance(p.mpn, 'GRM155R61A104KA01D') }))
-parts.groupBy(p => p.partCategoryName).aggregate(g => ({ topManufacturers: topK(3)(g.manufacturerName) }))
-```
-
-Method syntax for a user function is opt-in and is declaration merging plus one call, which is also how the generated methods are attached, so there is one mechanism:
-
-```ts
-declare module '@typedhouse/core' {
-  interface ExprMethods<T> {
-    distanceTo(this: Expr<string>, other: Expr<string> | string): Expr<bigint>
-  }
-}
-extendExpr({ distanceTo(other) { return editDistance(this, other) } })
-
-parts.where(p => p.mpn.distanceTo('GRM155R61A104KA01D').le(2n))
-```
-
-A user-defined function that already exists in tier 1 is a validation error (`duplicate_function`), so the typed set can grow without silently shadowing application code.
+**User extension scope.** Public `defineFunction`, `defineAggregate`, `extendExpr` and declaration-merging extension hooks were removed by owner decision. Catalog definitions above are internal implementation machinery, not an application extension API. Use generated known functions or trusted scalar snippets for functions outside the typed catalog; relational composition stays in the query builder.
 
 ## Part 3: compiler and execution
 
@@ -758,10 +722,12 @@ A user-defined function that already exists in tier 1 is a validation error (`du
 1. **Validate and resolve.** Walk the graph once. Bind every `ColumnRef` to its node and fail on `unbound_column`. Assign a `CHType` to every `Expr` bottom-up from the catalog; assign `Param` types from the sibling operand (`amount > {p0}` gives `p0` the type of `amount`; two untyped params in one comparison is `param_untyped`). Reject `AggExpr` outside `Aggregate.aggs`, `Grouped` references outside an aggregate call, and `map` outputs that are not flat. Output: the same graph, fully typed, plus a parent-count map.
 2. **Logical rewrites.** Apply the rules in the table below to a fixpoint. Merge and push-down rules run to a fixpoint, then PruneColumns runs once. Each merge or push-down strictly decreases a measure (node count, or the sum of Filter heights), so termination is by construction; still cap at 50 iterations and fail loudly.
 3. **Block planning.** A block is one SELECT with its clause slots in SQL order: FROM (a scan, or derived tables joined left-deep, with at most one ARRAY JOIN), WHERE, GROUP BY, HAVING, the select list (optionally DISTINCT), ORDER BY, LIMIT/OFFSET. Walk each chain bottom-up. A node folds into the current block when its slot is empty and no slot later in that order is filled yet; otherwise the current block becomes a derived table and the node opens a new one. `Scan` opens a block. `Join` takes its inputs' blocks as FROM items (a bare scan stays a table, anything else is a derived table). `Filter` is WHERE while GROUP BY is empty and HAVING once it is filled. `Project` is the select list, substituting into one already there. `Aggregate` fills GROUP BY and the select list together. `Distinct` sets the DISTINCT flag. `Sort` and `Limit` fill their slots. `ArrayJoin` folds when the block has no ARRAY JOIN yet and its FROM is a single scan, since ClickHouse allows one ARRAY JOIN clause per SELECT. `Union`, `RawRel` and `Materialize` always open a block; any node with more than one parent becomes a CTE. So `groupBy().aggregate().where().orderBy().limit()` is one SELECT with GROUP BY, HAVING, ORDER BY and LIMIT, and a `where` after an `orderBy` starts a new one. Each block gets an alias `t0, t1, …` in emission order.
-4. **Emit.** Render each block to a SELECT with named parameters `{p0:UInt64}`; wrap CTE blocks in `WITH t3 AS (...)`; append `SETTINGS`. Identifiers are always backtick-quoted. Every JS value in an expression is a parameter and `null` renders as `NULL`; `LIMIT`, `OFFSET` and `SAMPLE` values are node fields and render inline. Nothing a caller supplies is ever interpolated into the text, which closes the injection surface.
-5. **Decode.** `CompiledQuery` carries `columns: Record<string, CHType>` for the final block; the client reads `JSONEachRow` and converts each cell with a decoder derived from the `CHType` (the table in Part 1). Decoders are built once per compiled query and reused across rows.
+4. **Emit.** Render each block to a SELECT with named parameters `{p0:UInt64}`; wrap CTE blocks in `WITH t3 AS (...)`; append `SETTINGS`. Identifiers are always backtick-quoted. Every JS value in an expression is a parameter and `null` renders as `NULL`; `LIMIT`, `OFFSET` and `SAMPLE` values are node fields and render inline. Interpolated values never become SQL text. Trusted scalar snippets are the explicit exception for caller-authored literal SQL: their template text is not sanitized, and untrusted input must go through parameter holes.
+5. **Adapt driver values.** `CompiledQuery` carries result-column descriptors. The official ClickHouse client owns response parsing and streaming; a small descriptor-based adapter preserves supported bigint and Date conversions, recursively within supported arrays/tuples, plus non-finite-float compatibility handling. Decimal strings and Map objects retain their driver representations as specified in Part 1. Conversion plans are built once per compiled plan and reused across rows. A general decoder, exhaustive value validation and Map reshaping are outside the owner-approved scope; declared types must still match actual returned representations.
 
 ### Rewrite rules
+
+The patterns below are subject to semantic safety guards, not unconditional rewrite permissions. Preserve existing fallible/opaque/volatile-expression fences and alias-capture checks. Predicate pushdown and conjunct splitting require the whole predicate to satisfy the admitted total fragment; merging filters must also preserve fallible input computations and evaluation boundaries. The results-only contract does not authorize removing these guards. A rule's “always” means no additional shape-specific condition, not an exception to these safety requirements.
 
 | Rule | Pattern | Result | Condition |
 | --- | --- | --- | --- |
@@ -783,7 +749,7 @@ Not in v1: pushing `Limit` into a `Sort` under a `Union`, join reordering, pulli
 
 - Join strictness is `ALL` and the kind is spelled in full: `INNER ALL JOIN`, `LEFT ALL JOIN`. `ANY` is not exposed in v1; CROSS JOIN carries no strictness word.
 - When any `left`, `right` or `full` join is present, append `SETTINGS join_use_nulls = 1`. Without it ClickHouse fills the unmatched side with type defaults (`0`, `''`, `1970-01-01`), and the `Nullable<OrdersRow>` type would be a lie. This is the one place the compiler changes a server default; it is documented in the generated SQL as a trailing comment.
-- Always append `date_time_output_format = 'iso'`, `output_format_json_quote_64bit_integers = 1` and `output_format_json_quote_denormals = 1` as query settings on execution (not in `toSQL()` output, which is for humans).
+- Always append `date_time_output_format = 'iso'`, `output_format_json_quote_64bit_integers = 1`, `output_format_json_quote_decimals = 1` and `output_format_json_quote_denormals = 1` as query settings on execution (not in `toSQL()` output, which is for humans).
 - `Scan.final` renders as `FROM t FINAL`; `Scan.sample` as `SAMPLE 0.1`. Both are per-scan and survive all rewrites unchanged.
 - `Materialize` in v1 renders as an ordinary CTE and logs a warning that materialization is not yet implemented; the node exists so the API is stable. Real materialization (a `TEMPORARY TABLE` inside an HTTP session) is milestone 7.
 - CTE naming: `WITH t3 AS (SELECT …)`. ClickHouse inlines CTEs, so a CTE is for readability and for deduplicating the graph, never for performance; the shared-node check still matters because without it the *IR* would be emitted twice.
@@ -793,7 +759,7 @@ Join inputs and ARRAY JOIN: an input that is a bare `Scan` renders as `table AS 
 
 ### Execution
 
-`client.run(q)` compiles, executes with `@clickhouse/client`'s `query()` using `format: 'JSONEachRow'` and `query_params`, decodes, and returns `Promise<R[]>`. `client.stream(q)` returns an `AsyncIterable<R>` over the streamed response and never buffers more than one HTTP chunk. Compilation is memoized on the `Rel` object identity, so a query built once and run in a loop is compiled once.
+`client.run(q)` compiles, executes with `@clickhouse/client`'s `query()` using `format: 'JSONEachRow'` and `query_params`, decodes, and returns `Promise<R[]>`. `client.stream(q)` returns an `AsyncIterable<R>` over the official driver's streamed batches. Parsing, buffering and backpressure are delegated to that driver; a separate one-HTTP-chunk buffering guarantee is outside the approved scope. The actual 10M-row/<200 MB heap acceptance test remains mandatory. Compilation is memoized on the `Rel` object identity, so a query built once and run in a loop is compiled once.
 
 Errors: a ClickHouse error is wrapped in `QueryError { sql, params, cause, node? }`. When the server's message names a column or alias, the compiler's alias map is used to point `node` at the IR node that produced it; this is best-effort and must never throw while building the error.
 
@@ -816,9 +782,9 @@ What that later milestone then contains, so its size is visible now: the Z-set e
 
 ## Testing
 
-The compiler is the risky part, and its correctness is defined by one property: for every IR tree, the optimized SQL and the naive SQL return the same rows. Everything else is ordinary unit testing.
+The compiler is the risky part. Its correctness follows the results-only error contract under “Decided, and still open”: whenever naive SQL succeeds, optimized SQL must succeed with identical rows and types. If naive SQL fails, optimized SQL may fail or succeed; success must match an independent guard-first oracle in IR order. Existing stronger case-specific error checks and conservative fences remain.
 
-**Differential testing (milestone 4 onward).** A `fast-check` arbitrary generates random IR trees over the fixture schema from API examples (six tables, seeded deterministically with nulls, duplicate versions, empty arrays and orphan ids). Each tree is emitted twice, run against testcontainers ClickHouse, and the row sets are compared after sorting on all columns. A failure shrinks to the smallest tree that disagrees and prints both SQLs. Run 500 cases in CI, 10k nightly. This test also covers the decoders, because both paths go through them.
+**Differential testing (milestone 4 onward).** A `fast-check` arbitrary generates random IR trees over the fixture schema from API examples (six tables, seeded deterministically with nulls, duplicate versions, empty arrays and orphan ids). Each tree is emitted twice and run against testcontainers ClickHouse. For naive-success cases, compare result types and rows, preserving multiplicities (and order where the query specifies it). For naive-failure cases, apply the results-only contract above and check any optimized success against an independent guard-first oracle. A failure shrinks to the smallest tree that violates the contract and prints both SQLs. Run 500 cases in CI, 10k nightly. Both paths exercise the client conversion adapter; independent native expectations remain necessary to catch shared conversion errors.
 
 **EXPLAIN snapshots.** For the \~30 hand-written queries in the corpus (every example in API examples plus one per rewrite rule), snapshot `EXPLAIN PLAN` output and assert structurally: no `Subquery`-type step unless its child is a fence; no `ReadFromMergeTree` that reads more columns than the IR's pruned set. Snapshots of the SQL text itself are kept too, but only the `lowStockCategories` one is asserted byte-for-byte; the rest are review aids.
 
@@ -827,7 +793,7 @@ The compiler is the risky part, and its correctness is defined by one property: 
 1. *Positive cases.* `expect-type` assertions for every example in API examples, using `toEqualTypeOf` (never `toMatchTypeOf`, which lets extra properties through) and `.not.toBeAny()` on every result. Generic helpers get their own assertions that they instantiate to concrete types: `expectTypeOf(latestIndices).toEqualTypeOf<Query<ComponentIndicesRow>>()`, `expectTypeOf(forTenant('acme'))` accepted by `where` on every fixture table.
 2. *Negative cases, precisely.* `@ts-expect-error` alone is not enough: it passes on any error on the line, including the wrong one. The cases under What fails to compile live one per statement in `test/types/negative/*.ts`, each annotated `// expect: TS2339 Property 'thenBy' does not exist`, and a small harness over the TypeScript compiler API (`ts.createProgram`, collect diagnostics, match code and message substring per annotated line) fails on a missing, extra or different error. Where the design makes a method absent, the direct form is used as well: `expectTypeOf<keyof typeof q>().not.toMatchTypeOf<'thenBy'>()`.
 3. *Type and runtime agree.* For every corpus query, a script derives the TS type from the query's runtime `columns` map (the Part 1 mapping applied in reverse) and writes it to `test/types/snapshots/<name>.d.ts`; the test asserts `expectTypeOf<Infer<typeof q>>().toEqualTypeOf<Snapshot>()`. This is the one test that ties the phantom `R` to the decoder: a method whose declared return disagrees with its catalog `returns`, or a decoder that disagrees with the mapping table, fails here.
-4. *Compile performance.* `test/types/bench/` holds 200 corpus-shaped queries plus two pathological ones: a 25-step `map`/`join` chain and a 10-way join. `tsc --extendedDiagnostics` on it has a budget, instantiations and wall time, checked in CI and failing when exceeded; the initial budget is set at milestone 3 from the first measurement with 50% headroom and is lowered, never raised, without a note in the PR. One method surface generic over three phantoms, a name on every call and promotion-by-conditional-type are exactly the shape that becomes "excessively deep" or a 40-second build once a codebase has a few hundred queries, and this is where it is caught.
+4. *Compile performance.* `test/types/bench/` holds 200 corpus-shaped queries plus two pathological ones: a 25-step `map`/`join` chain and a 10-way join. `tsc --extendedDiagnostics` measures instantiations and wall time for source and built inputs. Instantiation ceilings are hard on every host and supported compiler; wall-time comparisons are advisory on every host class, including recorded reference hosts. Keep measurements and reference budgets, input-hash/policy checks, and hard failures for malformed metrics or compiler errors. Initial reference budgets use measured values with 50% headroom; changing a baseline or ceiling requires a note in the PR, not a silent rebaseline. One method surface generic over three phantoms, a name on every call and promotion-by-conditional-type are exactly the shape that becomes "excessively deep" or a 40-second build once a codebase has a few hundred queries, and this is where it is caught.
 5. *Readable inferred types.* `tsc --declaration` on the corpus, snapshot the emitted `.d.ts`. A result type that degrades from a flat object into an `Infer<Row<…>>` chain in hover text fails the snapshot even though it is still correct.
 6. *Generated surface.* The catalog-to-methods generator is deterministic (snapshot of `expr-methods.generated.d.ts`), and the generated declaration file compiles on its own, without the rest of the package.
 
@@ -845,7 +811,10 @@ These are settled so the implementer does not relitigate them; change one only w
 | --- | --- |
 | Schema access | `db.<table>`, one database per generated file; no name conversion |
 | 64-bit integers | `bigint`, always; no `number` option, and no implicit `number` literals against them |
-| Decimals | `col.Decimal(p, s)` canonical, as `system.columns` prints it; `col.Decimal32/64/128/256(s)` are sugar; branded `string` in TS, arithmetic in `Expr` only |
+| Decimals | `col.Decimal(p, s)` canonical, as `system.columns` prints it; `col.Decimal32/64/128/256(s)` are sugar; exact branded `string` in TS with `output_format_json_quote_decimals = 1`, arithmetic in `Expr` only |
+| Client conversion scope | Official-driver parsing/streaming plus the small compatibility adapter; supported bigint/Date conversions recurse through supported arrays/tuples, not Maps. Maps are driver objects typed `Record<string, unknown>`. No general decoder or separate one-HTTP-chunk proof; retain the actual 10M-row/<200 MB gate |
+| User extensions and raw SQL | No public custom-function/declaration-merging extension API. Use the generated catalog and trusted scalar `sql` snippets completed with `.as(descriptor)`; no public `sql<T>` or `sql.relation` |
+| Type-performance budgets | Instantiation ceilings hard everywhere; wall comparisons advisory on all host classes. Retain measurements/reference budgets and hard input-hash, policy, metric-validity and compiler checks |
 | `Expr` | one class, three phantoms (`T`, name `N`, mode `M`); `Grouped` and `AggExpr` are modes, not classes; methods are generated from the catalog, use method syntax, and are gated by `this` parameters |
 | Join row shape | nested `{ u, o }`; `...r.u` to flatten in `map` |
 | Joins | `join`, `crossJoin` over two or more inputs, one kind each, left-deep emission; outer joins binary, `leftJoin`/`rightJoin`/`fullJoin(left, right).on(…)` with one aliased input per record (user ruling, M4 slice 4a: TS object types carry no key order, so a record cannot name the preserved input), three-way outer joins by nesting; `on` is equality only, extra inner-join conditions become a filter above, an outer join's `join_condition_not_equi` |
@@ -863,6 +832,7 @@ These are settled so the implementer does not relitigate them; change one only w
 | `ARRAY JOIN` | the `arrayJoin` and `leftArrayJoin` operators, in v1; one per SELECT block |
 | Window functions, `LIMIT BY` | `sql` only in v1 |
 | Error contract of the optimizing path | Results-only (user ruling, M4 slice 4d): whenever the naive emission succeeds, the optimized query returns identical rows and types and never fails; when naive fails, the optimized query may fail or succeed, and if it succeeds its rows equal a guard-first oracle (fallible expressions evaluated only on rows that pass the guards, in IR order). Reason: ClickHouse's filter order, PREWHERE and primary-key/part pruning make whether an error is raised plan-dependent (24.8 prunes the part holding a bad row from a guard above an isolated fallible WHERE), so naive's failures are partly an artifact of its nesting. Existing fences stay; relaxing them is a later decision |
+| Descriptor completeness | (M4 slice 4f) A table descriptor lists every column the server can resolve by name in a SELECT over that table (ALIAS and MATERIALIZED columns included), or names the ones it omits in the shadow-only `hiddenColumns` metadata option. Hidden names are never row fields or select items; the compiler's alias guards treat them as physical columns (an aggregate folded onto the table, also through filters, an ARRAY JOIN or plain column selections, checks its aliases against the table's full declared output plus `hiddenColumns`), because under `prefer_column_name_to_alias = 1` an output alias equal to a resolvable column binds that column (`HAVING hidden` → code 215 where the nested form succeeds). `typedhouse generate --skip-alias` writes the skipped ALIAS names there; `typedhouse check` warns when the live table has a column the existing descriptor neither declares nor hides. A descriptor that omits a resolvable column without declaring it is outside the results-only contract |
 | Incremental engine | A TypeScript DBSP implementation over the same IR, later; not the Rust `dbsp` crate. The eight constraints in Part 4 are part of milestone 3 |
 
 Still open, to decide during milestone 3 when the code makes the trade-off concrete:

@@ -5,7 +5,7 @@ import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainer
 import { count, crossJoin, join, unionAll, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys, verify } from './backend-harness.js';
-import { ciLimit, prefetchedCheck } from './prefetch-check.js';
+import { ciLimit, ciMaxExecutionTime, prefetchedCheck, reportSlowestQuery } from './prefetch-check.js';
 import { build, native, recipeArbitrary, seed, source, topology, type Recipe } from './pruning-arbitrary.js';
 import { pruneColumns } from '../../compiler/src/prune-columns.js';
 import { planSelects } from '../../compiler/src/plan-selects.js';
@@ -15,7 +15,7 @@ let driver: ReturnType<typeof createClient>;
 const backends: ReturnType<typeof createClickHouseBackend>[] = [];
 beforeAll(async () => {
   container = await new GenericContainer('clickhouse/clickhouse-server:24.8').withEnvironment({ CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'fixture', CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1' }).withExposedPorts(8123).withWaitStrategy(Wait.forHttp('/ping', 8123)).start();
-  const options = { url: `http://${container.getHost()}:${container.getMappedPort(8123)}`, username: 'fixture', password: 'fixture', clickhouse_settings: { max_execution_time: 10, max_result_rows: '5000', result_overflow_mode: 'throw' as const } };
+  const options = { url: `http://${container.getHost()}:${container.getMappedPort(8123)}`, username: 'fixture', password: 'fixture', clickhouse_settings: { max_execution_time: ciMaxExecutionTime(10), max_result_rows: '5000', result_overflow_mode: 'throw' as const } };
   driver = createClient(options);
   for (const mode of ['clickhouse', 'clickhouse-naive'] as const) backends.push(createClickHouseBackend(options, mode));
   await driver.command({ query: 'CREATE TABLE pruning_wide (id String,tenant String,amount UInt64,spare String,ids Array(String),waste String) ENGINE=MergeTree ORDER BY (tenant,id)' });
@@ -25,7 +25,7 @@ beforeAll(async () => {
     { id: 'a', tenant: 'other', amount: '5', spare: 'z', ids: ['orphan'], waste: 'unused' },
   ], format: 'JSONEachRow' });
 }, 120000);
-afterAll(async () => { for (const b of backends) await b.close(); await driver?.close(); await container?.stop(); });
+afterAll(async () => { await reportSlowestQuery(driver, 'pruning', ciMaxExecutionTime(10)); for (const b of backends) await b.close(); await driver?.close(); await container?.stop(); });
 async function direct(recipe: Recipe) {
   const result = await driver.query({ query: native(recipe), format: 'JSONEachRow' });
   try { return (await result.json<{ id: string; amount: string }>()).map(r => recipe.nested ? { a: { id: r.id }, b: { amount: BigInt(r.amount) } } : { id: r.id, amount: BigInt(r.amount) }); }

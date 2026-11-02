@@ -7,7 +7,7 @@ export default defineConfig({
   testDir: './tests/browser',
   use: { baseURL },
   webServer: {
-    command: `pnpm dev --host 127.0.0.1 --port ${port}`,
+    command: `pnpm dev --host 127.0.0.1 --port ${port} --ignore-lock`,
     url: `${baseURL}/playground/`,
     // A preview server or another worktree cannot serve this worktree's source-module probes.
     reuseExistingServer: false,

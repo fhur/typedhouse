@@ -95,7 +95,7 @@ Callbacks build SQL expressions; they do not process fetched JavaScript rows. Fo
 
 ## Installation and local setup
 
-Requirements: **Node.js 20+**, **pnpm**, ESM, and TypeScript with `strict: true`. Docker is required for integration tests, not for compiling queries.
+Requirements: **Node.js 22.22+** (or 24.11+) to build from source, **pnpm**, ESM, and TypeScript with `strict: true`. Docker is required for integration tests, not for compiling queries.
 
 The current development path is the source workspace:
 

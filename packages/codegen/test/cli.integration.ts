@@ -42,7 +42,11 @@ it('captures live metadata and compares explicit generated snapshots', async () 
   expect(schema.tables.find(t => t.name === 'coverage')!.sortingKey).toEqual(['id', 'cityHash64(`odd-name`, __proto__)']);
   expect(schema.functions.length).toBeGreaterThan(1000);
   expect(schema.functions.find(f => f.name === 'sum')!.isAggregate).toBe(true);
-  for (const [name, content] of [['schema.ts', renderSchema(schema)], ['functions.ts', renderFunctions(schema)]]) {
+  // Slice 4f: `--skip-alias` output, reviewed as its own snapshot (coverage.alias_id becomes shadow-only hiddenColumns).
+  const skipped = await introspect(client, 'fixture', { skipAlias: true });
+  expect(skipped.tables.find(t => t.name === 'coverage')!.hiddenColumns).toEqual(['alias_id']);
+  expect(skipped.tables.filter(t => t.hiddenColumns).map(t => t.name)).toEqual(['coverage']);
+  for (const [name, content] of [['schema.ts', renderSchema(schema)], ['functions.ts', renderFunctions(schema)], ['schema.skip-alias.ts', renderSchema(skipped)]]) {
     if (process.env.TYPEDHOUSE_UPDATE_CODEGEN_SNAPSHOTS === '1') { await mkdir(snapshots, { recursive: true }); await writeFile(join(snapshots, name!), content!); }
     expect(content).toBe(await readFile(join(snapshots, name!), 'utf8'));
   }
@@ -134,4 +138,72 @@ it('supports skip-alias and flag precedence over credentials/environment', async
   expect((await cli('generate', ['--unknown'])).status).not.toBe(0);
   expect((await cli('generate', ['--password'])).status).not.toBe(0);
   expect((await cli('invalid')).status).not.toBe(0);
+});
+
+it('slice 4f: --skip-alias declares skipped ALIAS columns as hiddenColumns, the guards use them, and check warns on undeclared columns', async () => {
+  await client.command({ query: 'CREATE TABLE adversarial_hidden (id UInt32, v String, hidden Int64 ALIAS toInt64(id) * 10, mat Int64 MATERIALIZED toInt64(id) * 100) ENGINE = MergeTree ORDER BY id' });
+  try {
+    await client.command({ query: "INSERT INTO adversarial_hidden (id, v) VALUES (1, 'a'), (2, 'b'), (2, 'c')" });
+    expect(await cli('generate', ['--skip-alias'])).toEqual({ status: 0, output: '' });
+    const path = join(cwd, 'generated/schema.ts');
+    const text = await readFile(path, 'utf8');
+    expect(text).toContain('const adversarial_hidden = table("adversarial_hidden", {\n  id: col.UInt32,\n  v: col.String,\n  mat: col.Int64,\n}, { engine: "MergeTree", sortingKey: ["id"], partitionKey: [], primaryKey: ["id"], hiddenColumns: ["hidden"], columnMetadata:');
+    expect(text).toContain('hiddenColumns: ["alias_id"]');
+    expect(text).toContain('materialized_id: col.UInt32,'); // MATERIALIZED columns are never skipped
+    expect(await cli('check', ['--skip-alias'])).toEqual({ status: 0, output: '' });
+    // The generated descriptor carries the names as frozen shadow-only metadata, never as columns.
+    const core = pathToFileURL(join(root, 'packages/core/dist/index.js')).href;
+    const javascript = ts.transpileModule(text.replace("'@typedhouse/core'", JSON.stringify(core)), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+    const generated = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`) as { db: Record<string, { columns: Record<string, CHType>; hiddenColumns?: readonly string[] }> };
+    const descriptor = generated.db.adversarial_hidden!;
+    expect(descriptor.hiddenColumns).toEqual(['hidden']);
+    expect(Object.keys(descriptor.columns)).toEqual(['id', 'v', 'mat']);
+    expect(Object.isFrozen(descriptor.hiddenColumns)).toBe(true);
+    // End to end on 24.8: HAVING on an alias equal to the hidden column agrees with naive in every contract cell; the same
+    // descriptor without the metadata (out of contract) is the 4c Tester's capture.
+    const { from, table, count, max } = await import('@typedhouse/core');
+    const { compile, emitNaive } = await import('@typedhouse/compiler');
+    // The generated module loads natively; copy its plain descriptor data into the
+    // test realm before building IR. Production rejects cross-realm prototypes.
+    const localDescriptor = JSON.parse(JSON.stringify(descriptor)) as typeof descriptor;
+    const run = async (sql: string, params: Record<string, unknown>, settings: Record<string, number>) => {
+      try { return JSON.stringify(await (await client.query({ query: sql, query_params: params, format: 'JSONCompactEachRow', clickhouse_settings: settings })).json()); } catch (error) { return `E${(error as { code?: string }).code}`; }
+    };
+    const shape = (d: typeof descriptor) => from(d as Parameters<typeof from>[0]).groupBy((r: any) => ({ id: r.id })).aggregate((g: any) => ({ hidden: count(), top: max(g.v) })).where((r: any) => r.hidden.gt(1n)).ir;
+    const { hiddenColumns: _, ...bare } = localDescriptor;
+    const outcomes: Record<string, string[]> = { declared: [], bare: [] };
+    for (const [label, d] of [['declared', localDescriptor], ['bare', table('adversarial_hidden', Object.fromEntries(Object.entries(bare.columns).map(([k, type]) => [k, { type }])) as never, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] })]] as const) {
+      const root = shape(d as typeof descriptor), optimized = compile(root), naive = emitNaive(root);
+      for (const prefer of [0, 1]) for (const prewhere of [0, 1]) {
+        const settings = { prefer_column_name_to_alias: prefer, optimize_move_to_prewhere: prewhere };
+        const o = await run(optimized.sql, optimized.params, settings), n = await run(naive.sql, naive.params, settings);
+        expect(n).toBe('[[2,"2","c"]]');
+        outcomes[label]!.push(o === n ? 'agree' : o);
+      }
+    }
+    expect(outcomes).toEqual({ declared: ['agree', 'agree', 'agree', 'agree'], bare: ['agree', 'agree', 'E215', 'E215'] });
+    // check warns (stderr) when the existing descriptor neither declares nor hides a live column; exit status unchanged.
+    await writeFile(path, text.replace(', hiddenColumns: ["hidden"]', ''));
+    const warned = await cli('check', ['--skip-alias']);
+    expect(warned.status).toBe(1);
+    expect(warned.output).toContain('Warning: table "adversarial_hidden" has server columns its descriptor does not declare: "hidden".');
+    expect(warned.output).toContain('Stale generated files: schema.ts');
+    expect(warned.output).not.toContain('"coverage"');
+    // A column added after generation is reported too, with or without --skip-alias.
+    expect((await cli('generate')).status).toBe(0);
+    expect(await cli('check')).toEqual({ status: 0, output: '' });
+    await client.command({ query: 'ALTER TABLE adversarial_hidden ADD COLUMN extra UInt8 ALIAS 1' });
+    for (const extra of [[], ['--skip-alias']]) {
+      const added = await cli('check', extra);
+      expect(added.status).toBe(1);
+      expect(added.output).toContain('Warning: table "adversarial_hidden" has server columns its descriptor does not declare: "extra".');
+    }
+    // 4f fix round 1 (Tester D3): a hand edit with a JS-only escape no longer crashes check; staleness is still reported.
+    await writeFile(path, (await readFile(path, 'utf8')).replace('  v: col.String,', '  "a\\q": col.String,\n  "\\u{1F600}": col.String,'));
+    const edited = await cli('check');
+    expect(edited.status).toBe(1);
+    expect(edited.output).toContain('Stale generated files: schema.ts');
+    expect(edited.output).not.toContain('Code generation failed');
+    expect(edited.output).toContain('"v"'); // the edit dropped `v`, which is reported; the unparsable keys are ignored
+  } finally { await client.command({ query: 'DROP TABLE IF EXISTS adversarial_hidden' }); await cli('generate'); }
 });
