@@ -5,6 +5,7 @@ import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainer
 import { col, count, crossJoin, from, join, scalar, sum, table, unionAll, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys, verify } from './backend-harness.js';
+import { ciLimit, prefetchedCheck } from './prefetch-check.js';
 import { build, decodeNative, native, recipeArbitrary, seed, shape, type Recipe } from './cte-arbitrary.js';
 let container: StartedTestContainer;
 let driver: ReturnType<typeof createClient>;
@@ -31,27 +32,31 @@ async function direct(r: Recipe) {
   try { return (await result.json<{ id: string; amount: string; first?: string; second?: string }>()).map(row => decodeNative(r, row)); }
   finally { result.close(); }
 }
-async function check(r: Recipe) {
-  const q = build(r), expected = await direct(r), plans = backends.map(b => b.compile(q.ir));
+/** Slice 4d: all compile/IO work of one recipe, the native query and both backends in flight at once (no assertion). */
+async function evaluate(r: Recipe) {
+  const q = build(r), plans = backends.map(b => b.compile(q.ir));
+  const [expected, ...actual] = await Promise.all([direct(r), ...backends.map(async (backend, i) => (await collect(backend.run(plans[i]!))).flat())]);
+  return { q, plans, expected: expected!, actual };
+}
+function assertEvaluation({ q, plans, expected, actual }: Awaited<ReturnType<typeof evaluate>>) {
   try {
     expect(plans[0]!.compiled.columns).toEqual(plans[1]!.compiled.columns);
     expect(plans[0]!.compiled.columnPaths).toEqual(plans[1]!.compiled.columnPaths);
-    for (const [i, backend] of backends.entries()) {
-      const rows = (await collect(backend.run(plans[i]!))).flat();
-      expect(keys<unknown, Caps>(q, rows)).toEqual(keys<unknown, Caps>(q, expected));
-    }
+    for (const rows of actual) expect(keys<unknown, Caps>(q, rows)).toEqual(keys<unknown, Caps>(q, expected));
   } catch (cause) { throw new Error(`${String(cause)}\n${JSON.stringify(plans.map(p => ({ sql: p.compiled.sql, params: p.compiled.params })))}`, { cause }); }
   return expected;
 }
+async function check(r: Recipe) { return assertEvaluation(await evaluate(r)); }
 const anchor: Recipe = { tree: { kind: 'scan' }, mode: 'union', fence: 'none', take: 3, renames: 0, nested: false };
 it('executes 500 fixed-seed variable shared DAGs through official Backend plugins and native decoded bags', async () => {
   const shapes = new Set<string>();
   const start = performance.now();
-  const result = await fc.check(fc.asyncProperty(recipeArbitrary, async r => { shapes.add(shape(r)); await check(r); }), { seed: Number(process.env.TYPEDHOUSE_CTE_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_CTE_PATH ? { path: process.env.TYPEDHOUSE_CTE_PATH } : {}) });
-  console.info('CTE differential', { runs: result.numRuns, seed: result.seed, shapes: shapes.size, milliseconds: Math.round(performance.now() - start) });
+  const { result, prefetched } = await prefetchedCheck(recipeArbitrary, { seed: Number(process.env.TYPEDHOUSE_CTE_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_CTE_PATH ? { path: process.env.TYPEDHOUSE_CTE_PATH } : {}) },
+    evaluate, (r, e) => { shapes.add(shape(r)); assertEvaluation(e); });
+  console.info('CTE differential', { runs: result.numRuns, prefetched, seed: result.seed, shapes: shapes.size, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(500); expect(shapes.size).toBeGreaterThan(100);
-}, 120000);
+}, ciLimit(120000));
 it('anchors repeated references, empty/duplicate expansions, scalar totals and latest independently', async () => {
   const rows = [{ id: 'a', amount: 2n }, { id: 'b', amount: 3n }, { id: 'a', amount: 5n }];
   const q = build(anchor);

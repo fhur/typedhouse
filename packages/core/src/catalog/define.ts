@@ -58,7 +58,9 @@ export function resolveReturn(def: Definition, args: readonly unknown[]): CHType
     }
     return a instanceof Expr ? a.ir.type ?? (a.ir.kind === 'Param' && a.ir.value === null ? nullable(sibling ?? unknownType) : unknownType) : a === null
     ? nullable(sibling ?? unknownType)
-    : sibling ? (sibling.kind === 'Nullable' ? sibling.inner : sibling) : defaultType(a) ?? unknownType;
+    // Mirrors the compiler's Param resolution (`unwrap(sibling)`), so nested
+    // LowCardinality(Nullable(T)) siblings type a JS operand as T on both sides.
+    : sibling ? unwrap(sibling) : defaultType(a) ?? unknownType;
   });
   const returns = def.returns;
   let type = typeof returns === 'function' ? returns(resolved, args.map(a => a instanceof Expr ? undefined : a)) : returns === 'arg0' ? resolved[0] ?? unknownType : returns.type;

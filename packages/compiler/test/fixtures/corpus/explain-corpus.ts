@@ -1,7 +1,7 @@
 // EXPLAIN corpus (spec "Testing", M4): every supported API example plus one minimal query per rewrite rule.
 // Ids reuse test/types/corpus-coverage.json. `fences` lists the kinds that justify every SELECT boundary the
 // planned emission opens (empty = one SELECT).
-import { cast, col, count, from, join, unionAll, type Rel } from '@typedhouse/core';
+import { cast, col, count, from, join, leftJoin, unionAll, type Rel } from '@typedhouse/core';
 import * as s from './supported-types.js';
 import { componentsLatest } from './components-latest.js';
 import { projectionEnrichment } from './projection-enrichment.js';
@@ -9,8 +9,9 @@ import { knownHash, knownUnique } from './known-functions.js';
 import { snippetDistance } from './sql-snippets.js';
 import { components, db, forTenant } from './low-stock.js';
 
-export type FenceKind = 'Filter' | 'Aggregate' | 'Sort' | 'Limit' | 'Distinct' | 'Union' | 'Join' | 'ArrayJoin' | 'CTE' | 'Subquery' | 'RawRel' | 'Materialize';
-export type CorpusRule = 'MergeFilter' | 'MergeProject' | 'PushFilterProject' | 'PushFilterJoin' | 'PushFilterArrayJoin' | 'PushFilterUnion' | 'PushFilterAggKey' | 'PruneColumns';
+/** `Filter`: a filter outside the total fragment keeps its own SELECT over earlier filters (slice 3b), and so does a total one over it. */
+export type FenceKind = 'Aggregate' | 'Sort' | 'Limit' | 'Distinct' | 'Union' | 'Join' | 'ArrayJoin' | 'CTE' | 'Subquery' | 'RawRel' | 'Materialize' | 'Filter';
+export type CorpusRule = 'MergeFilter' | 'MergeProject' | 'PushFilterProject' | 'LeftToInner' | 'PushFilterJoin' | 'PushFilterArrayJoin' | 'PushFilterUnion' | 'PushFilterAggKey' | 'PruneColumns';
 export interface CorpusEntry {
   readonly id: string;
   readonly query: { readonly ir: Rel };
@@ -41,6 +42,7 @@ export const entries: readonly CorpusEntry[] = [
   { id: 'versioned/latest-totals', query: s.latestTotals, fences: ['CTE', 'Join', 'Aggregate'] },
   { id: 'versioned/argMax', query: s.argMaxIndices, fences: ['Aggregate'] },
   { id: 'versioned/weekly', query: s.weeklySeries, fences: [] },
+  // `startsWith` (known-origin) and `between` over DateTime64 are outside the total fragment: each keeps its own SELECT over the tenant filter.
   { id: 'entities/componentsLatest', query: componentsLatest, fences: ['CTE', 'Join', 'Filter'] },
   { id: 'entities/history', query: s.history, fences: ['Join', 'Sort', 'Filter'] },
   { id: 'entities/scopedLatest', query: s.scopedLatest, fences: ['CTE', 'Join'] },
@@ -61,6 +63,8 @@ export const entries: readonly CorpusEntry[] = [
   { id: 'joins/three-way', query: s.withPrice, fences: ['CTE', 'Join'] },
   { id: 'joins/self', query: s.sharedPart, fences: ['CTE'] },
   { id: 'joins/left-array', query: s.leftArray, fences: [] },
+  { id: 'joins/left', query: s.leftLatest, fences: ['CTE', 'Join'] },
+  { id: 'entities/optional-snapshot', query: s.optionalSnapshot, fences: ['CTE', 'Join'] },
   { id: 'composition/lowStock', query: s.lowStock, fences: ['CTE', 'Join'] },
   { id: 'ordering/page', query: s.orderedComponents, fences: [] },
   { id: 'ordering/nulls', query: s.orderedNullable, fences: [] },
@@ -78,6 +82,8 @@ export const entries: readonly CorpusEntry[] = [
   { id: 'rule/merge-project', rule: 'MergeProject', query: components.map(c => ({ entityId: c.entityId, parts: c.countOfParts })).map(r => ({ id: r.entityId, parts: r.parts })), fences: [] },
   { id: 'rule/push-filter-project', rule: 'PushFilterProject', query: components.map(c => ({ id: c.entityId, parts: c.countOfParts.plus(1n) })).where(r => r.parts.gt(3n)), fences: [] },
   { id: 'rule/push-filter-join', rule: 'PushFilterJoin', query: join({ a: components, b: fresh() }).on(r => r.a.entityId.eq(r.b.entityId)).where(r => r.a.state.eq('active')).map(r => ({ entityId: r.a.entityId, category: r.b.category })), fences: ['Join'] },
+  // Slice 4b: b.state = 'active' rejects b's NULL extension, so the LEFT join plans as INNER (EXPLAIN: Join, Type: INNER).
+  { id: 'rule/left-to-inner', rule: 'LeftToInner', query: leftJoin({ a: components }, { b: fresh() }).on(r => r.a.entityId.eq(r.b.entityId)).where(r => r.b.state.eq('active')).map(r => ({ entityId: r.a.entityId, category: r.b.category })), fences: ['Join'] },
   { id: 'rule/push-filter-array-join', rule: 'PushFilterArrayJoin', query: components.arrayJoin(c => c.matched_part_ids, 'partId').where(r => r.tenantId.eq('acme')), fences: [] },
   { id: 'rule/push-filter-union', rule: 'PushFilterUnion', query: unionAll(fresh(), fresh()).where(c => c.state.eq('active')), fences: ['Union'] },
   { id: 'rule/push-filter-agg-key', rule: 'PushFilterAggKey', query: components.groupBy(c => ({ tenantId: c.tenantId })).aggregate(() => ({ n: count() })).where(r => r.tenantId.eq('acme')), fences: [] },

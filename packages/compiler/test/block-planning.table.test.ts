@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, sql, from, join, outputLeaves, table, unionAll, type Rel } from '@typedhouse/core';
+import { cast, col, count, createKnownFunctions, sql, sum, from, fullJoin, join, leftJoin, max, outputLeaves, rightJoin, table, unionAll, type Rel } from '@typedhouse/core';
 import { compile } from '../src/index.js';
 import { emitPlanned, validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
@@ -16,6 +16,48 @@ const safe = (r: typeof t.row) => r.id.gt(1n);
 const unsafe = (r: typeof t.row) => cast(r.k, col.UInt64).gt(1n);
 const volatile = () => sql`rowNumberInAllBlocks()`.as(col.UInt64);
 const grouped = t.groupBy(r => ({ k: r.k })).aggregate(() => ({ n: count() }));
+const w = from(table('w', { id: col.UInt64, z: col.String }, meta));
+// Slice 4c: the same t/u join in every kind; `a` = t (id, k, ids), `b` = u (id, v).
+const joins = {
+  inner: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)),
+  left: () => leftJoin({ a: t }, { b: u }).on(r => r.a.id.eq(r.b.id)),
+  right: () => rightJoin({ a: t }, { b: u }).on(r => r.a.id.eq(r.b.id)),
+  full: () => fullJoin({ a: t }, { b: u }).on(r => r.a.id.eq(r.b.id)),
+} as const;
+const nestedJoins = {
+  inner: () => join({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)), b: u }).on(r => r.n.x.id.eq(r.b.id)),
+  left: () => leftJoin({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)) }, { b: u }).on(r => r.n.x.id.eq(r.b.id)),
+  right: () => rightJoin({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)) }, { b: u }).on(r => r.n.x.id.eq(r.b.id)),
+  full: () => fullJoin({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)) }, { b: u }).on(r => r.n.x.id.eq(r.b.id)),
+} as const;
+// Slice 4d: two total Filters over a subtree that computes a non-total value keep apart (24.8 pushes a merged WHERE's
+// pushable conjunct into a join input, below an ARRAY JOIN or below GROUP BY, ahead of the cast naive evaluates).
+const { fn: known } = createKnownFunctions({ array: { isAggregate: false, deterministic: true, aliasTo: '' } } as const);
+const castInput = t.map(r => ({ id: r.id, k: cast(r.k, col.UInt64) })), totalInput = t.map(r => ({ id: r.id, k: r.id.plus(1n) }));
+const fallibleRows = (['inner', 'left', 'right', 'full'] as const).flatMap(kind => {
+  // Dynamic kind: the four builders' row types differ only in nullability, which these filters do not depend on.
+  const make = (a: typeof t): any => kind === 'inner' ? join({ a, b: u }).on(r => r.a.id.eq(r.b.id)) : (kind === 'left' ? leftJoin : kind === 'right' ? rightJoin : fullJoin)({ a }, { b: u }).on(r => r.a.id.eq(r.b.id));
+  const twice = (a: any): Rel => make(a).where((r: any) => r.b.v.gt(1n)).where((r: any) => r.a.id.ne(3n)).ir;
+  return [
+    { name: `4d ${kind}: two total filters over a join with a fallible input keep apart`, build: () => twice(castInput), blocks: [['Filter'], ['Filter', 'Join']] },
+    { name: `4d ${kind}: two total filters over a join whose inputs are total share WHERE`, build: () => twice(totalInput), blocks: [['Filter', 'Filter', 'Join']] },
+  ];
+});
+const fenced = [['Filter', 'Aggregate'], ['Join']], sortedFence = [['Sort', 'Aggregate'], ['Join']];
+const aliasRows = (['inner', 'left', 'right', 'full'] as const).flatMap(kind => {
+  const j = joins[kind] as () => ReturnType<typeof joins.inner>;
+  const nj = nestedJoins[kind] as () => ReturnType<typeof nestedJoins.inner>;
+  return [
+    { name: `4c ${kind}: aggregate alias equal to a side column (v = count(), HAVING v) keeps the aggregate off the join block`, build: () => j().groupBy(r => ({ key: r.a.id })).aggregate(g => ({ v: count(), m: max(g.b.v) })).where(r => r.v.gt(1n)).ir, blocks: fenced },
+    { name: `4c ${kind}: key alias equal to the other side's column (v = a.k, HAVING v) keeps the aggregate off the join block`, build: () => j().groupBy(r => ({ v: r.a.k })).aggregate(() => ({ c: count() })).where(r => r.v.ne('x')).ir, blocks: fenced },
+    { name: `4c ${kind}: identity key of a name both inputs carry (id = b.id, ORDER BY id) keeps the aggregate off the join block`, build: () => j().groupBy(r => ({ id: r.b.id })).aggregate(() => ({ c: count() })).orderBy(r => r.id).ir, blocks: sortedFence },
+    { name: `4c ${kind}: key alias equal to a pruned column (ids = a.k, ORDER BY ids) keeps the aggregate off the join block`, build: () => j().groupBy(r => ({ ids: r.a.k })).aggregate(() => ({ c: count() })).orderBy(r => r.ids).ir, blocks: sortedFence },
+    { name: `4c ${kind}: key alias equal to a nested join side column (z = b.v, ORDER BY z) keeps the aggregate off the join block`, build: () => nj().groupBy(r => ({ z: r.b.v })).aggregate(() => ({ c: count() })).orderBy(r => r.z).ir, blocks: sortedFence },
+    { name: `4c ${kind}: non-colliding aliases with HAVING and ORDER BY fold onto the join block`, build: () => j().groupBy(r => ({ key: r.a.k })).aggregate(g => ({ c: count(), m: max(g.b.v) })).where(r => r.c.gt(1n)).orderBy(r => r.key).ir, blocks: [['Sort', 'Filter', 'Aggregate', 'Join']] },
+    { name: `4c ${kind}: identity key of a name both inputs carry with no HAVING/ORDER BY folds (the ON reads it qualified only)`, build: () => j().groupBy(r => ({ id: r.a.id })).aggregate(g => ({ c: count(), m: max(g.b.v) })).ir, blocks: [['Aggregate', 'Join']] },
+    { name: `4c ${kind}: identity key only one input carries (v = b.v, HAVING and ORDER BY v) folds`, build: () => j().groupBy(r => ({ v: r.b.v })).aggregate(() => ({ c: count() })).where(r => r.v.ne(1n)).orderBy(r => r.v).ir, blocks: [['Sort', 'Filter', 'Aggregate', 'Join']] },
+  ];
+});
 
 function layout(plan: SqlPlan, rel: Rel): string[][] {
   if (plan.ctes?.names.has(rel)) return [['CTE']];
@@ -79,7 +121,9 @@ const rows: { readonly name: string; readonly build: () => Rel; readonly blocks:
   { name: 'aggregate keyed on a source column over a left expansion folds', build: () => t.leftArrayJoin(r => r.ids, 'x').groupBy(r => ({ k: r.k })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'ArrayJoin', 'Scan']] },
   { name: 'aggregate over an inner expansion of a safe where folds', build: () => t.where(safe).arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'ArrayJoin', 'Filter', 'Scan']] },
   { name: 'aggregate over a where after an inner expansion folds', build: () => t.arrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).groupBy(r => ({ k: r.k })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'Filter', 'ArrayJoin', 'Scan']] },
-  { name: 'aggregate over a left expansion isolates the earlier unsafe where', build: () => t.where(unsafe).leftArrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate'], ['Filter'], ['ArrayJoin', 'Filter', 'Scan']] },
+  { name: 'aggregate over a left expansion with total wheres on both sides folds', build: () => t.where(safe).leftArrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'Filter', 'ArrayJoin', 'Filter', 'Scan']] },
+  // Slice 3b: the total where above the expansion must not be AND-ed into the fallible one below it, so it opens a block and the aggregate another.
+  { name: 'aggregate over a left expansion with a fallible where below and a total where above keeps both boundaries', build: () => t.where(unsafe).leftArrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate'], ['Filter'], ['ArrayJoin', 'Filter', 'Scan']] },
   { name: 'keyless aggregate over a left expansion folds', build: () => t.leftArrayJoin(r => r.ids, 'x').aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate', 'ArrayJoin', 'Scan']] },
   { name: 'having, sort and limit fold over an aggregated expansion', build: () => t.arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).where(r => r.n.gt(1n)).orderBy(r => r.x).limit(3).ir, blocks: [['Limit', 'Sort', 'Filter', 'Aggregate', 'ArrayJoin', 'Scan']] },
   { name: 'aggregate over an inner expansion of an unsafe where keeps the derived table', build: () => t.where(unsafe).arrayJoin(r => r.ids, 'x').groupBy(r => ({ x: r.x })).aggregate(() => ({ n: count() })).ir, blocks: [['Aggregate'], ['ArrayJoin'], ['Filter', 'Scan']] },
@@ -107,12 +151,48 @@ const rows: { readonly name: string; readonly build: () => Rel; readonly blocks:
   { name: 'computed selection over a filtered join block opens a block', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.v.gt(1n)).map(r => ({ next: r.a.id.plus(1n) })).ir, blocks: [['Project'], ['Filter', 'Join']] },
   { name: 'direct selection over a sorted join block opens a block', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).orderBy(r => r.a.id).map(r => ({ id: r.a.id })).ir, blocks: [['Project'], ['Sort', 'Join']] },
   { name: 'direct selection over a distinct join block opens a block', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).distinct().map(r => ({ id: r.a.id })).ir, blocks: [['Project'], ['Distinct', 'Join']] },
+  // Slice 3b: consecutive Filters share a WHERE/HAVING only when every predicate is total (what MergeFilter merges). A
+  // Filter outside the total fragment keeps its own block over earlier filters, a total one over it does the same, and
+  // two non-total ones never share; a non-total Filter that is the block's first WHERE folds. Scan, join-bound,
+  // expanded and aggregate blocks alike. `total` is total but not safe (arithmetic), so it still shares a WHERE.
+  { name: 'fallible where after a total where opens a block', build: () => t.where(safe).where(unsafe).ir, blocks: [['Filter'], ['Filter', 'Scan']] },
+  { name: 'fallible where alone folds as the first WHERE', build: () => t.where(unsafe).ir, blocks: [['Filter', 'Scan']] },
+  { name: 'total where after a fallible where opens a block', build: () => t.where(unsafe).where(safe).ir, blocks: [['Filter'], ['Filter', 'Scan']] },
+  { name: 'two fallible wheres never share a WHERE', build: () => t.where(unsafe).where(r => cast(r.k, col.Int64).lt(9n)).ir, blocks: [['Filter'], ['Filter', 'Scan']] },
+  { name: 'total arithmetic where after a safe where shares the WHERE', build: () => t.where(safe).where(r => r.id.plus(1n).gt(2n)).ir, blocks: [['Filter', 'Filter', 'Scan']] },
+  { name: 'total, fallible, total wheres are three blocks', build: () => t.where(safe).where(unsafe).where(r => r.k.eq('a')).ir, blocks: [['Filter'], ['Filter'], ['Filter', 'Scan']] },
+  { name: 'sort and limit fold above the isolated fallible where', build: () => t.where(safe).where(unsafe).orderBy(r => r.id).limit(2).ir, blocks: [['Limit', 'Sort', 'Filter'], ['Filter', 'Scan']] },
+  { name: 'fallible where after a total where and a folded computed selection: selection below, filter above', build: () => t.where(safe).map(r => ({ next: r.id.plus(1n), k: r.k })).where(r => cast(r.k, col.UInt64).gt(1n)).ir, blocks: [['Filter'], ['Project', 'Filter', 'Scan']] },
+  { name: 'whole-row identity selection between a total and a fallible where is transparent', build: () => t.where(safe).map(r => ({ id: r.id, k: r.k, ids: r.ids })).where(unsafe).ir, blocks: [['Filter'], ['Project', 'Filter', 'Scan']] },
+  { name: 'fallible where after a filtered join block opens a block over it', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.v.gt(1n)).where(r => cast(r.a.k, col.UInt64).gt(1n)).ir, blocks: [['Filter'], ['Filter', 'Join']] },
+  { name: 'fallible where alone on a join block folds', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => cast(r.a.k, col.UInt64).gt(1n)).ir, blocks: [['Filter', 'Join']] },
+  { name: 'fallible where after a join residual opens a block over it', build: () => join({ a: t, b: u }).on(r => [r.a.id.eq(r.b.id), r.a.id.lt(r.b.v)]).where(r => cast(r.a.k, col.UInt64).gt(1n)).ir, blocks: [['Filter'], ['Filter', 'Join']] },
+  { name: 'direct selection folds over the isolated fallible where of a join block', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.v.gt(1n)).where(r => cast(r.a.k, col.UInt64).gt(1n)).map(r => ({ id: r.a.id })).ir, blocks: [['Project', 'Filter'], ['Filter', 'Join']] },
+  { name: 'total where after a fallible one on a join block opens a block', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => cast(r.a.k, col.UInt64).gt(1n)).where(r => r.b.v.gt(1n)).ir, blocks: [['Filter'], ['Filter', 'Join']] },
+  { name: 'fallible where after a safe where under an inner expansion opens a block', build: () => t.where(safe).arrayJoin(r => r.ids, 'x').where(r => cast(r.x, col.UInt64).gt(1n)).ir, blocks: [['Filter'], ['ArrayJoin', 'Filter', 'Scan']] },
+  { name: 'fallible where alone above an inner expansion folds', build: () => t.arrayJoin(r => r.ids, 'x').where(r => cast(r.x, col.UInt64).gt(1n)).ir, blocks: [['Filter', 'ArrayJoin', 'Scan']] },
+  { name: 'total where after a fallible one above an expansion opens a block', build: () => t.arrayJoin(r => r.ids, 'x').where(r => cast(r.x, col.UInt64).gt(1n)).where(r => r.x.eq('a')).ir, blocks: [['Filter'], ['Filter', 'ArrayJoin', 'Scan']] },
+  { name: 'total where above a left expansion over a fallible where opens a block', build: () => t.where(unsafe).leftArrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).ir, blocks: [['Filter'], ['ArrayJoin', 'Filter', 'Scan']] },
+  { name: 'fallible having after a safe having opens a block, sort and limit fold above it', build: () => grouped.where(r => r.n.gt(1n)).where(r => cast(r.k, col.UInt64).gt(1n)).orderBy(r => r.k).limit(2).ir, blocks: [['Limit', 'Sort', 'Filter'], ['Filter', 'Aggregate', 'Scan']] },
+  { name: 'fallible having alone keeps its own block (pre-existing safe-HAVING gate, unchanged)', build: () => grouped.where(r => cast(r.k, col.UInt64).gt(1n)).ir, blocks: [['Filter'], ['Aggregate', 'Scan']] },
   { name: 'CTE input is never folded into an expansion', build: () => t.cte().arrayJoin(r => r.ids, 'x').ir, blocks: [['ArrayJoin'], ['CTE']] },
   { name: 'CTE reference takes filters and sorts directly', build: () => t.cte().where(safe).orderBy(r => r.id).ir, blocks: [['Sort', 'Filter', 'CTE']] },
   { name: 'distinct reads a CTE directly', build: () => t.cte().distinct().ir, blocks: [['Distinct', 'CTE']] },
   { name: 'join block takes filters and sorts', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.v.gt(1n)).orderBy(r => r.a.id).ir, blocks: [['Sort', 'Filter', 'Join']] },
   { name: 'distinct over a join block folds', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).map(r => ({ id: r.a.id })).distinct().ir, blocks: [['Distinct', 'Project', 'Join']] },
   { name: 'union always opens a block', build: () => unionAll(t, t).where(safe).ir, blocks: [['Filter'], ['Union']] },
+  ...aliasRows,
+  ...fallibleRows,
+  { name: '4d: two total filters over a fallible ARRAY JOIN expansion keep apart', build: () => t.arrayJoin(r => known.array(cast(r.k, col.UInt64)).as(col.Array(col.UInt64)), 'x').where(r => r.x.gt(0n)).where(safe).ir, blocks: [['Filter'], ['Filter', 'ArrayJoin', 'Scan']] },
+  { name: '4d: two total filters over a total ARRAY JOIN expansion share WHERE', build: () => t.arrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).where(safe).ir, blocks: [['Filter', 'Filter', 'ArrayJoin', 'Scan']] },
+  { name: '4d: two total HAVING filters over a fallible aggregate keep apart', build: () => t.groupBy(r => ({ id: r.id })).aggregate(g => ({ s: sum(cast(g.k, col.UInt64)) })).where(r => r.s.gt(0n)).where(r => r.id.ne(3n)).ir, blocks: [['Filter'], ['Filter', 'Aggregate', 'Scan']] },
+  { name: '4d: two total HAVING filters over a total aggregate share HAVING', build: () => t.groupBy(r => ({ id: r.id })).aggregate(() => ({ n: count() })).where(r => r.n.gt(0n)).where(r => r.id.ne(3n)).ir, blocks: [['Filter', 'Filter', 'Aggregate', 'Scan']] },
+  { name: '4d: two total filters over a fallible computed selection keep apart (natively immune, fenced by the same rule)', build: () => castInput.where(r => r.k.gt(0n)).where(r => r.id.ne(3n)).ir, blocks: [['Filter'], ['Filter'], ['Project', 'Scan']] },
+  { name: '4d: two total filters over a total computed selection share WHERE', build: () => totalInput.where(r => r.k.gt(0n)).where(r => r.id.ne(3n)).ir, blocks: [['Filter', 'Filter'], ['Project', 'Scan']] },
+  { name: '4d: two total filters over a non-total filter share WHERE (24.8 never pushes across a Filter step)', build: () => t.where(unsafe).where(safe).where(r => r.k.eq('a')).ir, blocks: [['Filter', 'Filter'], ['Filter', 'Scan']] },
+  // 4c CTE-source probe: `n: max(n)` over a CTE folds only while no HAVING/ORDER BY names `n` (else 215 under alias = 1).
+  { name: '4c: name: agg(name) over a CTE without HAVING/ORDER BY reads the CTE directly', build: () => t.cte().groupBy(r => ({ k: r.k })).aggregate(g => ({ id: max(g.id) })).ir, blocks: [['Aggregate', 'CTE']] },
+  { name: '4c: name: agg(name) over a CTE with HAVING on that name keeps its own scope', build: () => t.cte().groupBy(r => ({ k: r.k })).aggregate(g => ({ id: max(g.id) })).where(r => r.id.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['CTE']] },
 ];
 
 it.each(rows)('$name', ({ build, blocks }) => {
@@ -121,7 +201,8 @@ it.each(rows)('$name', ({ build, blocks }) => {
   const plan = planSelects(root, nodes, pruneColumns(root), planCtes(root));
   expect(layout(plan, root)).toEqual(blocks);
   const sql = emitPlanned(plan).sql;
-  expect(sql).not.toContain('*');
+  // 4c rows include outer joins, whose text ends with the join_use_nulls comment.
+  expect(sql.replace(/ \/\* join_use_nulls = 1: [^*]*\*\/$/, '')).not.toContain('*');
   // Without joins, CTEs or unions every planned block is exactly one SELECT.
   if (!blocks.flat().some(k => k === 'Join' || k === 'CTE' || k === 'Union')) expect(sql.match(/SELECT /g)).toHaveLength(blocks.length);
   expect(sql.includes('DISTINCT')).toBe(blocks.flat().includes('Distinct'));

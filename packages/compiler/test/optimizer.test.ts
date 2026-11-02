@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, table, from, val } from '@typedhouse/core';
+import { cast, col, table, from, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 
 const products = table('products', { id: col.UInt64, category: col.String, stock: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
@@ -53,6 +53,18 @@ it('folds above but not through projection and distinct fences', () => {
   expect(compile(whole.ir).sql).toBe('SELECT DISTINCT `id`, `category`, `stock` FROM `products` ORDER BY `id` ASC');
   // A narrower selection is still naive-emitted over the DISTINCT block, and the sort above it opens its own block.
   expect(selects(compile(from(products).distinct().map(r => ({ id: r.id })).orderBy(r => r.id).ir).sql)).toBe(3);
+});
+
+it('isolates a filter outside the total fragment from earlier filters (slice 3b)', () => {
+  // The cast must only ever see the rows the category filter passes: it keeps its own SELECT above that WHERE instead of
+  // being AND-ed into it (the server would evaluate the conjuncts in its own order); sort and limit fold above it.
+  const q = from(products).where(r => r.category.eq('books')).where(r => cast(r.category, col.UInt64).gt(1n)).orderBy(r => r.stock.desc()).limit(10);
+  expect(selects(compile(q.ir).sql)).toBe(2);
+  expect(compile(q.ir).sql).toBe('SELECT `__typedhouse_input`.`id`, `__typedhouse_input`.`category`, `__typedhouse_input`.`stock` FROM (SELECT `id`, `category`, `stock` FROM `products` WHERE `category` = {p0:String}) AS `__typedhouse_input` WHERE CAST(`__typedhouse_input`.`category` AS UInt64) > {p1:UInt64} ORDER BY `__typedhouse_input`.`stock` DESC LIMIT 10');
+  expect(compile(q.ir).params).toEqual(emitNaive(q.ir).params);
+  // Reversed, the total filter is not AND-ed into the fallible WHERE either; a fallible filter alone is the block's first WHERE.
+  expect(compile(from(products).where(r => cast(r.category, col.UInt64).gt(1n)).where(r => r.category.eq('books')).ir).sql).toContain('WHERE CAST(`category` AS UInt64) > {p0:UInt64}) AS `__typedhouse_input` WHERE `__typedhouse_input`.`category` = {p1:String}');
+  expect(selects(compile(from(products).where(r => cast(r.category, col.UInt64).gt(1n)).ir).sql)).toBe(1);
 });
 
 it('preserves shared parameter identity and textual allocation order', () => {

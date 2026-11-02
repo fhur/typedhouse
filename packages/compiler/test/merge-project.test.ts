@@ -42,8 +42,8 @@ it('merges stacked selections into one Project over the original input, sharing 
   expect(references(twice).every(r => r.rel === q.ir.id)).toBe(true);
   expect(Object.values(compile(query.ir).params)).toEqual(['1', 'none', '2']);
   expect(Object.keys(compile(query.ir).params)).toEqual(Object.keys(emitNaive(query.ir).params));
-  expect(rewriteMeasure(result.root)).toEqual([0, 0, 2]);
-  expect(rewriteMeasure(query.ir)).toEqual([0, 0, 3]);
+  expect(rewriteMeasure(result.root)).toEqual([0, 0, 2, 0]);
+  expect(rewriteMeasure(query.ir)).toEqual([0, 0, 3, 0]);
   const chain = q.map(r => ({ a: r.id })).map(r => ({ b: r.a })).map(r => ({ c: r.b })).map(r => ({ d: r.c }));
   expect(rewrite(chain.ir).hits.MergeProject).toBe(3);
   expect(compile(chain.ir).sql).toBe('SELECT `id` AS `d` FROM `merge`');

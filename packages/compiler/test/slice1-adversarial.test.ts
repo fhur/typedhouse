@@ -75,8 +75,12 @@ it('admission audit: the wide fragment admits nothing fallible, volatile, raw, s
   // Admitted: bare reads of any type (drop-only), integer arithmetic, boolean family, same-family ifNull incl. LowCardinality/Nullable.
   for (const e of [r.f, r.d, r.at, r.e, r.ids, r.nlc, val(1.5, col.Float64), val(new Date(0), col.DateTime())]) expect(totalExpression(e.ir)).toBe(true);
   for (const e of [r.small.plus(r.small), r.nn.plus(1n), r.nn.ifNull(0n), r.text.ifNull(r.lc), r.lc.eq('x'), r.nn.isNull(), r.small.multiply(val(200, col.UInt8)).gt(1)]) expect(totalExpression(e.ir)).toBe(true);
-  // Conservative rejections worth knowing: ifNull over LowCardinality(Nullable) and a typed Param of a narrower width than the arithmetic result.
-  expect(totalExpression(r.nlc.ifNull('x').ir)).toBe(false);
+  // Slice 4e: ifNull over LowCardinality(Nullable(String)) now resolves (LowCardinality(String)) and is same-family, hence
+  // total like its Nullable twin; across families it stays rejected. Still conservative: a typed Param of a narrower width.
+  expect(totalExpression(r.nlc.ifNull('x').ir)).toBe(true);
+  expect(totalPredicate(r.nlc.ifNull('x').eq('y').ir)).toBe(true);
+  expect(safePredicate(r.nlc.ifNull('x').eq('y').ir)).toBe(false);
+  expect(totalExpression(r.nlc.ifNull(val(1n, col.Int64) as never).ir)).toBe(false);
   expect(totalPredicate(r.small.multiply(val(200, col.UInt8)).gt(val(1, col.UInt8)).ir)).toBe(false);
   // Bare float/decimal/datetime reads are admitted as drops but never as predicate operands.
   for (const e of [r.f, r.d, r.at, r.ids]) expect(totalPredicate(e.ir)).toBe(false);

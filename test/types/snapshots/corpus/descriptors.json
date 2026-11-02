@@ -2107,6 +2107,23 @@
       "partId"
     ]
   },
+  "supported_leftLatest": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "stock": {
+        "kind": "scalar",
+        "name": "Float64"
+      }
+    },
+    "order": [
+      "entityId",
+      "stock"
+    ]
+  },
   "supported_lowStock": {
     "shape": "flat",
     "columns": {
@@ -2174,6 +2191,58 @@
       "parts",
       "stockIndex",
       "eol"
+    ]
+  },
+  "supported_optionalSnapshot": {
+    "shape": "flat",
+    "columns": {
+      "entityId": {
+        "kind": "scalar",
+        "name": "String"
+      },
+      "category": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "String"
+        }
+      },
+      "stockTotal": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "stockP50": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "leadDays": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      },
+      "stockIndex": {
+        "kind": "Nullable",
+        "inner": {
+          "kind": "scalar",
+          "name": "Float64"
+        }
+      }
+    },
+    "order": [
+      "entityId",
+      "category",
+      "stockTotal",
+      "stockP50",
+      "leadDays",
+      "stockIndex"
     ]
   },
   "supported_orderedBare": {

@@ -161,7 +161,7 @@ it('join-bound selections over Filter(Join), the spec self-join shape and a CTE-
   const renamed = await agree(j.where(x => x.a.id.lt(x.b.v)).map(x => ({ x: x.a.id, id: x.b.v })).ir, { selects: 2, oracle: 'SELECT a.id AS x, b.v AS id FROM adv_s3 AS a INNER JOIN adv_s3_other AS b ON a.id = b.id WHERE a.id < b.v', label: 'rename shadow over join residual' });
   expect(renamed.first.data).toEqual([{ x: 1, id: 5 }, { x: 2, id: 25 }, { x: 3, id: 40 }]);
   await agree(j.where(x => x.a.id.lt(x.b.v)).where(x => cast(x.a.s, col.UInt64).gt(0n)).map(x => ({ id: x.a.id })).ir, { error: '6', label: 'fallible second WHERE on the join block' });
-  await agree(j.where(x => x.a.id.ne(2)).where(x => cast(x.a.s, col.UInt64).gt(0n)).map(x => ({ id: x.a.id })).ir, { selects: 3, oracle: 'SELECT a.id AS id FROM (SELECT id, s FROM adv_s3 WHERE id != 2) AS a INNER JOIN adv_s3_other AS b ON a.id = b.id WHERE toUInt64(a.s) > 0', label: 'fallible WHERE above a pushed total one' }); // a flat `id != 2 AND toUInt64(s) > 0` oracle fails under PREWHERE: ClickHouse reorders conjuncts
+  await agree(j.where(x => x.a.id.ne(2)).where(x => cast(x.a.s, col.UInt64).gt(0n)).map(x => ({ id: x.a.id })).ir, { selects: 4, oracle: 'SELECT a.id AS id FROM (SELECT id, s FROM adv_s3 WHERE id != 2) AS a INNER JOIN adv_s3_other AS b ON a.id = b.id WHERE toUInt64(a.s) > 0', label: 'fallible WHERE above a total one (4b: not pushed under the fallible Filter, so 4 SELECTs, was 3)' }); // a flat `id != 2 AND toUInt64(s) > 0` oracle fails under PREWHERE: ClickHouse reorders conjuncts
 
   const shared = t.where(x => x.k.eq('a'));
   const named = await agree(join({ a: shared, b: shared }).on(x => x.a.id.eq(x.b.id)).where(x => x.a.n.le(x.b.n)).map(x => ({ t0: x.a.id, b: x.b.n })).ir, { selects: 2, oracle: "SELECT a.id AS t0, b.n AS b FROM adv_s3 AS a INNER JOIN adv_s3 AS b ON a.id = b.id WHERE a.k = 'a' AND b.k = 'a' AND a.n <= b.n", label: 'alias equal to CTE name' });
@@ -345,6 +345,38 @@ it('agent2: a mixed conjunction over LEFT ARRAY JOIN preserves the original fail
       expect(actual).toEqual({ error: '6' });
     }
   }
+});
+
+it('slice 3b (formerly "PRE-EXISTING … as observed"): a filter outside the total fragment keeps its own SELECT over earlier filters, so both texts agree in rows, meta and failure code on scan and join blocks', async () => {
+  // Before the fix the planner rendered consecutive Filters as one `WHERE a AND b`: `SELECT id FROM adv_s3 WHERE id != {p0}
+  // AND CAST(s AS UInt64) > {p1}` failed with CANNOT_PARSE_TEXT under optimize_move_to_prewhere = 1 (the CAST ran first)
+  // while the naive nesting returned [1, 3], and the join form failed under every setting (the one-sided CAST was pushed
+  // below the join). Now the fallible filter closes the block below it into a derived table, and a total filter above a
+  // fallible one does the same. `agree` runs both emitters through the contract matrix (prefer_column_name_to_alias 0/1 ×
+  // optimize_move_to_prewhere 0/1 × max_threads 1/default) and requires rows, meta and error code to agree cell by cell.
+  const bad = (a: typeof t.row) => cast(a.s, col.UInt64).gt(0n);
+  // Scan block, bad row (id 2, s = 'x') filtered out by the total filter below the cast: rows and meta agree everywhere.
+  const out = await agree(t.where(a => a.id.ne(2)).where(bad).map(a => ({ id: a.id })).ir, { selects: 2, oracle: 'SELECT id FROM (SELECT id, s FROM adv_s3 WHERE id != 2) WHERE toUInt64(s) > 0', label: '3b scan, bad row filtered out' });
+  expect(out.optimized.sql).toBe('SELECT `__typedhouse_input`.`id` FROM (SELECT `id`, `s` FROM `adv_s3` WHERE `id` != {p0:UInt32}) AS `__typedhouse_input` WHERE CAST(`__typedhouse_input`.`s` AS UInt64) > {p1:UInt64}');
+  expect(out.first).toEqual({ meta: [{ name: 'id', type: 'UInt32' }], data: [{ id: 1 }, { id: 3 }] });
+  // Bad row kept: both fail with CANNOT_PARSE_TEXT (6) in every cell.
+  await agree(t.where(a => a.id.ne(1)).where(bad).map(a => ({ id: a.id })).ir, { selects: 2, error: '6', label: '3b scan, bad row kept' });
+  // Fallible first: the cast sees every row in both forms (6), and the total filter above it is not AND-ed into its WHERE.
+  const reversed = await agree(t.where(bad).where(a => a.id.ne(2)).map(a => ({ id: a.id })).ir, { selects: 2, error: '6', label: '3b scan, fallible then total' });
+  expect(reversed.optimized.sql).toBe('SELECT `__typedhouse_input`.`id` FROM (SELECT `id` FROM `adv_s3` WHERE CAST(`s` AS UInt64) > {p0:UInt64}) AS `__typedhouse_input` WHERE `__typedhouse_input`.`id` != {p1:UInt32}'); // `s` is read by the inner WHERE only, so the derived list is pruned to `id`
+  // A fallible filter alone is its block's first WHERE; a total pair still shares one WHERE.
+  await agree(t.where(bad).map(a => ({ id: a.id })).ir, { selects: 1, error: '6', label: '3b scan, fallible alone' });
+  await agree(t.where(a => a.s.ne('x')).where(a => a.id.ne(2)).map(a => ({ id: a.id })).ir, { selects: 1, oracle: "SELECT id FROM adv_s3 WHERE s != 'x' AND id != 2", label: '3b scan, total pair' });
+  // Join block: the two-sided total residual stays in the join block's WHERE, the cast opens a derived table over the whole
+  // block (its references re-qualified by the derived leaf names) and the direct selection folds above it.
+  // Sums: (1,5) → 6, (2,25) → 27, (3,2) → 5, (3,40) → 43; the bad row is id 2.
+  const j = join({ a: t, b: u }).on(x => x.a.id.eq(x.b.id));
+  const jout = await agree(j.where(x => x.a.id.plus(x.b.v).ne(27n)).where(x => cast(x.a.s, col.UInt64).gt(0n)).map(x => ({ id: x.a.id })).ir, { selects: 3, oracle: 'SELECT id FROM (SELECT a.id AS id, a.s AS s FROM adv_s3 AS a INNER JOIN adv_s3_other AS b ON a.id = b.id WHERE a.id + b.v != 27) WHERE toUInt64(s) > 0', label: '3b join, bad row filtered out' });
+  expect(jout.optimized.sql).toBe('SELECT `__typedhouse_input`.`__typedhouse_leaf_0` AS `id` FROM (SELECT `a`.`id` AS `__typedhouse_leaf_0`, `a`.`s` AS `__typedhouse_leaf_3` FROM (SELECT `id`, `s` FROM `adv_s3`) AS `a` INNER ALL JOIN `adv_s3_other` AS `b` ON `a`.`id` = `b`.`id` WHERE (`a`.`id` + `b`.`v` != {p0:UInt64})) AS `__typedhouse_input` WHERE CAST(`__typedhouse_input`.`__typedhouse_leaf_3` AS UInt64) > {p1:UInt64}');
+  expect(jout.first).toEqual({ meta: [{ name: 'id', type: 'UInt32' }], data: [{ id: 1 }, { id: 3 }, { id: 3 }] });
+  await agree(j.where(x => x.a.id.plus(x.b.v).ne(5n)).where(x => cast(x.a.s, col.UInt64).gt(0n)).map(x => ({ id: x.a.id })).ir, { selects: 3, error: '6', label: '3b join, bad row kept' });
+  // Fallible first on the join block (its first WHERE), total two-sided filter above it: not AND-ed in, both fail (6).
+  await agree(j.where(x => cast(x.a.s, col.UInt64).gt(0n)).where(x => x.a.id.plus(x.b.v).ne(27n)).map(x => ({ id: x.a.id })).ir, { selects: 3, error: '6', label: '3b join, fallible then total' });
 });
 
 it('records old-analyzer (allow_experimental_analyzer = 0) behaviour, outside the spec contract', () => {

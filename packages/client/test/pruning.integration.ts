@@ -5,6 +5,7 @@ import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainer
 import { count, crossJoin, join, unionAll, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys, verify } from './backend-harness.js';
+import { ciLimit, prefetchedCheck } from './prefetch-check.js';
 import { build, native, recipeArbitrary, seed, source, topology, type Recipe } from './pruning-arbitrary.js';
 import { pruneColumns } from '../../compiler/src/prune-columns.js';
 import { planSelects } from '../../compiler/src/plan-selects.js';
@@ -30,19 +31,21 @@ async function direct(recipe: Recipe) {
   try { return (await result.json<{ id: string; amount: string }>()).map(r => recipe.nested ? { a: { id: r.id }, b: { amount: BigInt(r.amount) } } : { id: r.id, amount: BigInt(r.amount) }); }
   finally { result.close(); }
 }
-async function check(recipe: Recipe) {
-  const q = build(recipe), expected = await direct(recipe);
-  const plans = backends.map(b => b.compile(q.ir));
+/** Slice 4d: all compile/IO work of one recipe, the native query and both backends in flight at once (no assertion). */
+async function evaluate(recipe: Recipe) {
+  const q = build(recipe), plans = backends.map(b => b.compile(q.ir));
+  const [expected, ...actual] = await Promise.all([direct(recipe), ...backends.map(async (backend, i) => (await collect(backend.run(plans[i]!))).flat())]);
+  return { q, plans, expected: expected!, actual };
+}
+function assertEvaluation({ q, plans, expected, actual }: Awaited<ReturnType<typeof evaluate>>) {
   try {
     expect(plans[0]!.compiled.columns).toEqual(plans[1]!.compiled.columns);
     expect(plans[0]!.compiled.columnPaths).toEqual(plans[1]!.compiled.columnPaths);
-    for (const [i, backend] of backends.entries()) {
-      const rows = (await collect(backend.run(plans[i]!))).flat();
-      expect(keys<unknown, Caps>(q, rows)).toEqual(keys<unknown, Caps>(q, expected));
-    }
+    for (const rows of actual) expect(keys<unknown, Caps>(q, rows)).toEqual(keys<unknown, Caps>(q, expected));
   } catch (cause) { throw new Error(`${String(cause)}\n${JSON.stringify(plans.map(p => ({ sql: p.compiled.sql, params: p.compiled.params })))}`, { cause }); }
   return expected;
 }
+async function check(recipe: Recipe) { return assertEvaluation(await evaluate(recipe)); }
 const anchor: Recipe = { tree: { kind: 'scan' }, fence: 'none', take: 12, offset: 0, tenant: 'acme', renames: 0, nested: true };
 it('anchors disjoint shared demands, duplicate expansions and full-interface fences independently', async () => {
   const expected = [{ a: { id: 'a' }, b: { amount: 2n } }, { a: { id: 'a' }, b: { amount: 3n } }, { a: { id: 'b' }, b: { amount: 2n } }, { a: { id: 'b' }, b: { amount: 3n } }];
@@ -56,11 +59,12 @@ it('anchors disjoint shared demands, duplicate expansions and full-interface fen
 it('executes 500 bounded variable nested/shared recipes with independent native bag anchors', async () => {
   const shapes = new Set<string>();
   const start = performance.now();
-  const result = await fc.check(fc.asyncProperty(recipeArbitrary, async recipe => { shapes.add(topology(recipe.tree)); await check(recipe); }), { seed: Number(process.env.TYPEDHOUSE_PRUNING_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_PRUNING_PATH ? { path: process.env.TYPEDHOUSE_PRUNING_PATH } : {}) });
-  console.info('pruning differential', { runs: result.numRuns, seed: result.seed, topologies: shapes.size, milliseconds: Math.round(performance.now() - start) });
+  const { result, prefetched } = await prefetchedCheck(recipeArbitrary, { seed: Number(process.env.TYPEDHOUSE_PRUNING_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_PRUNING_PATH ? { path: process.env.TYPEDHOUSE_PRUNING_PATH } : {}) },
+    evaluate, (recipe, e) => { shapes.add(topology(recipe.tree)); assertEvaluation(e); });
+  console.info('pruning differential', { runs: result.numRuns, prefetched, seed: result.seed, topologies: shapes.size, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(500); expect(shapes.size).toBeGreaterThan(50);
-}, 120000);
+}, ciLimit(120000));
 it('detects a real dropped physical dependency, shrinks and replays the failing plan', () => {
   const property = fc.property(recipeArbitrary, recipe => {
     const q = build(recipe), validated = validateRel(q.ir);

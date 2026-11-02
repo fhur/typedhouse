@@ -151,3 +151,26 @@ export function contains(e: ExprNode, test: (e: ExprNode) => boolean): boolean {
 export function substitute(e: ExprNode, project: Extract<Rel, { kind: 'Project' }>): ExprNode {
   return mapExpression(e, r => r.rel === project.id && r.path.length === 1 && Object.hasOwn(project.exprs, r.path[0]!) ? project.exprs[r.path[0]!]! : r);
 }
+/** A type whose null-extended (join_use_nulls = 1) value is NULL. Array/Tuple/Map sides
+ * are not wrapped by an outer join and carry server defaults instead, so a predicate on
+ * them can hold on an extended row. */
+function nullCarrying(t: CHType): boolean {
+  return t.kind === 'Nullable' || t.kind === 'LowCardinality' && t.inner.kind === 'Nullable';
+}
+/** Null-rejecting on side `alias` of the Join `rel`: false or NULL (both falsy in WHERE) on
+ * every row whose `alias` side is null-extended. Within the closed fragment only: a
+ * comparison with a bare Nullable column of that side as an operand (any comparison with
+ * a NULL operand is NULL), `isNotNull` of such a column, or an `and` with such an
+ * argument. `or`, `isNull`, `not`, `ifNull`-wrapped operands and Param-only predicates are
+ * not. A column already Nullable in its source still qualifies: the rewrite only claims
+ * that extended rows are rejected, never that source NULLs are, and those are rejected by
+ * the same predicate before and after the join kind changes. Callers also gate on
+ * `safePredicate`. */
+export function nullRejecting(e: ExprNode, rel: Rel['id'], alias: string): boolean {
+  if (e.kind !== 'Call' || e.fn.origin !== 'typed') return false;
+  const side = (a: ExprNode | undefined) => a?.kind === 'ColumnRef' && a.rel === rel && a.path.length > 1 && a.path[0] === alias && nullCarrying(a.type);
+  if (comparisons.includes(e.fn.name)) return e.args.length === 2 && e.args.some(side);
+  if (e.fn.name === 'isNotNull') return e.args.length === 1 && side(e.args[0]);
+  if (e.fn.name === 'and') return e.args.some(a => nullRejecting(a, rel, alias));
+  return false;
+}

@@ -10,6 +10,7 @@ import { source } from './pruning-arbitrary.js';
 import { build, buildComposition, native, recipeArbitrary, seed, shape, anchor, type Recipe } from './aggregate-union-arbitrary.js';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { assertAggregateUnionAccounting } from './aggregate-union-accounting.js';
+import { ciLimit, prefetchedCheck } from './prefetch-check.js';
 let container: StartedTestContainer;
 let driver: ReturnType<typeof createClient>;
 const backends: ReturnType<typeof createClickHouseBackend>[] = [];
@@ -31,36 +32,55 @@ async function direct(r: Recipe) {
   try { return (await result.json<{ key: string; n: string; total: string; highest: string }>()).map(row => ({ key: row.key, n: BigInt(row.n), total: BigInt(row.total), highest: BigInt(row.highest) })); }
   finally { result.close(); }
 }
-async function check(r: Recipe) {
-  const q = build(r), plans = backends.map(b => b.compile(q.ir));
+/** Prefetch independent queries, draining all reads even when one rejects. */
+async function evaluate(r: Recipe) {
   try {
+    const q = build(r), hits = rewriteRel(q.ir).hits;
+    const plans = backends.map(b => b.compile(q.ir));
     const [expected, optimized, naive] = await concurrentReads([
       () => direct(r),
       async () => (await collect(backends[0]!.run(plans[0]!))).flat(),
       async () => (await collect(backends[1]!.run(plans[1]!))).flat(),
     ]);
-    const results = [optimized, naive];
+    return { ok: true as const, q, hits, plans, expected, actual: [optimized, naive] };
+  } catch (cause) { return { ok: false as const, cause }; }
+}
+type Evaluation = Awaited<ReturnType<typeof evaluate>>;
+function assertEvaluation(e: Evaluation) {
+  if (!e.ok) throw e.cause;
+  const { q, plans, expected, actual } = e;
+  try {
     expect(plans[0]!.compiled.columns).toEqual(plans[1]!.compiled.columns);
     expect(plans[0]!.compiled.columnPaths).toEqual(plans[1]!.compiled.columnPaths);
-    for (const rows of results) {
+    for (const rows of actual) {
       expect(keys<unknown, Caps>(q, rows)).toEqual(keys<unknown, Caps>(q, expected));
       expect(rows).toEqual(expected); // key is the complete unique grouping key.
     }
     return expected;
   } catch (cause) { throw new Error(`${String(cause)}\n${JSON.stringify(plans.map(p => ({ sql: p.compiled.sql, params: p.compiled.params })))}`, { cause }); }
 }
+async function check(r: Recipe) { return assertEvaluation(await evaluate(r)); }
+/** CI (run 41185458402) hit the 180 s limit with the serial loop; measured locally, 500 recipes
+ * spent 62 s in naive SQL, 23 s optimized, 14 s native and 36 s compiling and rewriting, one
+ * after another. The campaign is unchanged: a first, always-true pass over the same seed records
+ * exactly the values `fc.check` will generate, their evaluations run `PREFETCH` at a time, and
+ * the real property asserts each one (live, for any value not prefetched: shrinks and replays). Slice 4d: the loop is the
+ * shared `prefetchedCheck` (pruning, cte, pushdown and outer-join use it too). */
+const PREFETCH = 8;
 it('runs 500 fixed-seed recursive aggregate/Union recipes against native bags with rule evidence', async () => {
   const path = process.env.TYPEDHOUSE_AGG_UNION_PATH;
+  const options = { seed: Number(process.env.TYPEDHOUSE_AGG_UNION_SEED ?? seed), numRuns: 500, ...(path ? { path } : {}) };
   const shapes = new Set<string>(); let agg = 0, union = 0;
   const start = performance.now();
-  const result = await fc.check(fc.asyncProperty(recipeArbitrary, async r => {
-    shapes.add(shape(r.composition)); const hits = rewriteRel(build(r).ir).hits; agg += hits.PushFilterAggKey; union += hits.PushFilterUnion;
-    await check(r);
-  }), { seed: Number(process.env.TYPEDHOUSE_AGG_UNION_SEED ?? seed), numRuns: 500, ...(path ? { path } : {}) });
-  console.info('aggregate/Union differential', { mode: path ? 'replay-only (not full acceptance)' : 'full-500', path, runs: result.numRuns, seed: result.seed, shapes: shapes.size, agg, union, milliseconds: Math.round(performance.now() - start) });
+  const { result, prefetched } = await prefetchedCheck(recipeArbitrary, options, evaluate, (r, e) => {
+    shapes.add(shape(r.composition));
+    assertEvaluation(e);
+    if (e.ok) { agg += e.hits.PushFilterAggKey; union += e.hits.PushFilterUnion; }
+  }, PREFETCH);
+  console.info('aggregate/Union differential', { mode: path ? 'replay-only (not full acceptance)' : 'full-500', path, runs: result.numRuns, prefetched, seed: result.seed, shapes: shapes.size, agg, union, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   assertAggregateUnionAccounting(result.numRuns, path, { shapes: shapes.size, agg, union });
-}, 180000);
+}, ciLimit(180000));
 it('anchors rollups, shared latest, repeated/empty branches, HAVING and ordered run/stream', async () => {
   const expected = [{ key: 'a', n: 2n, total: 7n, highest: 5n }];
   await verify(backends, build(anchor), expected, () => direct(anchor), true);

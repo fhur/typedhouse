@@ -61,14 +61,16 @@ export function native(recipe: Recipe): string {
 export function shape(recipe: Recipe): string {
   return `${recipe.left ? 'left' : 'inner'}:${recipe.source}:${recipe.before}:${recipe.after}:${recipe.fence}:${recipe.project ? 'project' : 'full'}`;
 }
-/** The expansion folds into the scan block when it is LEFT or no non-safe filter sits under an inner one. */
-export function expansionFolds(recipe: Recipe): boolean {
-  // A pushed independent predicate cannot share the earlier unsafe WHERE;
-  // its derived source also prevents expansion from folding into the scan.
-  return !(recipe.before === 'unsafe' && (recipe.after === 'independent' || recipe.after === 'both'))
-    && (recipe.left || recipe.before === 'none' || recipe.before === 'safe');
+/** An independent filter pushed below the expansion cannot share an earlier unsafe WHERE. */
+function pushedAboveUnsafe(recipe: Recipe): boolean {
+  return recipe.before === 'unsafe' && (recipe.after === 'independent' || recipe.after === 'both');
 }
-/** One SELECT exactly when the expansion folds, no second ORDER BY follows a LIMIT (the `sort` fence always
+/** The expansion folds into the scan block when it is LEFT over a single Filter block, or no non-safe filter sits under an inner one. */
+export function expansionFolds(recipe: Recipe): boolean {
+  return (recipe.left && !pushedAboveUnsafe(recipe)) || recipe.before === 'none' || recipe.before === 'safe';
+}
+/** One SELECT exactly when the expansion folds, no total filter sits above a folded non-total one (the `alias` filter
+ * over an `unsafe` LEFT block opens its own, slice 3b), no second ORDER BY follows a LIMIT (the `sort` fence always
  * re-sorts above its LIMIT) and no selection follows DISTINCT (it opens a block, and the ordering above it another). */
 export function foldsToOneSelect(recipe: Recipe): boolean {
   return expansionFolds(recipe) && !(recipe.before === 'unsafe' && recipe.after !== 'none')

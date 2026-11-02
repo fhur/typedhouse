@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { col, count, from, table, val } from '@typedhouse/core';
+import { cast, col, count, from, join, leftJoin, max, table, val } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 import { validateRel } from '../src/emit-naive.js';
 import { planSelects } from '../src/plan-selects.js';
@@ -85,6 +85,30 @@ it('(v) folds integer arithmetic whose untyped Params resolve from an integer si
   const overflow = from(events).map(e => ({ x: e.small.plus(300) }));
   for (const emitter of [compile, emitNaive]) expect(() => emitter(overflow.ir)).toThrow('param_incompatible');
 });
+it('slice 3b: a filter outside the total fragment never shares a WHERE or HAVING with earlier filters', () => {
+  const f = table('f', { id: col.UInt64, s: col.String, k: col.String }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] });
+  const g = table('g', { id: col.UInt64, v: col.UInt64 }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] });
+  const scan = from(f);
+  const bad = (r: typeof scan.row) => cast(r.s, col.UInt64).gt(0n);
+  // Earlier filters below, the fallible one above, in IR order; the first WHERE of a block folds whatever it is.
+  const above = scan.where(r => r.id.ne(2n)).where(bad);
+  expect(compile(above.ir).sql).toBe('SELECT `__typedhouse_input`.`id`, `__typedhouse_input`.`s`, `__typedhouse_input`.`k` FROM (SELECT `id`, `s`, `k` FROM `f` WHERE `id` != {p0:UInt64}) AS `__typedhouse_input` WHERE CAST(`__typedhouse_input`.`s` AS UInt64) > {p1:UInt64}');
+  expect(plan(above.ir).blocks.get(above.ir)).toMatchObject({ source: { kind: 'derived', rel: above.ir.kind === 'Filter' ? above.ir.input : undefined }, clauses: [above.ir] });
+  expect(compile(scan.where(bad).ir).sql).toBe('SELECT `id`, `s`, `k` FROM `f` WHERE CAST(`s` AS UInt64) > {p0:UInt64}');
+  // A total filter after the fallible one is not AND-ed into it either; a total pair still shares (MergeFilter merges it anyway).
+  expect(compile(scan.where(bad).where(r => r.id.ne(2n)).ir).sql).toBe('SELECT `__typedhouse_input`.`id`, `__typedhouse_input`.`s`, `__typedhouse_input`.`k` FROM (SELECT `id`, `s`, `k` FROM `f` WHERE CAST(`s` AS UInt64) > {p0:UInt64}) AS `__typedhouse_input` WHERE `__typedhouse_input`.`id` != {p1:UInt64}');
+  const pair = scan.where(r => r.id.ne(2n)).where(r => r.k.eq('a'));
+  expect(plan(pair.ir).blocks.get(pair.ir)?.clauses).toHaveLength(2);
+  expect(compile(pair.ir).sql).toBe('SELECT `id`, `s`, `k` FROM `f` WHERE `id` != {p0:UInt64} AND `k` = {p1:String}');
+  // Join block: the two-sided total residual is the join block's WHERE; the fallible filter opens a derived table over the
+  // whole block, re-qualifying its references by the derived table's leaf names, and the direct selection folds above it.
+  const q = compile(join({ a: from(f), b: from(g) }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.id.plus(r.b.v).ne(27n)).where(r => cast(r.a.s, col.UInt64).gt(0n)).map(r => ({ id: r.a.id })).ir);
+  expect(q.sql).toBe('SELECT `__typedhouse_input`.`__typedhouse_leaf_0` AS `id` FROM (SELECT `a`.`id` AS `__typedhouse_leaf_0`, `a`.`s` AS `__typedhouse_leaf_1` FROM (SELECT `id`, `s` FROM `f`) AS `a` INNER ALL JOIN `g` AS `b` ON `a`.`id` = `b`.`id` WHERE (`a`.`id` + `b`.`v` != {p0:UInt64})) AS `__typedhouse_input` WHERE CAST(`__typedhouse_input`.`__typedhouse_leaf_1` AS UInt64) > {p1:UInt64}');
+  // Aggregate block: a fallible HAVING over an existing HAVING opens a block whose source is the aggregate block; ORDER BY and LIMIT fold into the outer block.
+  const having = scan.groupBy(r => ({ k: r.k })).aggregate(() => ({ c: count() })).where(r => r.c.gt(1n)).where(r => cast(r.k, col.UInt64).gt(1n)).orderBy(r => r.k).limit(2);
+  expect(compile(having.ir).sql).toBe('SELECT `__typedhouse_input`.`k`, `__typedhouse_input`.`c` FROM (SELECT `__typedhouse_input`.`k` AS `k`, count() AS `c` FROM `f` AS `__typedhouse_input` GROUP BY `__typedhouse_input`.`k` HAVING `c` > {p0:UInt64}) AS `__typedhouse_input` WHERE CAST(`__typedhouse_input`.`k` AS UInt64) > {p1:UInt64} ORDER BY `__typedhouse_input`.`k` ASC LIMIT 2');
+  for (const query of [above, pair, having]) { expect(compile(query.ir).columns).toEqual(emitNaive(query.ir).columns); expect(Object.keys(compile(query.ir).params)).toEqual(Object.keys(emitNaive(query.ir).params)); }
+});
 it('records Distinct as a flag and ArrayJoin as a FROM-level member of scan blocks', () => {
   const s = table('s', { id: col.UInt64, ids: col.Array(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
   const scan = from(s);
@@ -122,4 +146,18 @@ it('records Distinct as a flag and ArrayJoin as a FROM-level member of scan bloc
   expect(compile(scan.distinct().map(r => ({ ids: r.ids, id: r.id })).orderBy(r => r.id).map(r => ({ id: r.id })).ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id` FROM (SELECT DISTINCT `ids`, `id` FROM `s` ORDER BY `id` ASC) AS `__typedhouse_input`');
   expect(compile(scan.distinct().map(r => ({ id: r.id })).ir).sql).toBe('SELECT `__typedhouse_input`.`id` AS `id` FROM (SELECT DISTINCT `id`, `ids` FROM `s`) AS `__typedhouse_input`');
   expect(compile(scan.distinct().map(r => ({ id: r.id, other: r.ids })).ir).sql).toContain('FROM (SELECT DISTINCT `id`, `ids` FROM `s`) AS `__typedhouse_input`');
+});
+
+it('4c: an aggregate alias equal to a join-input column that HAVING/ORDER BY name reads the join block as a derived table', () => {
+  const m = { engine: 'Memory', sortingKey: [], partitionKey: [] } as const;
+  const pa = from(table('pa', { id: col.UInt32, s: col.String, n: col.Int64 }, m)), pb = from(table('pb', { id: col.UInt32, n: col.Int64, v: col.String }, m));
+  const lj = () => leftJoin({ a: pa }, { b: pb }).on(r => r.a.id.eq(r.b.id));
+  // Fenced: `n` (count) is a column of both inputs, read by max(b.n) and named by HAVING/ORDER BY. The derived join block
+  // exposes only leaf names, so `n` can bind nothing but the alias under prefer_column_name_to_alias = 1.
+  const fenced = lj().groupBy(r => ({ id: r.a.id })).aggregate(g => ({ n: count(), top: max(g.b.n) })).where(r => r.n.gt(1n)).orderBy(r => r.n);
+  expect(compile(fenced.ir).sql).toBe('SELECT `__typedhouse_input`.`__typedhouse_leaf_0` AS `id`, count() AS `n`, max(`__typedhouse_input`.`__typedhouse_leaf_4`) AS `top` FROM (SELECT `a`.`id` AS `__typedhouse_leaf_0`, `b`.`n` AS `__typedhouse_leaf_4` FROM (SELECT `id` FROM `pa`) AS `a` LEFT ALL JOIN (SELECT `id`, `n` FROM `pb`) AS `b` ON `a`.`id` = `b`.`id`) AS `__typedhouse_input` GROUP BY `__typedhouse_input`.`__typedhouse_leaf_0` HAVING `n` > {p0:UInt64} ORDER BY `n` ASC SETTINGS join_use_nulls = 1 /* join_use_nulls = 1: unmatched outer-join columns are NULL, not type defaults */');
+  // Folded: `v` is an identity read of a column only `pb` carries; `c`/`top` collide with nothing.
+  const folded = lj().groupBy(r => ({ v: r.b.v })).aggregate(g => ({ c: count(), top: max(g.b.n) })).where(r => r.c.gt(1n)).orderBy(r => r.v);
+  expect(compile(folded.ir).sql).toBe('SELECT `b`.`v` AS `v`, count() AS `c`, max(`b`.`n`) AS `top`\nFROM (SELECT `id` FROM `pa`) AS `a`\nLEFT ALL JOIN `pb` AS `b` ON `a`.`id` = `b`.`id`\nGROUP BY `b`.`v`\nHAVING `c` > {p0:UInt64}\nORDER BY `v` ASC SETTINGS join_use_nulls = 1 /* join_use_nulls = 1: unmatched outer-join columns are NULL, not type defaults */');
+  for (const q of [fenced, folded]) expect(compile(q.ir).columns).toEqual(emitNaive(q.ir).columns);
 });

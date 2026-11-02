@@ -58,10 +58,14 @@ expectTypeOf<Infer<typeof supported.latestTotals>>().toEqualTypeOf<Snapshot.supp
 expectTypeOf<Infer<typeof supported.latestTotals>>().not.toBeAny();
 expectTypeOf<Infer<typeof supported.leftArray>>().toEqualTypeOf<Snapshot.supported_leftArray>();
 expectTypeOf<Infer<typeof supported.leftArray>>().not.toBeAny();
+expectTypeOf<Infer<typeof supported.leftLatest>>().toEqualTypeOf<Snapshot.supported_leftLatest>();
+expectTypeOf<Infer<typeof supported.leftLatest>>().not.toBeAny();
 expectTypeOf<Infer<typeof supported.lowStock>>().toEqualTypeOf<Snapshot.supported_lowStock>();
 expectTypeOf<Infer<typeof supported.lowStock>>().not.toBeAny();
 expectTypeOf<Infer<typeof supported.manufacturers>>().toEqualTypeOf<Snapshot.supported_manufacturers>();
 expectTypeOf<Infer<typeof supported.manufacturers>>().not.toBeAny();
+expectTypeOf<Infer<typeof supported.optionalSnapshot>>().toEqualTypeOf<Snapshot.supported_optionalSnapshot>();
+expectTypeOf<Infer<typeof supported.optionalSnapshot>>().not.toBeAny();
 expectTypeOf<Infer<typeof supported.orderedBare>>().toEqualTypeOf<Snapshot.supported_orderedBare>();
 expectTypeOf<Infer<typeof supported.orderedBare>>().not.toBeAny();
 expectTypeOf<Infer<typeof supported.orderedComponents>>().toEqualTypeOf<Snapshot.supported_orderedComponents>();
