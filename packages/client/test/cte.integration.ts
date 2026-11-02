@@ -5,7 +5,7 @@ import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainer
 import { col, count, crossJoin, from, join, scalar, sum, table, unionAll, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys, verify } from './backend-harness.js';
-import { ciLimit, prefetchedCheck } from './prefetch-check.js';
+import { ciLimit, ciMaxExecutionTime, prefetchedCheck, reportSlowestQuery } from './prefetch-check.js';
 import { build, decodeNative, native, recipeArbitrary, seed, shape, type Recipe } from './cte-arbitrary.js';
 let container: StartedTestContainer;
 let driver: ReturnType<typeof createClient>;
@@ -14,7 +14,7 @@ let warning: ReturnType<typeof vi.spyOn>;
 beforeAll(async () => {
   warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   container = await new GenericContainer('clickhouse/clickhouse-server:24.8').withEnvironment({ CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'fixture', CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1' }).withExposedPorts(8123).withWaitStrategy(Wait.forHttp('/ping', 8123)).start();
-  const options = { url: `http://${container.getHost()}:${container.getMappedPort(8123)}`, username: 'fixture', password: 'fixture', clickhouse_settings: { max_execution_time: 10, max_result_rows: '5000', result_overflow_mode: 'throw' as const } };
+  const options = { url: `http://${container.getHost()}:${container.getMappedPort(8123)}`, username: 'fixture', password: 'fixture', clickhouse_settings: { max_execution_time: ciMaxExecutionTime(10), max_result_rows: '5000', result_overflow_mode: 'throw' as const } };
   driver = createClient(options);
   for (const mode of ['clickhouse', 'clickhouse-naive'] as const) backends.push(createClickHouseBackend(options, mode));
   await driver.command({ query: 'CREATE TABLE pruning_wide (id String,tenant String,amount UInt64,spare String,ids Array(String),waste String) ENGINE=MergeTree ORDER BY (tenant,id)' });
@@ -26,7 +26,7 @@ beforeAll(async () => {
   await driver.command({ query: 'CREATE TABLE t0 (id String, __typedhouse_input String, t1 String) ENGINE=Memory' });
   await driver.insert({ table: 't0', values: [{ id: 'a', __typedhouse_input: 'i', t1: 'j' }], format: 'JSONEachRow' });
 }, 120000);
-afterAll(async () => { warning?.mockRestore(); for (const b of backends) await b.close(); await driver?.close(); await container?.stop(); });
+afterAll(async () => { await reportSlowestQuery(driver, 'cte', ciMaxExecutionTime(10)); warning?.mockRestore(); for (const b of backends) await b.close(); await driver?.close(); await container?.stop(); });
 async function direct(r: Recipe) {
   const result = await driver.query({ query: native(r), format: 'JSONEachRow' });
   try { return (await result.json<{ id: string; amount: string; first?: string; second?: string }>()).map(row => decodeNative(r, row)); }

@@ -202,7 +202,9 @@ it('4. narrowed CTE exception: name: agg(name) over t0 with HAVING/ORDER BY thro
 }, 300000);
 
 it('hazard: an ALIAS column omitted from the descriptor (`typedhouse generate --skip-alias`) is outside N', async () => {
-  const M = from(table('xm', { id: col.UInt32, v: col.String }, meta));
+  // 4f: the descriptor declares the omitted ALIAS column as shadow-only `hiddenColumns` (what `typedhouse generate
+  // --skip-alias` now emits); every alias guard counts it in N. The undeclared twin is recorded below, out of contract.
+  const M = from(table('xm', { id: col.UInt32, v: col.String }, { ...meta, hiddenColumns: ['hidden'] }));
   const q = join({ a: A, m: M }).on(r => r.a.id.eq(r.m.id)).groupBy(r => ({ id: r.a.id })).aggregate(g => ({ hidden: count(), top: max(g.m.v) })).where(r => r.hidden.gt(1n));
   // Scan-block twin (pre-existing slice 1/3 guard, same descriptor-based schema).
   const scan = M.groupBy(r => ({ id: r.id })).aggregate(g => ({ hidden: count(), top: max(g.v) })).where(r => r.hidden.gt(1n));
@@ -214,10 +216,18 @@ it('hazard: an ALIAS column omitted from the descriptor (`typedhouse generate --
       results[`${label} alias=${s.prefer_column_name_to_alias} prewhere=${s.optimize_move_to_prewhere}`] = o === n ? 'agree' : `optimized ${o.startsWith('E') ? o : 'rows'} vs naive ${n.startsWith('E') ? n : 'rows'}`;
     }
   }
-  // PIN (Tester finding 4c-1): the descriptor-faithful N cannot see an undeclared ALIAS column; both the 4c join rule and the
-  // pre-existing scan guard fold, and `HAVING hidden` binds xm.hidden under prefer_column_name_to_alias = 1.
+  // PIN (Tester finding 4c-1), flipped by 4f: with `hiddenColumns` in N both the 4c join rule and the slice 1/3 scan guard
+  // keep the aggregate's own scope, so `HAVING hidden` names the alias in every cell. Was: alias=1 cells
+  // 'optimized E215 vs naive rows' for join and scan.
   expect(results).toEqual({
-    'join alias=0 prewhere=0': 'agree', 'join alias=0 prewhere=1': 'agree', 'join alias=1 prewhere=0': 'optimized E215 vs naive rows', 'join alias=1 prewhere=1': 'optimized E215 vs naive rows',
-    'scan alias=0 prewhere=0': 'agree', 'scan alias=0 prewhere=1': 'agree', 'scan alias=1 prewhere=0': 'optimized E215 vs naive rows', 'scan alias=1 prewhere=1': 'optimized E215 vs naive rows',
+    'join alias=0 prewhere=0': 'agree', 'join alias=0 prewhere=1': 'agree', 'join alias=1 prewhere=0': 'agree', 'join alias=1 prewhere=1': 'agree',
+    'scan alias=0 prewhere=0': 'agree', 'scan alias=0 prewhere=1': 'agree', 'scan alias=1 prewhere=0': 'agree', 'scan alias=1 prewhere=1': 'agree',
   });
+  // 4f, out of contract (spec: a descriptor lists every column the server resolves by name, or declares it hidden): the
+  // undeclared descriptor still diverges exactly as the original pin recorded.
+  const bareM = from(table('xm', { id: col.UInt32, v: col.String }, meta));
+  const undeclared = join({ a: A, m: bareM }).on(r => r.a.id.eq(r.m.id)).groupBy(r => ({ id: r.a.id })).aggregate(g => ({ hidden: count(), top: max(g.m.v) })).where(r => r.hidden.gt(1n));
+  const o = compile(undeclared.ir), n = emitNaive(undeclared.ir);
+  expect(brief(await execute(o.sql, o.params, { prefer_column_name_to_alias: 1 }))).toBe('E215');
+  expect(brief(await execute(n.sql, n.params, { prefer_column_name_to_alias: 1 }))).not.toMatch(/^E/);
 });

@@ -55,7 +55,7 @@ export function renderSchema(schema: DatabaseSchema): string {
   const shortcuts = [['entity_ots_component', 'ComponentRow'], ['entity_off_the_shelf_part', 'PartRow'], ['metric_group_ots_component_indices', 'ComponentIndicesRow']] as const;
   const body = tables.map((t, i) => {
     const columns = [...t.columns].sort((a, b) => a.position - b.position);
-    const metadata = object([['engine', str(t.engine)], ['sortingKey', JSON.stringify(t.sortingKey)], ['partitionKey', JSON.stringify(t.partitionKey)], ['primaryKey', JSON.stringify(t.primaryKey)], ['columnMetadata', object(columns.map(c => [c.name, JSON.stringify({ defaultKind: c.defaultKind, comment: c.comment, position: c.position })]))]]);
+    const metadata = object([['engine', str(t.engine)], ['sortingKey', JSON.stringify(t.sortingKey)], ['partitionKey', JSON.stringify(t.partitionKey)], ['primaryKey', JSON.stringify(t.primaryKey)], ...(t.hiddenColumns?.length ? [['hiddenColumns', JSON.stringify(t.hiddenColumns)] as [string, string]] : []), ['columnMetadata', object(columns.map(c => [c.name, JSON.stringify({ defaultKind: c.defaultKind, comment: c.comment, position: c.position })]))]]);
     const shortcut = shortcuts.find(([name]) => name === t.name);
     return `const ${bindings[i]} = table(${str(t.name)}, {\n${columns.map(c => `  ${key(c.name)}: ${renderColumn(c.type)},`).join('\n')}\n}, ${metadata});\nexport type ${aliases[i]} = Infer<typeof ${bindings[i]}>;${shortcut ? `\nexport type ${shortcut[1]} = ${aliases[i]};` : ''}`;
   }).join('\n\n');

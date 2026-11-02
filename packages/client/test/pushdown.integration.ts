@@ -6,7 +6,7 @@ import { canonicalKey, crossJoin, join, leftJoin, unionAll, val, col } from '@ty
 import { components, parts } from './differential-arbitrary.js';
 import { createClickHouseBackend, type Backend } from '../src/index.js';
 import { collect, differential, multiplicityDiff, decodedRecord } from './backend-harness.js';
-import { ciLimit, prefetchedCheck } from './prefetch-check.js';
+import { ciLimit, ciMaxExecutionTime, prefetchedCheck, reportSlowestQuery } from './prefetch-check.js';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { build, fails, intDiv, native, recipeArbitrary, seed, shape, shapeCount, type Recipe } from './pushdown-arbitrary.js';
 let container: StartedTestContainer;
@@ -20,7 +20,7 @@ const values = [
 ];
 beforeAll(async () => {
   container = await new GenericContainer('clickhouse/clickhouse-server:24.8').withEnvironment({ CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'fixture', CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1' }).withExposedPorts(8123).withWaitStrategy(Wait.forHttp('/ping', 8123)).start();
-  const options = { url: `http://${container.getHost()}:${container.getMappedPort(8123)}`, username: 'fixture', password: 'fixture', clickhouse_settings: { max_execution_time: 10, max_result_rows: '1000', result_overflow_mode: 'throw' as const } };
+  const options = { url: `http://${container.getHost()}:${container.getMappedPort(8123)}`, username: 'fixture', password: 'fixture', clickhouse_settings: { max_execution_time: ciMaxExecutionTime(10), max_result_rows: '1000', result_overflow_mode: 'throw' as const } };
   driver = createClient(options);
   for (const mode of ['clickhouse', 'clickhouse-naive'] as const) backends.push(createClickHouseBackend(options, mode));
   await driver.command({ query: 'CREATE TABLE differential_components (tenant String,id String,category Nullable(String),ids Array(String),at Date,amount UInt64) ENGINE=Memory' });
@@ -28,7 +28,7 @@ beforeAll(async () => {
   await driver.insert({ table: 'differential_components', values, format: 'JSONEachRow' });
   await driver.insert({ table: 'differential_parts', values: [{ tenant: 'acme', id: 'p' }, { tenant: 'acme', id: 'p' }, { tenant: 'acme', id: 'q' }, { tenant: 'other', id: 'p' }], format: 'JSONEachRow' });
 }, 120000);
-afterAll(async () => { for (const backend of backends) await backend.close(); await driver?.close(); await container?.stop(); });
+afterAll(async () => { await reportSlowestQuery(driver, 'pushdown', ciMaxExecutionTime(10)); for (const backend of backends) await backend.close(); await driver?.close(); await container?.stop(); });
 /** The server error type a backend fails with (QueryError's cause is the driver error), or 'none'. */
 async function failure(backend: Backend, q: ReturnType<typeof build>): Promise<string> {
   try { await collect(backend.run(backend.compile(q.ir))); return 'none'; }

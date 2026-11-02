@@ -128,7 +128,7 @@ export function validateStructure(root: Rel): void {
             default: choice('kind', ['scalar', 'FixedString', 'DateTime', 'DateTime64', 'Decimal', 'Enum', 'Nullable', 'LowCardinality', 'Array', 'Map', 'Tuple', 'Variant', 'Dynamic', 'AggregateFunction', 'SimpleAggregateFunction', 'Unknown']);
           }
           break;
-        case 'table': field('name', 'string'); field('columns', record('type')); field('engine', 'string'); field('sortingKey', array('string')); field('partitionKey', array('string')); field('primaryKey', array('string'), true); break;
+        case 'table': field('name', 'string'); field('columns', record('type')); field('engine', 'string'); field('sortingKey', array('string')); field('partitionKey', array('string')); field('primaryKey', array('string'), true); field('hiddenColumns', array('string'), true); break;
         case 'knownEvidence': field('catalog', record('knownEntry')); field('name', 'string'); field('declaration', 'knownDeclaration', true); break;
         case 'knownEntry': field('isAggregate', 'boolean'); if (object.deterministic !== null) field('deterministic', 'boolean'); field('aliasTo', 'string'); break;
         case 'knownDeclaration': choice('origin', ['as']); field('type', 'type'); break;

@@ -2,7 +2,9 @@ import type { ClickHouseClient } from '@clickhouse/client';
 import { parseCHType, type CHType } from '@typedhouse/core';
 
 export interface SchemaColumn { name: string; type: CHType; position: number; defaultKind: string; comment: string }
-export interface SchemaTable { name: string; columns: SchemaColumn[]; engine: string; sortingKey: string[]; partitionKey: string[]; primaryKey: string[] }
+/** `hiddenColumns` (slice 4f): names of ALIAS columns skipped by `skipAlias`. They stay resolvable by name on the server,
+ * so the generated descriptor declares them as shadow-only metadata for the compiler's alias guards. */
+export interface SchemaTable { name: string; columns: SchemaColumn[]; engine: string; sortingKey: string[]; partitionKey: string[]; primaryKey: string[]; hiddenColumns?: string[] }
 export interface KnownFunction { name: string; isAggregate: boolean; deterministic: boolean | null; aliasTo: string }
 export interface DatabaseSchema { tables: SchemaTable[]; functions: KnownFunction[] }
 
@@ -36,7 +38,7 @@ ORDER BY c.table, c.position`, query_params: { db: database }, format: 'JSONEach
   for (const row of rows) {
     let table = tables.get(row.table);
     if (!table) { table = { name: row.table, columns: [], engine: row.engine, sortingKey: splitKey(row.sorting_key), partitionKey: splitKey(row.partition_key), primaryKey: splitKey(row.primary_key) }; tables.set(row.table, table); }
-    if (options.skipAlias && row.default_kind === 'ALIAS') continue;
+    if (options.skipAlias && row.default_kind === 'ALIAS') { (table.hiddenColumns ??= []).push(row.name); continue; }
     table.columns.push({ name: row.name, type: parseCHType(row.type), position: Number(row.position), defaultKind: row.default_kind, comment: row.comment });
   }
   const probe = await (await client.query({ query: "SELECT name FROM system.columns WHERE database = 'system' AND table = 'functions' AND name = 'deterministic'", format: 'JSONEachRow' })).json<{ name: string }>();

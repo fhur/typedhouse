@@ -13,7 +13,24 @@ typedhouse check --database analytics --out-dir src/generated
 credentials to avoid shell history. Unknown, duplicate value flags and missing
 values fail. Driver errors are redacted. The client is closed on both success and
 failure. `check` compares both files without creating/writing files, and exits 1
-if either is missing or stale. `--skip-alias` excludes only ALIAS columns.
+if either is missing or stale. `--skip-alias` excludes only ALIAS columns from the
+row type; their names are kept as the descriptor's shadow-only `hiddenColumns`
+metadata (`table(name, columns, { ..., hiddenColumns: ["alias_id"] })`), which is
+never a row field or select item. MATERIALIZED columns are always declared.
+
+**Descriptor completeness (slice 4f).** A descriptor must list every column the
+server resolves by name in a SELECT over the table, or name it in
+`hiddenColumns`: under `prefer_column_name_to_alias = 1` an output alias equal to
+such a column binds the column (e.g. `count() AS hidden … HAVING hidden > 1` over a
+table with `hidden ALIAS …` fails with code 215), and the compiler's alias guards
+can only avoid that for names they know. They check declared and hidden names on
+every path where the table is read directly: a computed selection, an aggregate
+folded onto the table (also through filters, an ARRAY JOIN or plain column
+selections), and an aggregate folded onto a join with that table as a side. Generated descriptors always satisfy this.
+`check` additionally prints a warning to stderr, per table, naming the live columns
+that the existing `schema.ts` neither declares nor hides (for example a column added
+after generation); the exit status is decided by the stale comparison exactly as
+before. Hand-written descriptors are not checked: list hidden names yourself.
 
 Introspection uses bound database parameters and server metadata, never parses
 DDL. Key expression lists retain expressions and split only at top-level commas.

@@ -521,7 +521,7 @@ WHERE c.database = {db:String}
 ORDER BY c.table, c.position
 ```
 
-Include tables, views and materialized views (`t.engine` tells them apart; all three are queryable). Skip `default_kind = 'ALIAS'` columns only if `--skip-alias` is passed; by default they are included and marked. Columns whose name contains a dot are the flattened members of a `Nested(...)` column; keep them as-is under their dotted name.
+Include tables, views and materialized views (`t.engine` tells them apart; all three are queryable). Skip `default_kind = 'ALIAS'` columns only if `--skip-alias` is passed; by default they are included and marked. Skipped names are still emitted, as the descriptor's shadow-only `hiddenColumns` (see "Descriptor completeness" below). Columns whose name contains a dot are the flattened members of a `Nested(...)` column; keep them as-is under their dotted name.
 
 ### Type grammar
 
@@ -863,6 +863,7 @@ These are settled so the implementer does not relitigate them; change one only w
 | `ARRAY JOIN` | the `arrayJoin` and `leftArrayJoin` operators, in v1; one per SELECT block |
 | Window functions, `LIMIT BY` | `sql` only in v1 |
 | Error contract of the optimizing path | Results-only (user ruling, M4 slice 4d): whenever the naive emission succeeds, the optimized query returns identical rows and types and never fails; when naive fails, the optimized query may fail or succeed, and if it succeeds its rows equal a guard-first oracle (fallible expressions evaluated only on rows that pass the guards, in IR order). Reason: ClickHouse's filter order, PREWHERE and primary-key/part pruning make whether an error is raised plan-dependent (24.8 prunes the part holding a bad row from a guard above an isolated fallible WHERE), so naive's failures are partly an artifact of its nesting. Existing fences stay; relaxing them is a later decision |
+| Descriptor completeness | (M4 slice 4f) A table descriptor lists every column the server can resolve by name in a SELECT over that table (ALIAS and MATERIALIZED columns included), or names the ones it omits in the shadow-only `hiddenColumns` metadata option. Hidden names are never row fields or select items; the compiler's alias guards treat them as physical columns (an aggregate folded onto the table, also through filters, an ARRAY JOIN or plain column selections, checks its aliases against the table's full declared output plus `hiddenColumns`), because under `prefer_column_name_to_alias = 1` an output alias equal to a resolvable column binds that column (`HAVING hidden` → code 215 where the nested form succeeds). `typedhouse generate --skip-alias` writes the skipped ALIAS names there; `typedhouse check` warns when the live table has a column the existing descriptor neither declares nor hides. A descriptor that omits a resolvable column without declaring it is outside the results-only contract |
 | Incremental engine | A TypeScript DBSP implementation over the same IR, later; not the Rust `dbsp` crate. The eight constraints in Part 4 are part of milestone 3 |
 
 Still open, to decide during milestone 3 when the code makes the trade-off concrete:

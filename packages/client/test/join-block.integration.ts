@@ -5,7 +5,7 @@ import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainer
 import { col, from, print, parseCHType, table, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys } from './backend-harness.js';
-import { prefetchedCheck } from './prefetch-check.js';
+import { prefetchedCheck, reportSlowestQuery } from './prefetch-check.js';
 import { build, buildColliding, colliding, collidingShape, native, nativeColliding, recipes, seed, shape, type Colliding, type Recipe } from './join-block-arbitrary.js';
 let container: StartedTestContainer;
 let driver: ReturnType<typeof createClient>;
@@ -25,7 +25,7 @@ beforeAll(async () => {
     { id: 'a', tenant: 'other', amount: '5', spare: 'z', ids: ['orphan'], waste: 'unused' },
   ] });
 }, 120000);
-afterAll(async () => { for (const b of [...backends, ...preferColumn]) await b.close(); await driver?.close(); await container?.stop(); });
+afterAll(async () => { await reportSlowestQuery(driver, 'join-block'); for (const b of [...backends, ...preferColumn]) await b.close(); await driver?.close(); await container?.stop(); });
 function decode(value: unknown, key = ''): unknown {
   if (typeof value === 'string' && ['amount', 'n', 'total'].includes(key)) return BigInt(value);
   if (Array.isArray(value)) return value;

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import fc from 'fast-check';
-import { prefetchedCheck, ciLimit } from './prefetch-check.js';
+import { prefetchedCheck, ciLimit, ciMaxExecutionTime, prefetchConcurrency } from './prefetch-check.js';
 import { resultsContract } from './results-contract.js';
 import * as aggregateUnion from './aggregate-union-arbitrary.js';
 import * as cte from './cte-arbitrary.js';
@@ -60,6 +60,42 @@ it('ciLimit doubles an explicit limit only under CI=true', () => {
     for (const value of ['false', '0', '', '1', 'TRUE']) { process.env.CI = value; expect(ciLimit(180000), value).toBe(180000); }
     process.env.CI = 'true'; expect(ciLimit(180000)).toBe(360000);
   } finally { if (saved === undefined) delete process.env.CI; else process.env.CI = saved; }
+});
+
+it('slice 4f item 0: prefetch concurrency and the per-query server limit change only under CI=true', async () => {
+  const os = await import('node:os');
+  // Locally (CI unset or anything but 'true'): 8 at a time and the suite's own limit, whatever the host.
+  for (const env of [{}, { CI: 'false' }, { CI: '1' }, { CI: 'TRUE' }, { CI: '' }] as NodeJS.ProcessEnv[]) {
+    for (const cpus of [1, 2, 4, 16]) expect(prefetchConcurrency(env, cpus), JSON.stringify(env)).toBe(8);
+    expect(ciMaxExecutionTime(10, env)).toBe(10);
+    expect(ciMaxExecutionTime(20, env)).toBe(20);
+  }
+  const ci = { CI: 'true' } as NodeJS.ProcessEnv;
+  expect([1, 2, 4, 8, 16, 64].map(cpus => prefetchConcurrency(ci, cpus))).toEqual([1, 2, 4, 8, 8, 8]);
+  expect(prefetchConcurrency(ci, 0)).toBe(1); // never zero workers
+  expect(ciMaxExecutionTime(10, ci)).toBe(30);
+  expect(ciMaxExecutionTime(60, ci)).toBe(60); // never lowers a suite's own limit
+  // Defaults read the real environment and host.
+  const saved = process.env.CI;
+  try {
+    delete process.env.CI; expect(prefetchConcurrency()).toBe(8); expect(ciMaxExecutionTime(10)).toBe(10);
+    process.env.CI = 'true'; expect(prefetchConcurrency()).toBe(Math.min(8, os.availableParallelism())); expect(ciMaxExecutionTime(10)).toBe(30);
+  } finally { if (saved === undefined) delete process.env.CI; else process.env.CI = saved; }
+});
+
+it('slice 4f item 0: a lower concurrency runs exactly the same campaign (stream, order, failure, shrink)', async () => {
+  const arbitrary = fc.integer({ min: 0, max: 1000 }), options = { seed: 42, numRuns: 200 };
+  const reference = await fc.check(fc.asyncProperty(arbitrary, async n => { if (n > 500) throw new Error('big'); }), options);
+  for (const concurrency of [1, 2, 4, 8]) {
+    const asserted: number[] = [];
+    const passing = await prefetchedCheck(arbitrary, options, async n => n, n => { asserted.push(n); }, concurrency);
+    expect(passing.result.failed).toBe(false);
+    expect(asserted).toEqual(fc.sample(arbitrary, options));
+    const { result } = await prefetchedCheck(arbitrary, options, async n => n, n => { if (n > 500) throw new Error('big'); }, concurrency);
+    expect(result.counterexample, String(concurrency)).toEqual(reference.counterexample);
+    expect(result.counterexamplePath, String(concurrency)).toBe(reference.counterexamplePath);
+    expect(result.numShrinks, String(concurrency)).toBe(reference.numShrinks);
+  }
 });
 
 it('resultsContract: results-only error contract (user ruling, slice 4d follow-up)', () => {

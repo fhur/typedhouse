@@ -9,13 +9,13 @@ import { source } from './pruning-arbitrary.js';
 import { build, buildComposition, native, recipeArbitrary, seed, shape, anchor, type Recipe } from './aggregate-union-arbitrary.js';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { assertAggregateUnionAccounting } from './aggregate-union-accounting.js';
-import { ciLimit, prefetchedCheck } from './prefetch-check.js';
+import { ciLimit, ciMaxExecutionTime, prefetchedCheck, reportSlowestQuery } from './prefetch-check.js';
 let container: StartedTestContainer;
 let driver: ReturnType<typeof createClient>;
 const backends: ReturnType<typeof createClickHouseBackend>[] = [];
 beforeAll(async () => {
   container = await new GenericContainer('clickhouse/clickhouse-server:24.8').withEnvironment({ CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'fixture', CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1' }).withExposedPorts(8123).withWaitStrategy(Wait.forHttp('/ping', 8123)).start();
-  const options = { url: `http://${container.getHost()}:${container.getMappedPort(8123)}`, username: 'fixture', password: 'fixture', clickhouse_settings: { max_execution_time: 10, max_result_rows: '5000', result_overflow_mode: 'throw' as const } };
+  const options = { url: `http://${container.getHost()}:${container.getMappedPort(8123)}`, username: 'fixture', password: 'fixture', clickhouse_settings: { max_execution_time: ciMaxExecutionTime(10), max_result_rows: '5000', result_overflow_mode: 'throw' as const } };
   driver = createClient(options);
   for (const mode of ['clickhouse', 'clickhouse-naive'] as const) backends.push(createClickHouseBackend(options, mode));
   await driver.command({ query: 'CREATE TABLE pruning_wide (id String,tenant String,amount UInt64,spare String,ids Array(String),waste String) ENGINE=MergeTree ORDER BY (tenant,id)' });
@@ -25,7 +25,7 @@ beforeAll(async () => {
     { id: 'a', tenant: 'other', amount: '5', spare: 'z', ids: ['orphan'], waste: 'unused' },
   ], format: 'JSONEachRow' });
 }, 120000);
-afterAll(async () => { for (const b of backends) await b.close(); await driver?.close(); await container?.stop(); });
+afterAll(async () => { await reportSlowestQuery(driver, 'aggregate-union', ciMaxExecutionTime(10)); for (const b of backends) await b.close(); await driver?.close(); await container?.stop(); });
 async function direct(r: Recipe) {
   const result = await driver.query({ query: native(r), format: 'JSONEachRow' });
   try { return (await result.json<{ key: string; n: string; total: string; highest: string }>()).map(row => ({ key: row.key, n: BigInt(row.n), total: BigInt(row.total), highest: BigInt(row.highest) })); }
@@ -59,10 +59,9 @@ async function check(r: Recipe) { return assertEvaluation(await evaluate(r)); }
 /** CI (run 41185458402) hit the 180 s limit with the serial loop; measured locally, 500 recipes
  * spent 62 s in naive SQL, 23 s optimized, 14 s native and 36 s compiling and rewriting, one
  * after another. The campaign is unchanged: a first, always-true pass over the same seed records
- * exactly the values `fc.check` will generate, their evaluations run `PREFETCH` at a time, and
+ * exactly the values `fc.check` will generate, their evaluations run 8 at a time (slice 4f: `prefetchConcurrency()`, fewer only under CI), and
  * the real property asserts each one (live, for any value not prefetched: shrinks and replays). Slice 4d: the loop is the
  * shared `prefetchedCheck` (pruning, cte, pushdown and outer-join use it too). */
-const PREFETCH = 8;
 it('runs 500 fixed-seed recursive aggregate/Union recipes against native bags with rule evidence', async () => {
   const path = process.env.TYPEDHOUSE_AGG_UNION_PATH;
   const options = { seed: Number(process.env.TYPEDHOUSE_AGG_UNION_SEED ?? seed), numRuns: 500, ...(path ? { path } : {}) };
@@ -72,7 +71,7 @@ it('runs 500 fixed-seed recursive aggregate/Union recipes against native bags wi
     shapes.add(shape(r.composition));
     assertEvaluation(e);
     if (e.ok) { agg += e.hits.PushFilterAggKey; union += e.hits.PushFilterUnion; }
-  }, PREFETCH);
+  });
   console.info('aggregate/Union differential', { mode: path ? 'replay-only (not full acceptance)' : 'full-500', path, runs: result.numRuns, prefetched, seed: result.seed, shapes: shapes.size, agg, union, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   assertAggregateUnionAccounting(result.numRuns, path, { shapes: shapes.size, agg, union });

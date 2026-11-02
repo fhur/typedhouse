@@ -17,6 +17,7 @@ for (const available of [false, true]) {
     expect(query.mock.calls[0]![0].query_params).toEqual({ db: "db' hostile" });
     expect(query.mock.calls[2]![0].query).toContain(available ? ', deterministic,' : 'NULL AS deterministic');
     expect(result.tables[0]!.columns.map(c => c.name)).toEqual(['nested.1', 'nested.2']);
+    expect(result.tables[0]!.hiddenColumns).toEqual(['nested.0']); // slice 4f: the skipped ALIAS column stays visible to the alias guards
     expect(result.functions).toEqual([{ name: '__proto__', isAggregate: true, deterministic: available ? false : null, aliasTo: 'sum' }]);
   });
 }
