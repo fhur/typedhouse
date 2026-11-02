@@ -98,9 +98,9 @@ it('join-bound direct selections fold over Filter(Join) blocks only; computed on
   // Residual `lt` in WHERE with a selection whose alias equals a physical column the WHERE reads qualified: folds (qualified refs).
   const shadowed = j.where(r => r.a.id.lt(r.b.v)).map(r => ({ x: r.a.id, id: r.b.v }));
   expect(check(shadowed.ir, 2)).toBe('SELECT `a`.`id` AS `x`, `b`.`v` AS `id`\nFROM (SELECT `id` FROM `adv_s3`) AS `a`\nINNER ALL JOIN `adv_s3_other` AS `b` ON `a`.`id` = `b`.`id`\nWHERE (`a`.`id` < `b`.`v`)');
-  // Two filters, one fallible: both are WHERE clauses of the join block, the selection still folds.
+  // Two filters, one fallible: keep a boundary over the join's earlier WHERE.
   const twice = j.where(r => r.a.id.lt(r.b.v)).where(r => cast(r.a.s, col.UInt64).gt(0n)).map(r => ({ id: r.a.id }));
-  expect(check(twice.ir, 2)).toContain('WHERE (`a`.`id` < `b`.`v`) AND (CAST(`a`.`s` AS UInt64) > {p0:UInt64})');
+  expect(check(twice.ir, 4)).toContain('WHERE (`a`.`id` < `b`.`v`)) AS `__typedhouse_input` WHERE CAST(`__typedhouse_input`.`__typedhouse_leaf_3` AS UInt64) > {p0:UInt64}');
   // Computed selection over the filtered join: a boundary.
   expect(check(j.where(r => r.a.id.lt(r.b.v)).map(r => ({ next: r.a.id.plus(1) })).ir, 3)).toContain(') AS `__typedhouse_input`');
   // Sort between the filter and the selection, or after it: boundaries either side.

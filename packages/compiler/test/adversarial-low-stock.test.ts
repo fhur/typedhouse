@@ -5,11 +5,11 @@ import { emitPlanned } from '../src/emit-naive.js';
 import { planSelects } from '../src/plan-selects.js';
 
 const q = from(table('review_numbers', { n: col.Float64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-it('preserves disjunction grouping across separately folded Float64 filters', () => {
+it('preserves disjunction grouping across isolated Float64 filters', () => {
   // Float predicates deliberately stay outside the logical totality envelope.
   // n=1 must be removed by the second filter, not admitted by the first OR arm.
   const query = q.where(r => r.n.eq(1).or(r.n.eq(2))).where(r => r.n.gt(1));
-  expect(compile(query.ir).sql).toBe('SELECT `n` FROM `review_numbers` WHERE (`n` = {p0:Float64} OR `n` = {p1:Float64}) AND `n` > {p2:Float64}');
+  expect(compile(query.ir).sql).toBe('SELECT `__typedhouse_input`.`n` FROM (SELECT `n` FROM `review_numbers` WHERE `n` = {p0:Float64} OR `n` = {p1:Float64}) AS `__typedhouse_input` WHERE `__typedhouse_input`.`n` > {p2:Float64}');
   expect(compile(query.ir).params).toEqual(emitNaive(query.ir).params);
 });
 
@@ -36,6 +36,6 @@ it('preserves OR on either side of aggregate source WHERE conjunctions', () => {
   const query = q.where(r => r.n.eq(1).or(r.n.eq(2)))
     .where(r => r.n.gt(1).or(r.n.lt(0)))
     .aggregate(g => ({ total: sum(g.n) }));
-  expect(compile(query.ir).sql).toBe('SELECT sum(`__typedhouse_input`.`n`) AS `total` FROM `review_numbers` AS `__typedhouse_input` WHERE (`__typedhouse_input`.`n` = {p0:Float64} OR `__typedhouse_input`.`n` = {p1:Float64}) AND (`__typedhouse_input`.`n` > {p2:Float64} OR `__typedhouse_input`.`n` < {p3:Float64})');
+  expect(compile(query.ir).sql).toBe('SELECT sum(`__typedhouse_input`.`n`) AS `total` FROM (SELECT `__typedhouse_input`.`n` FROM (SELECT `n` FROM `review_numbers` WHERE `n` = {p0:Float64} OR `n` = {p1:Float64}) AS `__typedhouse_input` WHERE `__typedhouse_input`.`n` > {p2:Float64} OR `__typedhouse_input`.`n` < {p3:Float64}) AS `__typedhouse_input`');
   expect(compile(query.ir).params).toEqual(emitNaive(query.ir).params);
 });

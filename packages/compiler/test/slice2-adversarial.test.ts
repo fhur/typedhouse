@@ -209,53 +209,45 @@ function boundaryFilter(root: Rel, kind: Rel['kind']): Extract<Rel, { kind: 'Fil
     parent = cur; cur = cur.input;
   }
 }
-it('(vi) a mixed conjunction (safe AND arithmetic AND cast) splits exactly at each boundary', () => {
+it('(vi) a mixed conjunction (safe AND arithmetic AND cast) stays intact at each boundary', () => {
   const mixed = (r: typeof t.row) => safe(r).and(arith(r)).and(unsafe(r));
-  // Join: only the safe conjunct reaches side a; arithmetic and cast stay as the residual above the join.
+  // Join: the safe terms cannot suppress evaluation of the cast.
   const j = rewrite(join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.id.gt(1).and(r.a.n.plus(val(1n, col.Int64)).gt(2n)).and(cast(r.a.s, col.UInt64).gt(1n)).and(r.b.v.lt(5n))).map(r => ({ id: r.a.id })).ir);
-  expect(j.hits.PushFilterJoin).toBe(1);
+  expect(j.hits.PushFilterJoin).toBe(0);
   const jf = boundaryFilter(j.root, 'Join')!;
-  expect(conjuncts(jf.pred).map(safePredicate)).toEqual([false, false]);
-  // Slice 3 fix round 1: the direct selection folds over the filtered join block, which is now the root (newline separators).
-  expect(j.compiled.sql).toBe('SELECT `a`.`id` AS `id`\nFROM (SELECT `id`, `n`, `s` FROM `adv` WHERE `id` > {p0:UInt32}) AS `a`\nINNER ALL JOIN (SELECT `id` FROM `adv2` WHERE `v` < {p1:UInt64}) AS `b` ON `a`.`id` = `b`.`id`\nWHERE (`a`.`n` + {p2:Int64} > {p3:Int64} AND CAST(`a`.`s` AS UInt64) > {p4:UInt64})');
-  // ArrayJoin (inner and left): only the safe conjunct moves below the expansion.
+  expect(conjuncts(jf.pred).map(safePredicate)).toEqual([true, false, false, true]);
+  // ArrayJoin (inner and left): keep the original evaluation set.
   for (const left of [false, true]) {
     const q = left ? t.leftArrayJoin(r => r.ids, 'x') : t.arrayJoin(r => r.ids, 'x');
     const a = rewrite(q.where(mixed).ir);
-    expect(a.hits.PushFilterArrayJoin).toBe(1);
+    expect(a.hits.PushFilterArrayJoin).toBe(0);
     const af = boundaryFilter(a.root, 'ArrayJoin')!;
-    expect(conjuncts(af.pred).map(safePredicate)).toEqual([false, false]);
-    expect(conjuncts(af.pred).map(totalPredicate)).toEqual([true, false]);
-    if (a.root.kind !== 'Filter' || a.root.input.kind !== 'ArrayJoin' || a.root.input.input.kind !== 'Filter') throw new Error('shape');
-    expect(safePredicate(a.root.input.input.pred)).toBe(true);
-    // Planner: the pushed safe filter folds under the expansion, the residual above it folds as a later WHERE.
-    expect(a.compiled.sql).toBe(`SELECT \`id\`, \`k\`, \`n\`, \`small\`, \`nn\`, \`lcs\`, \`s\`, \`ids\`, \`nids\`, \`uids\`, \`parts\`, \`tup\`, \`x\` FROM \`adv\` ${left ? 'LEFT ' : ''}ARRAY JOIN \`ids\` AS \`x\` WHERE \`id\` > {p0:UInt32} AND \`n\` + {p1:Int64} > {p2:Int64} AND CAST(\`s\` AS UInt64) > {p3:UInt64}`);
+    expect(conjuncts(af.pred).map(safePredicate)).toEqual([true, false, false]);
+    expect(conjuncts(af.pred).map(totalPredicate)).toEqual([true, true, false]);
+    if (a.root.kind !== 'Filter' || a.root.input.kind !== 'ArrayJoin') throw new Error('shape');
+    expect(a.root.input.input).toBe(t.ir);
+    expect(selects(a.compiled.sql)).toBe(1);
   }
-  // Aggregate: the safe key conjunct becomes WHERE below the aggregate; arithmetic over the key and a cast stay above
-  // (never HAVING, since the planner also requires safePredicate for HAVING folding).
+  // Aggregate: neither split the key term nor admit the cast into HAVING.
   const grouped = t.groupBy(r => ({ k: r.k, id: r.id })).aggregate(() => ({ c: count() }));
   const g = rewrite(grouped.where(r => r.k.eq('a').and(r.id.plus(1).gt(2n)).and(cast(r.k, col.UInt64).gt(1n)).and(r.c.gt(1n))).ir);
-  expect(g.hits.PushFilterAggKey).toBe(1);
+  expect(g.hits.PushFilterAggKey).toBe(0);
   const gf = boundaryFilter(g.root, 'Aggregate')!;
-  expect(conjuncts(gf.pred)).toHaveLength(3);
-  expect(conjuncts(gf.pred).map(safePredicate)).toEqual([false, false, true]);
-  expect(g.compiled.sql).toContain('GROUP BY `__typedhouse_input`.`k`, `__typedhouse_input`.`id`) AS `__typedhouse_input` WHERE `__typedhouse_input`.`id` + {p1:UInt32} > {p2:UInt64} AND CAST(`__typedhouse_input`.`k` AS UInt64) > {p3:UInt64} AND `__typedhouse_input`.`c` > {p4:UInt64}');
-  expect(g.compiled.sql).toContain('FROM `adv` AS `__typedhouse_input` WHERE `__typedhouse_input`.`k` = {p0:String} GROUP BY');
-  // Union: the safe conjunct replicates into both branches, the rest stays above the union.
+  expect(conjuncts(gf.pred)).toHaveLength(4);
+  expect(conjuncts(gf.pred).map(safePredicate)).toEqual([true, false, false, true]);
+  expect(selects(g.compiled.sql)).toBe(2);
+  // Union: no branch replication of a term from the fallible conjunction.
   const un = rewrite(unionAll(t, t.where(r => r.k.eq('z'))).where(mixed).ir);
-  expect(un.hits.PushFilterUnion).toBe(1);
+  expect(un.hits.PushFilterUnion).toBe(0);
   const uf = boundaryFilter(un.root, 'Union')!;
-  expect(conjuncts(uf.pred).map(safePredicate)).toEqual([false, false]);
-  if (uf.input.kind !== 'Union') throw new Error('shape');
-  for (const branch of uf.input.inputs) { expect(branch.kind).toBe('Filter'); if (branch.kind === 'Filter') expect(safePredicate(branch.pred)).toBe(true); }
-  expect(un.hits.MergeFilter).toBe(1); // the replicated safe conjunct merges with the second branch's own filter
-  // Project: safe and arithmetic cross (substituted copies are total); the cast conjunct stays above.
+  expect(conjuncts(uf.pred).map(safePredicate)).toEqual([true, false, false]);
+  expect(un.hits.MergeFilter).toBe(0);
+  // Project: total substituted terms still cannot narrow the cast's evaluation set.
   const p = rewrite(t.map(r => ({ id: r.id, n2: r.n.plus(val(1n, col.Int64)), s: r.s })).where(r => r.id.gt(1).and(r.n2.gt(2n)).and(cast(r.s, col.UInt64).gt(1n))).ir);
-  expect(p.hits.PushFilterProject).toBe(1);
-  if (p.root.kind !== 'Filter' || p.root.input.kind !== 'Project' || p.root.input.input.kind !== 'Filter') throw new Error('shape');
-  expect(conjuncts(p.root.pred)).toHaveLength(1);
-  expect(conjuncts(p.root.input.input.pred).map(totalPredicate)).toEqual([true, true]);
-  expect(conjuncts(p.root.input.input.pred).map(safePredicate)).toEqual([true, false]);
+  expect(p.hits.PushFilterProject).toBe(0);
+  if (p.root.kind !== 'Filter' || p.root.input.kind !== 'Project') throw new Error('shape');
+  expect(conjuncts(p.root.pred)).toHaveLength(3);
+  expect(p.root.input.input).toBe(t.ir);
 });
 it('(2) MergeFilter merges only total pairs and never carries a non-safe conjunct across a boundary afterwards', () => {
   // Two filters stacked above a Join: merged in pass 2 after the safe one is pushed? No: bottom-up, the lower one is

@@ -265,37 +265,35 @@ it('pushes safe conjuncts below any total array expansion, keeping alias-depende
     expect(rewrite(unsafe.ir).root).toBe(unsafe.ir);
   }
 });
-it('(vi) gates per conjunct: only safe conjuncts cross Join, ArrayJoin, Aggregate and Union; only total ones cross a Project', () => {
+it('(vi) retains the entire mixed fallible conjunction at Join, ArrayJoin, Aggregate, Union and Project', () => {
   const unsafe = (text: typeof q.row.text) => cast(text, col.Nullable(col.UInt32)).gt(1);
   const kinds = (e: import('@typedhouse/core').ExprNode) => conjuncts(e).map(c => c.kind === 'Call' && c.args.some(a => a.kind === 'Cast') ? 'cast' : safePredicate(c) ? 'safe' : 'arith');
   const joined = rewrite(crossJoin({ a: q, b: q }).where(r => r.a.id.gt(1).and(r.a.id.plus(1).gt(2n)).and(unsafe(r.a.text))).ir);
-  expect(joined.hits.PushFilterJoin).toBe(1);
-  if (joined.root.kind !== 'Filter' || joined.root.input.kind !== 'Join' || joined.root.input.inputs[0]![1].kind !== 'Filter') throw new Error('shape');
-  expect(kinds(joined.root.pred)).toEqual(['arith', 'cast']);
-  expect(kinds(joined.root.input.inputs[0]![1].pred)).toEqual(['safe']);
-  expect(joined.root.input.inputs[1]![1]).toBe(q.ir);
+  expect(joined.hits.PushFilterJoin).toBe(0);
+  if (joined.root.kind !== 'Filter' || joined.root.input.kind !== 'Join') throw new Error('shape');
+  expect(kinds(joined.root.pred)).toEqual(['safe', 'arith', 'cast']);
+  expect(joined.root.input.inputs.map(([, input]) => input)).toEqual([q.ir, q.ir]);
   const expanded = rewrite(q.arrayJoin(r => r.ids, 'part').where(r => r.id.gt(1).and(r.id.plus(1).gt(2n)).and(unsafe(r.text))).ir);
-  expect(expanded.hits.PushFilterArrayJoin).toBe(1);
-  if (expanded.root.kind !== 'Filter' || expanded.root.input.kind !== 'ArrayJoin' || expanded.root.input.input.kind !== 'Filter') throw new Error('shape');
-  expect(kinds(expanded.root.pred)).toEqual(['arith', 'cast']);
-  expect(kinds(expanded.root.input.input.pred)).toEqual(['safe']);
+  expect(expanded.hits.PushFilterArrayJoin).toBe(0);
+  if (expanded.root.kind !== 'Filter' || expanded.root.input.kind !== 'ArrayJoin') throw new Error('shape');
+  expect(kinds(expanded.root.pred)).toEqual(['safe', 'arith', 'cast']);
+  expect(expanded.root.input.input).toBe(q.ir);
   const grouped = q.groupBy(r => ({ key: r.id })).aggregate(() => ({ n: count() })).where(r => r.key.gt(1).and(r.key.plus(1).gt(2n)).and(cast(r.n, col.String).ne('x')));
   const aggregated = rewrite(grouped.ir);
-  expect(aggregated.hits.PushFilterAggKey).toBe(1);
-  if (aggregated.root.kind !== 'Filter' || aggregated.root.input.kind !== 'Aggregate' || aggregated.root.input.input.kind !== 'Filter') throw new Error('shape');
-  expect(kinds(aggregated.root.pred)).toEqual(['arith', 'cast']);
-  expect(kinds(aggregated.root.input.input.pred)).toEqual(['safe']);
+  expect(aggregated.hits.PushFilterAggKey).toBe(0);
+  if (aggregated.root.kind !== 'Filter' || aggregated.root.input.kind !== 'Aggregate') throw new Error('shape');
+  expect(kinds(aggregated.root.pred)).toEqual(['safe', 'arith', 'cast']);
+  expect(aggregated.root.input.input).toBe(q.ir);
   const union = rewrite(unionAll(q, q).where(r => r.id.gt(1).and(r.id.plus(1).gt(2n)).and(unsafe(r.text))).ir);
-  expect(union.hits.PushFilterUnion).toBe(1);
+  expect(union.hits.PushFilterUnion).toBe(0);
   if (union.root.kind !== 'Filter' || union.root.input.kind !== 'Union') throw new Error('shape');
-  expect(kinds(union.root.pred)).toEqual(['arith', 'cast']);
-  for (const branch of union.root.input.inputs) { if (branch.kind !== 'Filter') throw new Error('shape'); expect(kinds(branch.pred)).toEqual(['safe']); expect(branch.input).toBe(q.ir); }
+  expect(kinds(union.root.pred)).toEqual(['safe', 'arith', 'cast']);
+  expect(union.root.input.inputs).toEqual([q.ir, q.ir]);
   const projected = rewrite(q.map(r => ({ id: r.id, text: r.text })).where(r => r.id.gt(1).and(r.id.plus(1).gt(2n)).and(unsafe(r.text))).ir);
-  expect(projected.hits.PushFilterProject).toBe(1);
-  if (projected.root.kind !== 'Filter' || projected.root.input.kind !== 'Project' || projected.root.input.input.kind !== 'Filter') throw new Error('shape');
-  expect(kinds(projected.root.pred)).toEqual(['cast']);
-  expect(kinds(projected.root.input.input.pred)).toEqual(['safe', 'arith']);
-  expect(projected.root.input.input.input).toBe(q.ir);
+  expect(projected.hits.PushFilterProject).toBe(0);
+  if (projected.root.kind !== 'Filter' || projected.root.input.kind !== 'Project') throw new Error('shape');
+  expect(kinds(projected.root.pred)).toEqual(['safe', 'arith', 'cast']);
+  expect(projected.root.input.input).toBe(q.ir);
   // MergeFilter needs both predicates total, not safe: merging changes no evaluation set.
   const merged = rewrite(q.where(r => r.id.plus(1).gt(2n)).where(r => r.id.gt(1)).ir);
   expect(merged.hits.MergeFilter).toBe(1);

@@ -109,11 +109,11 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
     hits.MergeProject++;
     return relNode({ kind: 'Project', input: inner.input, exprs: mapRecord(outer.exprs, e => substitute(e, inner)), columns: outer.columns, output: outer.output });
   }
-  /** Every arm decides conjunct by conjunct: the qualifying subset crosses the child,
-   * the rest stays above as a residual Filter. A conjunction never promises to evaluate
-   * one conjunct on rows another rejects, so splitting cannot suppress a failure; what
-   * crosses a Join/ArrayJoin/Aggregate/Union boundary is `safePredicate`, what crosses
-   * a Project is `totalPredicate` (the substituted copy), and nothing else moves. */
+  /** Split only within the closed total fragment. A single AND is not a sequence
+   * of filters: pushing a safe conjunct can suppress a residual's failure or change
+   * volatile evaluation. Keep that original predicate intact; planner isolation is
+   * reserved for boundaries that were not manufactured from a fallible AND.
+   * Within the total fragment, each boundary still applies its narrower rules. */
   function local(node: Rel): Rel {
     if (node.kind === 'Project') return mergeProject(node);
     if (node.kind !== 'Filter') return node;
@@ -130,6 +130,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
       hits.MergeFilter++;
       return filter(child.input, conjunction([child.pred, rebind(node.pred, child, child.input)]));
     }
+    if (!totalPredicate(node.pred)) return node;
     if (child.kind === 'Aggregate' && Object.getOwnPropertyNames(child.keys).length && safeAggregate(child)) {
       const { pushed, residual } = split(pred => safePredicate(pred) && references(pred).every(r => r.rel === child.id && r.path.length === 1 && Object.hasOwn(child.keys, r.path[0]!)));
       if (!pushed.length) return node;

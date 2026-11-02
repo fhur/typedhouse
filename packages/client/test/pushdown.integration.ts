@@ -50,10 +50,13 @@ it('anchors duplicate, empty-array, NULL, tenant and shared-occurrence cardinali
   expect(await check({ ...anchor, kind: 'shared' })).toEqual([decoded[0]]);
   expect(await check({ ...anchor, kind: 'cross', tenant: 'other' })).toEqual([decoded[3]]);
   expect(await check({ ...anchor, fence: 'limit', take: 3, offset: 1 })).toEqual(Array(3).fill(decoded[0]));
-  // A Param array expands every row, the empty-array row included; the mixed filter pushes only its safe conjuncts.
+  // A Param array expands every row, the empty-array row included. The cast
+  // keeps the mixed predicate intact; row/cardinality assertions are unchanged.
   expect(await check({ ...anchor, kind: 'array', expansion: 'constant', mixed: true })).toEqual([...Array(2).fill(decoded[0]), ...Array(2).fill(decoded[1]), ...Array(2).fill(decoded[2])]);
   const mixed = rewriteRel(build({ ...anchor, mixed: true }).ir);
-  expect(mixed.hits.PushFilterJoin).toBeGreaterThan(0); expect(mixed.hits.PushFilterArrayJoin).toBe(1);
+  expect(mixed.hits.PushFilterJoin).toBe(0); expect(mixed.hits.PushFilterArrayJoin).toBe(0);
+  const total = rewriteRel(build(anchor).ir);
+  expect(total.hits.PushFilterJoin).toBeGreaterThan(0); expect(total.hits.PushFilterArrayJoin).toBeGreaterThan(0);
   expect(await check({ ...anchor, mixed: true })).toEqual([...Array(5).fill(decoded[0]), ...Array(2).fill(decoded[1])]);
 });
 it('preserves nested occurrence paths, same-side residuals, swapped names and shared consumers', async () => {

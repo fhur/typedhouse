@@ -12,7 +12,7 @@ export const recipeArbitrary = fc.record({
   take: fc.integer({ min: 0, max: 9 }), offset: fc.integer({ min: 0, max: 3 }),
   /** `constant` expands a Param array: any total array expression may now be filtered below. */
   expansion: fc.constantFrom('column' as const, 'constant' as const),
-  /** Adds a total-arithmetic and a cast conjunct to the first filter: only the safe conjuncts may cross. */
+  /** Adds arithmetic and a cast to the first filter: the whole mixed predicate must stay intact. */
   mixed: fc.boolean(),
 });
 export type Recipe = typeof recipeArbitrary extends fc.Arbitrary<infer T> ? T : never;

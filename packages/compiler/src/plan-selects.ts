@@ -1,5 +1,5 @@
 import { outputLeaves, type ExprNode, type Rel } from '@typedhouse/core';
-import { deterministicExpression, safePredicate } from './rewrite-expressions.js';
+import { deterministicExpression, safePredicate, totalPredicate } from './rewrite-expressions.js';
 import { directSelection, type ColumnDemand } from './prune-columns.js';
 import type { CtePlan } from './plan-ctes.js';
 
@@ -127,8 +127,12 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
       const last = child?.clauses.at(-1);
       const safe = !child?.aggregate || (rel.kind === 'Filter' ? safePredicate(rel.pred) : rel.kind === 'Sort' ? rel.keys.every(k => k.expr.kind === 'ColumnRef') : true);
+      // A shared WHERE may reorder evaluation (including PREWHERE). Match MergeFilter:
+      // keep either non-total predicate in its original scope, in both directions.
+      const isolated = rel.kind !== 'Filter' || !child?.clauses.some(n => n.kind === 'Filter')
+        || totalPredicate(rel.pred) && child.clauses.every(n => n.kind !== 'Filter' || totalPredicate(n.pred));
       // WHERE precedes DISTINCT; a Filter above a folded Distinct opens a new block.
-      block = child && !child.project && safe && !(child.distinct && rel.kind === 'Filter') && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
+      block = child && !child.project && safe && isolated && !(child.distinct && rel.kind === 'Filter') && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
         ? { ...child, clauses: Object.freeze([...child.clauses, rel]) }
         : { source: Object.freeze({ kind: ctes?.names.has(rel.input) ? 'cte' : 'derived', rel: rel.input }), clauses: Object.freeze([rel]) };
     } else return undefined;

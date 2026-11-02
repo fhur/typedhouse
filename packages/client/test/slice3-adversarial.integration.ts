@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import fc from 'fast-check';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { cast, col, count, sql, from, join, table, type Rel } from '@typedhouse/core';
+import { cast, col, count, scalar, sql, from, join, table, unionAll, val, type Rel } from '@typedhouse/core';
 import { compile, emitNaive } from '@typedhouse/compiler';
 
 // Tester native probes for slice 3 on clickhouse/clickhouse-server:24.8. The optimizing and naive emissions must agree in
@@ -188,26 +189,161 @@ it('(vii)/(viii): aggregates over expansions with FINAL, SAMPLE, Params and HAVI
   await agree(t.where(a => a.k.eq('a')).distinct().map(a => ({ k: a.k, id: a.id, n: a.n, s: a.s, nn: a.nn, lc: a.lc, ids: a.ids, extra: a.extra, alias_id: a.alias_id, mat_id: a.mat_id, tup: a.tup, parts: a.parts })).orderBy(a => a.id).map(a => ({ id: a.id })).ir, { selects: 2, ordered: true, oracle: "SELECT id FROM (SELECT DISTINCT * FROM adv_s3 WHERE k = 'a' ORDER BY id)", label: '(viii) pruned consumer above the fold' });
 });
 
-it('PRE-EXISTING (HEAD, not slice 3) as observed: stacked Filters rendered as one AND let ClickHouse evaluate a fallible conjunct on rows the earlier conjunct removes', async () => {
-  // Block planning folds consecutive Filters into one WHERE joined by AND (MergeFilter deliberately keeps a non-total
-  // predicate apart, but the planner joins them anyway). ClickHouse evaluates such conjuncts in its own order: on a scan
-  // with optimize_move_to_prewhere = 1 (the default) the CAST runs before `id != 2`, and on a join block it runs on
-  // every joined row. The naive nesting keeps the order, so the optimized text fails where the naive one succeeds.
-  // Pinned as observed so a fix flips it deliberately; the same text was emitted before slice 3 (no new arm involved).
+it('stacked fallible WHERE scopes preserve the naive rows and failures under all eight contracts', async () => {
+  // Regression: a single AND failed on the excluded bad row (scan with PREWHERE,
+  // join with every setting). A compiler boundary must be proved on the server,
+  // not just by counting SELECTs: ClickHouse can optimize derived tables too.
   const scan = t.where(a => a.id.ne(2)).where(a => cast(a.s, col.UInt64).gt(0n)).map(a => ({ id: a.id }));
-  const o = compile(scan.ir), n = emitNaive(scan.ir);
-  expect(o.sql).toBe('SELECT `id` FROM `adv_s3` WHERE `id` != {p0:UInt32} AND CAST(`s` AS UInt64) > {p1:UInt64}');
-  for (const prewhere of [0, 1]) for (const threads of [1, 0]) {
-    const settings = { optimize_move_to_prewhere: prewhere, ...(threads ? { max_threads: 1 } : {}) };
-    expect((await execute(n.sql, n.params, settings)).data, JSON.stringify(settings)).toEqual([{ id: 1 }, { id: 3 }]);
-    expect((await execute(o.sql, o.params, settings)).error, JSON.stringify(settings)).toBe(prewhere ? '6' : undefined);
-  }
+  const fixed = await agree(scan.ir, { selects: 2, label: 'isolated scan CAST' });
+  expect(fixed.first.data).toEqual([{ id: 1 }, { id: 3 }]);
   const joined = join({ a: t, b: u }).on(x => x.a.id.eq(x.b.id)).where(x => x.a.id.plus(x.b.v).ne(27n)).where(x => cast(x.a.s, col.UInt64).gt(0n)).map(x => ({ id: x.a.id }));
-  const jo = compile(joined.ir), jn = emitNaive(joined.ir);
-  expect(jo.sql).toContain('WHERE (`a`.`id` + `b`.`v` != {p0:UInt64}) AND (CAST(`a`.`s` AS UInt64) > {p1:UInt64})');
+  const fixedJoin = await agree(joined.ir, { label: 'isolated join CAST' });
+  expect(fixedJoin.first.data).toEqual([{ id: 1 }, { id: 3 }, { id: 3 }]);
+  await agree(t.where(a => a.id.ne(1)).where(a => cast(a.s, col.UInt64).gt(0n)).map(a => ({ id: a.id })).ir, { error: '6', label: 'CAST bad row kept' });
+  await agree(t.where(a => cast(a.s, col.UInt64).gt(0n)).where(a => a.id.ne(2)).map(a => ({ id: a.id })).ir, { error: '6', label: 'CAST before exclusion' });
+  for (const source of [t, t.cte(), t.map(a => ({ ...a, s: a.s }))]) {
+    await agree(source.where(a => a.id.ne(2)).where(a => sql`intDiv(${a.n}, ${a.n.minus(20n)})`.as(col.Int64).ne(0n)).map(a => ({ id: a.id })).ir, { label: 'isolated integer division' });
+    await agree(source.where(a => a.id.ne(1)).where(a => sql`intDiv(${a.n}, ${a.n.minus(20n)})`.as(col.Int64).ne(0n)).map(a => ({ id: a.id })).ir, { error: '153', label: 'division bad row kept' });
+    await agree(source.where(a => sql`intDiv(${a.n}, ${a.n.minus(20n)})`.as(col.Int64).ne(0n)).where(a => a.id.ne(2)).map(a => ({ id: a.id })).ir, { error: '153', label: 'division before exclusion' });
+  }
+  await agree(t.where(a => a.id.ne(2)).leftArrayJoin(a => a.ids, 'x').where(a => cast(a.s, col.UInt64).gt(0n)).map(a => ({ id: a.id, x: a.x })).ir, { label: 'expanded isolated CAST' });
+  const groups = t.groupBy(a => ({ s: a.s })).aggregate(() => ({ c: count() }));
+  await agree(groups.where(a => a.c.gt(1n)).where(a => cast(a.s, col.UInt64).gt(0n)).ir, { label: 'HAVING excludes every bad group' });
+  await agree(groups.where(a => a.c.gt(0n)).where(a => cast(a.s, col.UInt64).gt(0n)).ir, { error: '6', label: 'HAVING keeps bad group' });
+});
+
+it('agent2 repair review: nested Boolean predicates retain outcomes through wrapper and scalar scopes', async () => {
+  const base = t.map(a => ({ id: a.id, n: a.n, s: a.s }));
+  const sources = [base, base.cte(), base.distinct(), base.orderBy(a => a.id).limit(3),
+    base.orderBy(a => a.id).limit(1), unionAll(base, base),
+    t.leftArrayJoin(a => a.ids, 'x').map(a => ({ id: a.id, n: a.n, s: a.s })),
+    t.arrayJoin(a => a.ids, 'x').map(a => ({ id: a.id, n: a.n, s: a.s }))];
+  const excluded = val(2, col.UInt32), zero = val(0n, col.UInt64);
+  let comparisons = 0;
+  for (const [sourceIndex, source] of sources.entries()) for (const stacked of [false, true]) for (const reverse of [false, true]) {
+    const safe = (a: typeof source.row) => a.id.ne(excluded).or(a.id.eq(99));
+    const bad = (a: typeof source.row) => cast(a.s, col.UInt64).gt(zero).or(a.id.eq(98));
+    const filtered = stacked ? reverse ? source.where(bad).where(safe) : source.where(safe).where(bad)
+      : source.where(a => reverse ? bad(a).and(safe(a)) : safe(a).and(bad(a)));
+    // A shadowed output alias, ORDER/LIMIT/DISTINCT and a scalar-subquery consumer
+    // must not turn the original single AND into ordered filters (or vice versa).
+    const rows = filtered.map(a => ({ s: a.id, id: a.s })).distinct().orderBy(a => a.s).limit(5);
+    const nested = t.where(a => a.id.eq(1)).map(() => ({ n: scalar(filtered.aggregate(() => count())) }));
+    for (const root of [rows.ir, nested.ir]) {
+      const a = compile(root), b = emitNaive(root);
+      expect(a.columns).toEqual(b.columns);
+      expect(Object.values(a.params).sort()).toEqual(Object.values(b.params).sort());
+      for (const settings of contract) {
+        expect(await execute(a.sql, a.params, settings), JSON.stringify({ sourceIndex, stacked, reverse, settings, optimized: a.sql, naive: b.sql }))
+          .toEqual(await execute(b.sql, b.params, settings));
+        comparisons++;
+      }
+    }
+  }
+  expect(comparisons).toBe(512);
+}, 120000);
+
+const fallibleRecipes = fc.record({ source: fc.integer({ min: 0, max: 7 }), excluded: fc.integer({ min: 1, max: 3 }), reverse: fc.boolean(), division: fc.boolean(), mixed: fc.boolean(), repeats: fc.integer({ min: 1, max: 4 }), setting: fc.integer({ min: 0, max: 7 }) });
+type FallibleRecipe = { source: number; excluded: number; reverse: boolean; division: boolean; mixed: boolean; repeats: number; setting: number };
+function fallibleQuery(r: FallibleRecipe) {
+  const source = r.source === 3
+    ? join({ a: t, b: u }).on(x => x.a.id.eq(x.b.id)).map(x => ({ id: x.a.id, n: x.a.n, s: x.a.s }))
+    : r.source === 1 ? t.leftArrayJoin(a => a.ids, 'x')
+    : r.source === 7 ? t.arrayJoin(a => a.ids, 'x')
+    : r.source === 4 ? unionAll(t, t)
+    : r.source === 5 ? t.groupBy(a => ({ id: a.id, n: a.n, s: a.s })).aggregate(() => ({ c: count() }))
+    : r.source === 6 ? t.map(a => ({ id: a.id, n: a.n.plus(0n), s: a.s }))
+    : r.source === 2 ? t.cte() : t;
+  const fallible = (a: typeof source.row) => r.division
+    ? sql`intDiv(${a.n}, ${a.n.minus(20n)})`.as(col.Int64).ne(0n) : cast(a.s, col.UInt64).gt(0n);
+  if (r.mixed) return source.where(a => r.reverse
+    ? fallible(a).and(a.id.ne(r.excluded)) : a.id.ne(r.excluded).and(fallible(a))).map(a => ({ id: a.id }));
+  let q = r.reverse ? source.where(fallible) : source;
+  for (let i = 0; i < r.repeats; i++) q = q.where(a => a.id.ne(r.excluded));
+  if (!r.reverse) q = q.where(fallible);
+  return q.map(a => ({ id: a.id }));
+}
+it('checks original AND versus stacked evaluation at every boundary under all eight settings', async () => {
+  for (let source = 0; source < 8; source++) for (const mixed of [false, true]) for (const reverse of [false, true]) for (const division of [false, true]) {
+    const recipe: FallibleRecipe = { source, mixed, reverse, division, excluded: 2, repeats: 1, setting: 0 };
+    const root = fallibleQuery(recipe).ir, a = compile(root), b = emitNaive(root);
+    expect(a.columns).toEqual(b.columns);
+    for (const settings of contract) {
+      expect(await execute(a.sql, a.params, settings), JSON.stringify({ recipe, settings, sql: a.sql }))
+        .toEqual(await execute(b.sql, b.params, settings));
+    }
+  }
+  // Direct Join boundaries (without an intervening Project), and opaque volatile
+  // expressions whose output is stable so independent executions can be compared.
+  const joined = join({ a: t, b: u }).on(a => a.a.id.eq(a.b.id));
+  for (const reverse of [false, true]) for (const mixed of [false, true]) {
+    const safe = (a: typeof joined.row) => a.a.id.ne(2);
+    const bad = (a: typeof joined.row) => cast(a.a.s, col.UInt64).gt(0n);
+    const q = mixed ? joined.where(a => reverse ? bad(a).and(safe(a)) : safe(a).and(bad(a)))
+      : reverse ? joined.where(bad).where(safe) : joined.where(safe).where(bad);
+    const expanded = t.leftArrayJoin(a => a.ids, 'x');
+    const volatile = () => sql`rand() % 1 = 0`.as(col.Bool);
+    const v = mixed ? expanded.where(a => reverse ? volatile().and(a.id.ne(2)) : a.id.ne(2).and(volatile()))
+      : reverse ? expanded.where(volatile).where(a => a.id.ne(2)) : expanded.where(a => a.id.ne(2)).where(volatile);
+    for (const root of [q.map(a => ({ id: a.a.id })).ir, v.map(a => ({ id: a.id })).ir]) {
+      const a = compile(root), b = emitNaive(root);
+      for (const settings of contract) expect(await execute(a.sql, a.params, settings), JSON.stringify({ mixed, reverse, settings, sql: a.sql }))
+        .toEqual(await execute(b.sql, b.params, settings));
+    }
+  }
+}, 120000);
+it('executes 500 fixed-seed original-AND and stacked fallible-filter recipes, including kept errors', async () => {
+  const branches = new Set<string>(), outcomes = new Set<string>();
+  const result = await fc.check(fc.asyncProperty(fallibleRecipes, async r => {
+    const root = fallibleQuery(r).ir, a = compile(root), b = emitNaive(root);
+    const settings = contract[r.setting]!;
+    const actual = await execute(a.sql, a.params, settings), expected = await execute(b.sql, b.params, settings);
+    expect(a.columns).toEqual(b.columns);
+    expect(Object.values(a.params).sort()).toEqual(Object.values(b.params).sort());
+    expect(actual, JSON.stringify({ r, optimized: a.sql, naive: b.sql })).toEqual(expected);
+    branches.add(`${r.source}/${r.reverse}/${r.division}/${r.mixed}`);
+    outcomes.add(actual.error ?? 'rows');
+  }), { seed: 20261204, numRuns: 500 });
+  console.info('fallible-filter differential', { runs: result.numRuns, seed: result.seed, branches: branches.size, outcomes: [...outcomes].sort() });
+  if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks}\n${String(result.errorInstance)}`);
+  expect(result.numRuns).toBe(500);
+  expect(branches.size).toBe(64);
+  expect([...outcomes].sort()).toEqual(['153', '6', 'rows']);
+}, 120000);
+it('detects the old flattened-WHERE fault natively, shrinks and replays it', async () => {
+  const property = fc.asyncProperty(fc.integer({ min: 1, max: 20 }), async repeats => {
+    const r: FallibleRecipe = { source: 0, excluded: 2, reverse: false, division: false, mixed: false, repeats, setting: 0 };
+    const naive = emitNaive(fallibleQuery(r).ir);
+    const expected = await execute(naive.sql, naive.params, { optimize_move_to_prewhere: 1 });
+    const faulty = await execute(`SELECT id FROM adv_s3 WHERE ${Array(repeats).fill('id != 2').join(' AND ')} AND CAST(s AS UInt64) > 0`, {}, { optimize_move_to_prewhere: 1 });
+    expect(faulty).toEqual(expected);
+  });
+  const result = await fc.check(property, { seed: 20261204, numRuns: 500 });
+  expect(result.failed).toBe(true);
+  expect(result.numShrinks).toBeGreaterThan(0);
+  const replay = await fc.check(property, { seed: result.seed, path: result.counterexamplePath!, numRuns: 500 });
+  expect(replay.failed).toBe(true);
+  expect(replay.counterexample).toEqual(result.counterexample);
+  console.info('fallible-filter fault', { seed: result.seed, shrinks: result.numShrinks, path: result.counterexamplePath });
+}, 120000);
+
+it('agent2: a mixed conjunction over LEFT ARRAY JOIN preserves the original failure', async () => {
+  const query = t.leftArrayJoin(a => a.ids, 'x')
+    .where(a => a.id.ne(2).and(cast(a.s, col.UInt64).gt(0n)))
+    .map(a => ({ id: a.id, x: a.x }));
+  // Before the new isolation guard, the pushed total predicate and residual
+  // cast shared this WHERE. It agrees with naive failure under PREWHERE=1.
+  expect(await execute('SELECT id AS id, x AS x FROM adv_s3 LEFT ARRAY JOIN ids AS x WHERE id != 2 AND CAST(s AS UInt64) > 0', {},
+    { prefer_column_name_to_alias: 0, optimize_move_to_prewhere: 1, max_threads: 1 })).toEqual({ error: '6' });
+  const optimized = compile(query.ir), naive = emitNaive(query.ir);
   for (const settings of contract) {
-    expect((await execute(jn.sql, jn.params, settings)).data, JSON.stringify(settings)).toEqual([{ id: 1 }, { id: 3 }, { id: 3 }]);
-    expect((await execute(jo.sql, jo.params, settings)).error, JSON.stringify(settings)).toBe('6');
+    const actual = await execute(optimized.sql, optimized.params, settings);
+    const expected = await execute(naive.sql, naive.params, settings);
+    expect(actual, JSON.stringify(settings)).toEqual(expected);
+    if (settings.prefer_column_name_to_alias === 0 && settings.optimize_move_to_prewhere === 1 && settings.max_threads === 1) {
+      expect(expected).toEqual({ error: '6' });
+      expect(actual).toEqual({ error: '6' });
+    }
   }
 });
 

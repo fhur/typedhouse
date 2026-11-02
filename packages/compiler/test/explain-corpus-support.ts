@@ -3,7 +3,7 @@ import { validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
 import { planSelects, type SelectBlock, type SqlPlan } from '../src/plan-selects.js';
 import { pruneColumns, type ColumnDemand } from '../src/prune-columns.js';
-import { mapExpression } from '../src/rewrite-expressions.js';
+import { mapExpression, totalPredicate } from '../src/rewrite-expressions.js';
 import { rewriteRel } from '../src/rewrite-rel.js';
 import type { FenceKind } from './fixtures/corpus/explain-corpus.js';
 
@@ -59,7 +59,14 @@ export function structure(root: Rel): Structure {
       case 'subquery': return 'Subquery';
       case 'union-branch': case 'union-input': return 'Union';
       case 'join-input': return 'Join';
-      case 'derived': return fenceNodes.has(consumer!.kind) ? consumer!.kind as FenceKind : fenceNodes.has(rel.kind) ? rel.kind as FenceKind : 'unfenced';
+      case 'derived': {
+        // Filter is not a blanket consumer-kind exemption: require an actual earlier
+        // predicate and failure/evaluation risk on one side of this exact boundary.
+        const earlier = plan.blocks.get(rel)?.clauses.filter(n => n.kind === 'Filter') ?? [];
+        if (consumer?.kind === 'Filter' && consumer.input === rel && earlier.length
+          && (!totalPredicate(consumer.pred) || earlier.some(n => !totalPredicate(n.pred)))) return 'Filter';
+        return fenceNodes.has(consumer!.kind) ? consumer!.kind as FenceKind : fenceNodes.has(rel.kind) ? rel.kind as FenceKind : 'unfenced';
+      }
     }
   };
   const push = (rel: Rel, role: Role, consumer?: Rel) => selects.push({ rel, role, ...(consumer ? { consumer } : {}), fence: fenceOf(rel, role, consumer) });
@@ -125,6 +132,7 @@ export function structure(root: Rel): Structure {
     for (const sub of subs) visit(sub, false);
   }
   visit(rewritten, true);
+  if (selects.some(s => s.fence === 'Filter')) fences.add('Filter');
   return { rewritten, plan, columns, selects, fences, planned, scans, demand };
 }
 
@@ -134,7 +142,7 @@ export const stepTypes = Object.freeze({
   base: Object.freeze(['Expression', 'Filter', 'ReadFromMergeTree', 'ReadFromMemoryStorage', 'ReadFromStorage']),
   byFence: Object.freeze<Record<FenceKind, readonly string[]>>({
     Aggregate: ['Aggregating', 'MergingAggregated'], Sort: ['Sorting'], Limit: ['Limit', 'Offset'], Distinct: ['Distinct'], Union: ['Union'],
-    Join: ['Join'], ArrayJoin: ['ArrayJoin'], Subquery: ['CreatingSets', 'CreatingSet'], CTE: [], RawRel: [], Materialize: [],
+    Filter: [], Join: ['Join'], ArrayJoin: ['ArrayJoin'], Subquery: ['CreatingSets', 'CreatingSet'], CTE: [], RawRel: [], Materialize: [],
   }),
 });
 export interface PlanStep { readonly type: string; readonly description: string; readonly header: readonly string[]; readonly children: readonly PlanStep[] }

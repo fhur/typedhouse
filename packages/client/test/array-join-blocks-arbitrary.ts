@@ -63,10 +63,14 @@ export function shape(recipe: Recipe): string {
 }
 /** The expansion folds into the scan block when it is LEFT or no non-safe filter sits under an inner one. */
 export function expansionFolds(recipe: Recipe): boolean {
-  return recipe.left || recipe.before === 'none' || recipe.before === 'safe';
+  // A pushed independent predicate cannot share the earlier unsafe WHERE;
+  // its derived source also prevents expansion from folding into the scan.
+  return !(recipe.before === 'unsafe' && (recipe.after === 'independent' || recipe.after === 'both'))
+    && (recipe.left || recipe.before === 'none' || recipe.before === 'safe');
 }
 /** One SELECT exactly when the expansion folds, no second ORDER BY follows a LIMIT (the `sort` fence always
  * re-sorts above its LIMIT) and no selection follows DISTINCT (it opens a block, and the ordering above it another). */
 export function foldsToOneSelect(recipe: Recipe): boolean {
-  return expansionFolds(recipe) && recipe.fence !== 'sort' && !(recipe.fence === 'distinct' && recipe.project);
+  return expansionFolds(recipe) && !(recipe.before === 'unsafe' && recipe.after !== 'none')
+    && recipe.fence !== 'sort' && !(recipe.fence === 'distinct' && recipe.project);
 }
