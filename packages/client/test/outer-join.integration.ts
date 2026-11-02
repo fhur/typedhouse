@@ -9,6 +9,7 @@ import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { createClickHouseBackend, QueryError } from '../src/index.js';
 import { rowDecoder } from '../src/decode.js';
 import { collect, keys } from './backend-harness.js';
+import { prefetchedCheck } from './prefetch-check.js';
 import { build, ddl, inserts, native, recipes, seed, shape, type Recipe } from './outer-join-arbitrary.js';
 import { components, db, forTenant, latest } from '../../compiler/test/fixtures/corpus/low-stock.js';
 let container: StartedTestContainer;
@@ -208,29 +209,37 @@ async function check(r: Recipe): Promise<number> {
 }
 it('runs 500 shrinkable binary left/right/full recipes, composed with nested inner/outer joins (orphans, NULL keys, duplicates) against both backends and native SQL, rows and meta', async () => {
   const shapes = new Set<string>();
-  let rows = 0, empty = 0, nulls = 0, castFailed = 0, castRows = 0, converted = 0, outerless = 0, inputCast = 0, fenced = 0;
+  let rows = 0, empty = 0, nulls = 0, castFailed = 0, castRows = 0, converted = 0, outerless = 0, inputCast = 0, fenced = 0, inputFailed = 0, inputRows = 0, unmerged = 0;
   const hits = new Set<string>();
   const start = performance.now();
-  const result = await fc.check(fc.asyncProperty(recipes, async r => {
+  // Slice 4d: `check` (every cell's IO and assertions) runs prefetched, 8 recipes at a time; the accounting below stays in
+  // generation order, and a failure is rethrown at its own run with both texts.
+  const evaluate = async (r: Recipe) => {
+    try { return await check(r); } catch (cause) {
+      const plans = backends.map(b => b.compile(build(r).ir).compiled);
+      throw new Error(`${String(cause)}\n${JSON.stringify(plans.map(p => ({ sql: p.sql, params: p.params })))}`, { cause });
+    }
+  };
+  const { result, prefetched } = await prefetchedCheck(recipes, { seed: Number(process.env.TYPEDHOUSE_OUTER_JOIN_SEED ?? seed), numRuns: Number(process.env.TYPEDHOUSE_OUTER_JOIN_RUNS ?? 500), ...(process.env.TYPEDHOUSE_OUTER_JOIN_PATH ? { path: process.env.TYPEDHOUSE_OUTER_JOIN_PATH } : {}) }, evaluate, (r, n) => {
     shapes.add(shape(r));
     const plans = backends.map(b => b.compile(build(r).ir).compiled);
-    try {
-      const n = await check(r);
-      if (n < 0) castFailed++; else { rows += n; if (!n) empty++; if (r.fallible) castRows += n ? 1 : 0; }
-      const result = rewriteRel(build(r).ir);
-      if (r.inputCast !== 'none') {
-        inputCast++;
-        // Fix round 1: the fence fired when the cast-free twin gets join-rule hits this recipe does not.
-        const twin = rewriteRel(build({ ...r, inputCast: 'none' }).ir).hits, joinHits = (h: typeof twin) => h.LeftToInner + h.PushFilterJoin;
-        if (joinHits(twin) > joinHits(result.hits)) fenced++;
-      }
-      for (const [rule, count] of Object.entries(result.hits)) if (count) hits.add(rule);
-      if (result.hits.LeftToInner) converted++;
-      if (!plans[0]!.sql.includes('join_use_nulls')) outerless++;
-      if (Object.values(plans[0]!.columns).some(t => t.kind === 'Nullable' || (t.kind === 'LowCardinality' && t.inner.kind === 'Nullable'))) nulls++;
-    } catch (cause) { throw new Error(`${String(cause)}\n${JSON.stringify(plans.map(p => ({ sql: p.sql, params: p.params })))}`, { cause }); }
-  }), { seed: Number(process.env.TYPEDHOUSE_OUTER_JOIN_SEED ?? seed), numRuns: Number(process.env.TYPEDHOUSE_OUTER_JOIN_RUNS ?? 500), ...(process.env.TYPEDHOUSE_OUTER_JOIN_PATH ? { path: process.env.TYPEDHOUSE_OUTER_JOIN_PATH } : {}) });
-  console.info('outer-join differential', { runs: result.numRuns, seed: result.seed, shapes: shapes.size, rows, empty, nullable: nulls, castFailed, castRows, converted, outerless, inputCast, fenced, hits: [...hits].sort(), milliseconds: Math.round(performance.now() - start) });
+    if (n < 0) castFailed++; else { rows += n; if (!n) empty++; if (r.fallible) castRows += n ? 1 : 0; }
+    const result = rewriteRel(build(r).ir);
+    if (r.inputCast !== 'none') {
+      inputCast++;
+      // Fix round 1: the fence fired when the cast-free twin gets join-rule hits this recipe does not.
+      const twin = rewriteRel(build({ ...r, inputCast: 'none' }).ir).hits, joinHits = (h: typeof twin) => h.LeftToInner + h.PushFilterJoin;
+      if (joinHits(twin) > joinHits(result.hits)) fenced++;
+      // 4d: the failing input cast really fails in some runs and returns rows in others; MergeFilter withheld a merge.
+      if (n < 0) inputFailed++; else inputRows++;
+      if (twin.MergeFilter > result.hits.MergeFilter) unmerged++;
+    }
+    for (const [rule, count] of Object.entries(result.hits)) if (count) hits.add(rule);
+    if (result.hits.LeftToInner) converted++;
+    if (!plans[0]!.sql.includes('join_use_nulls')) outerless++;
+    if (Object.values(plans[0]!.columns).some(t => t.kind === 'Nullable' || (t.kind === 'LowCardinality' && t.inner.kind === 'Nullable'))) nulls++;
+  });
+  console.info('outer-join differential', { runs: result.numRuns, prefetched, seed: result.seed, shapes: shapes.size, rows, empty, nullable: nulls, castFailed, castRows, converted, outerless, inputCast, fenced, inputFailed, inputRows, unmerged, hits: [...hits].sort(), milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBeGreaterThanOrEqual(500);
   expect(shapes.size).toBeGreaterThan(300);
@@ -251,6 +260,10 @@ it('runs 500 shrinkable binary left/right/full recipes, composed with nested inn
   // Fix round 1: recipes with a fallible input projection exercise the `fallibleWithin` fence.
   expect(inputCast, 'fallible input recipes').toBeGreaterThan(100);
   expect(fenced, 'runs where the fence withheld a join-rule hit').toBeGreaterThan(20);
+  // 4d: genuinely failing input casts, failing identically everywhere in some runs and returning rows in others.
+  expect(inputFailed, 'failing input-cast runs that failed').toBeGreaterThan(20);
+  expect(inputRows, 'failing input-cast runs with rows').toBeGreaterThan(20);
+  expect(unmerged, 'runs where the 4d fence withheld a MergeFilter').toBeGreaterThan(5);
 }, 600000);
 
 // Slice 4b anchor, the shrunk counterexample of the first LeftToInner draft (seed 20261131): b.id > 2 is null-rejecting on b,
@@ -276,22 +289,23 @@ it('anchor (4b): no LeftToInner under a fallible Filter; the INNER text fails na
 // them and 24.8's push-down stops at the first, so a1's fallible projection (k = CAST(s AS UInt32)) runs on every a1 row and
 // fails; MergeFilter merges them into one WHERE, the server pushes the guard into a1 below the projection, and the optimized
 // text returns rows. No join rule fires (fallibleWithin fences them); the oracle (nested like naive) fails too.
-it('FINDING pin (pre-existing, MergeFilter): merged filters let the server guard a fallible input projection that naive evaluates', async () => {
+// 4d: flipped. MergeFilter no longer combines two total Filters over a subtree computing a non-total value (the cast input).
+it('fixed (4d) FINDING pin (MergeFilter): two filters over a fallible input projection stay apart and fail like naive', async () => {
   const r: Recipe = { root: { node: 'join', kind: 'right', left: { node: 'table', table: 0, pre: 4 }, right: { node: 'table', table: 0, pre: null }, on: { left: 0, right: 0, leftKey: 'id', rightKey: 'id', text: false } }, shared: false, post: { side: 0, op: 'isNull' }, fallible: null, project: 'none', order: null, distinct: false, inputCast: 'failing' };
   const guarded = (build(r) as any).where((row: any) => row.a1.s.eq('7'));
   const hits = rewriteRel(guarded.ir).hits;
-  expect(hits).toMatchObject({ LeftToInner: 0, PushFilterJoin: 0, MergeFilter: 1 });
+  expect(hits).toMatchObject({ LeftToInner: 0, PushFilterJoin: 0, MergeFilter: 0 }); // 4d: was MergeFilter: 1
   const [optimized, naive] = backends.map(b => b.compile(guarded.ir).compiled) as [CompiledQuery, CompiledQuery];
   const opt = await outcome(() => json(optimized.sql, optimized.params as Record<string, string>));
   const nai = await outcome(() => json(naive.sql, naive.params as Record<string, string>));
   expect(nai.ok ? 'rows' : nai.code).toBe('6');
-  expect(opt.ok ? opt.value.data.length : opt.code).toBe(1); // observed: one row (a1.id = 3, s = '7'); expected once fixed: code 6
+  expect(opt.ok ? opt.value.data.length : opt.code).toBe('6'); // 4d: was one row (a1.id = 3, s = '7')
 });
 
 it('detects a lost null extension after IO (outer → inner), shrinks and replays the exact counterexample', async () => {
   let executions = 0;
   // Recipes whose guarded cast can fail are excluded: the server may fail before any extension is lost.
-  const property = fc.asyncProperty(recipes.filter(r => r.fallible?.guard !== 'id'), async r => {
+  const property = fc.asyncProperty(recipes.filter(r => r.fallible?.guard !== 'id' && r.inputCast !== 'failing'), async r => { // 4d: and failing input casts
     const q = build(r), correct = backends[1]!.compile(q.ir), faulty = backends[0]!.compile(build(r, true).ir);
     const expected = (await collect(backends[1]!.run(correct))).flat();
     const actual = (await collect(backends[0]!.run(faulty))).flat(); executions++;

@@ -7,7 +7,7 @@
 - Partial: PushFilterProject (`rewrite-rel.ts` ~L87) crosses Projects whose every expression is a `ColumnRef` bound to the input, i.e. identity **and renames**, never computed expressions. PushFilterArrayJoin requires `child.expr` to be a bare `ColumnRef`. `plan-selects.ts` fences `Distinct`, `ArrayJoin`, every Project over a non-table source, and computed Projects outside `safeProjection` (typed integer `plus`/`minus`/`multiply` over a scan with Filter-only clauses, alias not shadowing any physical column). `differential.integration.ts` general topology runs `numRuns: 60`; `pushdown`/`pruning`/`fixture-differential` already run 500. EXPLAIN evidence is four focused tests (`low-stock`, `pruning`, `cte`, `aggregate-union` integration), text `toContain`/`toBe`, not a corpus with both structural clauses.
 - Not started: MergeProject (no rule, `RewriteRule` union lacks it), LeftToInner, outer joins (`join.ts` exports `join`/`crossJoin` only; `emit-naive.ts` L328 fails `unsupported_join` for other kinds; `corpus-coverage.json` carries three `deferred outer join` ids), table-driven block-planning test (`plan-selects.test.ts` has four hand cases).
 
-**House invariant that constrains every slice (not in the spec table, settled in code and tests):** a rewrite or fold may never *suppress* a failure the naive emission would raise. Concretely: an expression outside the closed total fragment (`safePredicate` for predicates; `safeProjection` for projections; `safeAggregate` for aggregates — Cast, division, `Raw`, `Subquery`, known/user-origin calls, non-deterministic calls, non-scalar families are all outside) must keep its evaluation set, and never be dropped. `rewrite-rel.test.ts` "keeps all explicit fences and unused fallible projections" and "never misses a hidden fallible output" pin this. Slices 1–2 extend the total fragment only with evidence; they do not relax the invariant. Where the spec's rule condition is weaker than the invariant, the invariant wins and the docs page says so.
+**House invariant — results-only error contract (user ruling during slice 4d; recorded as a row in `spec.md` "Decided, and still open").** When the naive emission succeeds, the optimized emission must return identical rows and identical column types (`meta` = `columns`) and must never fail. When the naive emission fails, the optimized emission may fail too or may return the rows of the guard-first oracle (the query evaluated with every guard applied before every fallible expression); it may not return any other rows. Reason (spec row): filter order, PREWHERE and primary-key/part pruning make ClickHouse's error raising plan-dependent, so naive's failures are partly an artifact of its nesting. Test helper: `packages/client/test/results-contract.ts` (`resultsContract(optimized, naive, oracle?)`). Consequence for the plan: a fold that makes the optimized text **fail where naive succeeds** (e.g. alias capture, slice 4f) is a defect; a fold that returns guard-first rows where naive fails is not. **Every fence shipped so far stays** (`safePredicate`/`totalPredicate`/`totalExpression`, `fallibleExposure`, `fallibleWithin`, `fallibleComputation`, the 3b/4d filter isolation, "never drop an unreferenced fallible output"); relaxing any of them under the new contract is a future change that must be proposed, reviewed and recorded explicitly, never done in passing. Earlier slices' wording "may never suppress a failure" is historical and superseded by this paragraph.
 
 ### Shared verification protocol (every slice, in this order)
 
@@ -674,7 +674,7 @@ One more shape is pinned for parity, not counted against 4b. Key alias `id` name
 - test:compiler-integration 0: 30 files / 317 tests, 375 s.
 - check:all 0 (579 s).
 
-### Slice 4d — MergeFilter across fallible join inputs (ACTIVE next)
+### Slice 4d — MergeFilter across fallible join inputs (ACCEPTED (committed; see git log, the commit after f73b234))
 
 **0. CI integration headroom (first item).** On GitHub runners the integration files run ~2× slower than locally: aggregate-union 78–108 s (47 s locally), outer-join 95–122 s, pushdown 51–65 s, cte/pruning 45–64 s; master run 41216934562 timed out aggregate-union's 500-run test at 180 s on one job. Fix without dropping any of the 500 runs or coverage accounting, choosing from: CI-aware per-test timeouts with a margin derived from recorded CI timings (not a blanket raise); less contention (measure the `maxWorkers: 2` × one-container-per-file interplay on the runner); the 4b prefetch/parallel evaluation applied to outer-join, pushdown, cte and pruning. Record per-file local and CI timings before and after in the Worker report. Acceptance: both CI matrix jobs green on two consecutive runs of the branch, with the timings logged.
 
@@ -690,7 +690,118 @@ One more shape is pinned for parity, not counted against 4b. Key alias `id` name
 
 **Acceptance.** Protocol green; lowStock byte-identical (its inputs are total); every matrix cell agrees; flipping the new condition fails the pins and ≥3 table rows. **Hazards.** Do not fence total-input joins (perf regression on every corpus join — check the snapshot diff is limited to fallible-input ids); the condition must look through Project/Filter/CTE layers of an input but stop at real fences; LeftToInner (4b) runs before planning and must not reintroduce the merge.
 
-### Slice 4e — `ifNull` over `LowCardinality(Nullable(T))` (QUEUED)
+**As accepted (Tester REJECTED only for pre-existing D1/D2, both resolved by the user's results-only ruling; 4d fixes held in every cell).** *Item 0, CI headroom:* new `packages/client/test/prefetch-check.ts` generalizes 4b's prefetch (record the `fc.assert` stream, evaluate 8 at a time, assert in order; duplicates, shrinks and replays live), applied to outer-join, pushdown, cte, pruning and join-block; `ciLimit` doubles an explicit per-test limit only when `CI === 'true'` (aggregate-union/pushdown 360 s, cte/pruning 240 s); `maxWorkers` unchanged; `prefetch-check.test.ts` pins stream equality for all six arbitraries plus failure/shrink/replay parity. Local six-file wall 227 → 108 s (outer-join 80.8 → 20.3 s, pushdown 42.6 → 18.3 s, cte 43.0 → 10.2 s, join-block 101.7 → 27.6 s), full integration 370 → 266 s; projected CI margin ≤ 53 % at the worst observed ratio. Two consecutive green CI runs remain a lead action (see closing note). *Rule:* `fallibleComputation` = 4b's `fallibleWithin` without the Filters' own predicates; MergeFilter refuses over it, the planner's Filter arm refuses to fold beside held Filters when `fallibleBelowFilters(block)` holds, and the harness counts that boundary as a `Filter` fence. *Deviations (accepted):* (1) the rule applies over any subtree, not only Join (GROUP BY and ARRAY JOIN reproduced); (2) Filter predicates are excluded from `fallibleComputation` — the Worker's "24.8 never pushes across a Filter step" premise was refuted by the Tester on multi-part data (D1), but under the results-only contract the resulting behaviour is admissible, so the exclusion stays; (3) PushFilterArrayJoin is also fenced by `fallibleComputation(input)`. *Scan variant:* immune on single-part data but fenced as required by the generic rule (table row + native pin), which is what multi-part data needs. *D1/D2 (pre-existing):* under the ruling both are "naive fails, optimized fails or returns guard-first rows" — not defects; the pins in `slice4d-adversarial.integration.ts` now assert zero `resultsContract` violations in all 16 cells against a guard-first oracle (non-vacuous: on 2 parts all 15 D1 and 4 D2 shapes return guard-first rows). *Minors fixed:* m1 pushdown `inputCasts` split by recipe variant (`failing` 107 failed / 23 rows, `passing` 16 / 89, thresholds asserted); m2 `ciLimit` scales only for `CI === 'true'`, and the slice4b one-filter case now reaches PushFilterArrayJoin (flip-checked). `check:all` exit 0.
+
+### Slice 4d — Worker report
+
+- **0. CI headroom: measurements.**
+  - CI job logs (runs 41216932321/41216934562 at 0106121, 41220998418 at f73b234) run 0.9–2.2× this box. aggregate-union's 500-run test took 58–108 s plus one >180 s timeout (≥3.8×); outer-join 77–123 s; pushdown 39–67 s; cte/pruning 34–68 s. 4c's join-block colliding test took 85 s on CI against a 400 s limit.
+  - Local, same load, six files alone, HEAD tests → 4d (`six-{before,after}.log`): aggregate-union 47.4 → 49.9 s, outer-join 80.8 → 20.3 s, pushdown 42.6 → 18.3 s, cte 43.0 → 10.2 s, pruning 38.1 → <10 s, join-block 4c 101.7 → 27.6 s. Wall time 227 → 108 s. Full integration 370 → 266 s.
+- **0. The fix.**
+  - New `prefetch-check.ts` (out-of-list, flagged) generalizes 4b's prefetch. The `fc.assert` stream is recorded, `evaluate` runs 8 at a time, and asserts run in order. Duplicates, shrinks and replays run live.
+  - All six suites use it. Runs, seeds, accounting and fault injection are unchanged.
+  - `ciLimit` doubles the explicit limit only under `CI`: aggregate-union and pushdown 360 s, cte and pruning 240 s.
+  - New `prefetch-check.test.ts` (8 tests, Docker-free) pins stream equality for all six arbitraries, failure, shrink and replay parity, and `ciLimit`. `maxWorkers` is unchanged.
+- **0. Projected CI margin, at the worst ratio of 2.2×.** aggregate-union about 110/360 s (31%), and the ≥3.8× outlier about 190 s (53%). outer-join about 45/600, pushdown 40/360, cte and pruning 25/240, join-block 61/400.
+  - **Lead:** push and watch two consecutive green runs on both matrix jobs, logging per-file times.
+- **Rule.** `fallibleComputation` is 4b's `fallibleWithin` without the Filters' own predicates.
+  - MergeFilter refuses over it.
+  - The planner's Filter arm refuses to fold beside held Filters when `fallibleBelowFilters(block)` holds (exported). The harness `filterFence` counts that boundary as `Filter`.
+  - Deviation 1: the rule applies over any subtree, not only Join, because GROUP BY and ARRAY JOIN reproduced too.
+  - Deviation 2: Filter predicates are excluded. A probe shows 24.8 never pushes across a Filter step in any of the 8 cells, below a scan, an ARRAY JOIN, a GROUP BY or a LEFT join. This keeps the 3b and array-join-blocks expectations.
+  - Deviation 3 (brief (ii)): PushFilterArrayJoin is fenced by `fallibleComputation(input)` too. A single filter over a fallible selection under ARRAY JOIN returned rows where naive gave code 6 under push-down 0.
+  - No EXPLAIN snapshot moved. lowStock is byte-identical.
+- **Variants.**
+  - Join (all kinds), ARRAY JOIN (fallible expansion, or fallible selection below) and GROUP BY (fallible aggregate under two HAVING) reproduced. They are fixed and pinned.
+  - The scan variant is immune: 24.8 keeps the merged `and(c>0, id!=3)` as one PREWHERE/Filter above the projection and never splits it below an Expression step. That also held on a 20k-row wide table. It is fenced anyway by the generic rule, recorded in a table row and a native pin.
+- **Tests.** `pnpm test` 93 files / 1,254 tests.
+  - rewrite-rel.test +2: MergeFilter and PushFilterArrayJoin negatives and positives.
+  - block-planning table +15 rows: 4 kinds × fallible/total, ARRAY JOIN, HAVING, scan, filter-below.
+  - Both FINDING pins flipped ("4d").
+  - slice4b native matrix: 4 kinds × fallible/total × bad row filtered/kept, 16 combos × 16 cells (both emitters, alias, prewhere, push-down, threads), plus oracle. 8 fail with code 6, 8 return rows. The variants have their own test.
+- **Arbitraries.**
+  - outer-join generates `failing` instead of `safe` (seed 20261131, 500 runs): 82 failed, 75 returned rows, 54 had a MergeFilter withheld.
+  - pushdown gains `inputCast` with value-preserving cast `amount + CAST(ifNull(category,'0') AS UInt64)*0` (700 runs): 123 failed, 112 returned rows, 132 topologies.
+  - Fault campaigns exclude failing casts and still shrink and replay: 16 and 8 shrinks.
+- **Flip check.** Removing both conditions failed the outer-join and pushdown differentials with genuine optimized-rows vs naive code 6 mismatches. It also failed both pins, the matrix, 7 table rows and 2 unit tests. Restored.
+- **Protocol** (`/tmp/typedhouse-m4-slice4d-worker-*.log`):
+  - The first pass found 4 TS errors in my tests; fixed and rerun.
+  - typecheck 0; `dlx tsc` 5.5.4 0, latest 0;
+  - test 0 (load 12.9, no flake); build 0;
+  - verify:core-package 0; verify:query-package 0; verify:expr-surface 0;
+  - test:compiler-integration 0 (30 files / 319 tests, 266 s);
+  - check:all 0 (481 s);
+  - docs not changed.
+- **Look first.**
+  1. The Deviation 2 claim (24.8 never pushes across a Filter step).
+  2. Fencing the immune scan variant.
+  3. `prefetchedCheck`'s `stopped` handling.
+  4. `ciLimit` as the margin.
+  5. A `merge-filters.md` sentence is still to write (out-of-list).
+- **Logs.** First-session logs were lost in a reboot; all numbers are from reruns.
+- **Contract follow-up.** The user ruled the error contract results-only after the Tester's D1:
+  - when naive succeeds, optimized returns the same rows and types and never fails;
+  - when naive fails, optimized fails or returns the guard-first oracle's rows.
+
+  Changes:
+  - `spec.md` "Decided, and still open" gains a row with the reason: filter order, PREWHERE and primary-key/part pruning make error raising plan-dependent, so naive's failures are partly an artifact of its nesting.
+  - New `packages/client/test/results-contract.ts` holds `resultsContract(optimized, naive, oracle?)`, which returns `equal`/`both-failed`/`oracle-rows` or a violation. An oracle that itself fails admits no rows. Unit cases are in `prefetch-check.test.ts`. The 500-run suites are not migrated.
+  - The D1 and D2 pins in `slice4d-adversarial.integration.ts` now assert zero contract violations in all 16 contract cells, citing the ruling. The guard-first oracle is the naive text over `*_c` twins without the bad id 3 (every guard rejects it). Three IN-guard shapes keep id 3 and use naive as their oracle.
+  - The old counts are logged only. The oracle branch is not vacuous: on 2 parts exactly the 15 D1 shapes, and all 4 D2 shapes, return the guard-first rows (16/16 or 8/16 cells).
+  - m1: pushdown `inputCasts` is split by recipe variant: `failing` 107 failed / 23 rows, `passing` 16 failed / 89 rows. Asserted: `failing` >20 failed and >0 rows; `passing` >20 rows.
+  - m2: `ciLimit` scales only for `CI === 'true'`. The slice4b one-filter case now expands a projected array column, so PushFilterArrayJoin is reachable (flip-checked: 1 without the fence, 0 with).
+  - The Tester's `slice4d-adversarial.test.ts` ciLimit pin is flipped ("4d follow-up"; out-of-list, flagged).
+
+  Protocol (`/tmp/typedhouse-m4-slice4d-worker-contract-*.log`):
+  - typecheck 0;
+  - test 0: 94 files, 1,267 passed plus 1 Tester opt-in skip, load 13.9, no flake;
+  - build 0;
+  - slice4d-adversarial, pushdown and slice4b-adversarial integration 0 (26 tests);
+  - check:all 0 (unit 94/1,267; codegen 1/7; integration 31/325, 278 s).
+
+### Slice 4d — Tester verdict
+
+**REJECTED.** There is one blocker under the brief's own rule, D1. It is pre-existing, but it refutes Deviation 2. The 4d fences themselves are sound and precise. Probes: `packages/client/test/slice4d-adversarial.integration.ts` (24.8, own MergeTree tables, `wait_end_of_query = 1`, 16 contract cells) and `packages/compiler/test/slice4d-adversarial.test.ts`. Logs: `/tmp/typedhouse-m4-slice4d-tester-*.log`.
+
+**D1 — BLOCKER, pre-existing.** The premise "24.8 never pushes a predicate across a Filter step" is false once the bad row sits in its own part (two INSERTs) or granule.
+- Repro: `A.where(r => cast(r.s, col.UInt8).gt(0)).where(r => r.id.ne(3))`. The 3b text `FROM (SELECT … FROM ta WHERE CAST(s AS UInt8) > 0) WHERE id != 3` returns rows [1, 2, 4]; naive fails with code 6 in **16/16** cells. Analyzer 0, PREWHERE/FINAL variants and short-circuit settings behave the same.
+- Mechanism: the guard reaches ReadFromMergeTree's primary-key analysis. EXPLAIN indexes=1 shows `Condition: (id not in [3, 3])`, Parts 1/2; naive's deeper nesting shows `Condition: true`, Parts 2/2. A `granularity = 1` table with an `id = 1` guard does the same.
+- Scope: 15 of 23 probe shapes diverge in 8 or 16 cells — scan, inner/LEFT ARRAY JOIN, inner/left join, ON-copied guard, HAVING, and filters over a fallible-filtered join/GROUP BY/expansion input. With a single part all 23 agree, which is why the Worker's single-INSERT probes saw nothing.
+- Counts are identical with HEAD's `rewrite-rel.ts`/`plan-selects.ts` swapped in, so this is not a 4d regression.
+- Flip F4 (exclusion removed, i.e. `fallibleComputation` = `fallibleWithin`) fixes the 6 merged/pushed shapes but not the single-guard 3b forms. Fixing D1 needs both that change and a planner change for an isolated fallible WHERE read directly from a table (e.g. naive's extra nesting; evidence required).
+- Pinned as observed in the `D1` map, expected 0 once fixed. 4d's own targets agree 16/16 on two-part tables: the pin join, the inner cross-conjunct, the scan selection, the HAVING aggregate, the fallible expansion and the selection below an expansion.
+- The scan variant is **not** immune on multi-part data (F1: 16/16 diverge), so fencing it is required, not over-fencing.
+
+**D2 — major, pre-existing; 4f class.** A descriptor-visible `c UInt8 ALIAS CAST(s AS UInt8)` is a plain ColumnRef to both fences. MergeFilter, PushFilterJoin and PushFilterAggKey move `id != 3` below the read that computes it: rows vs code 6 in 16/16 cells for left join, inner join and GROUP BY, even on one part. Pinned. Suggest folding it into 4f (descriptor marks computed columns).
+
+**m1 — minor.** pushdown `inputCasts.{failed,rows}` are observed outcomes and pool both variants. By recipe content (seed, 700 runs), `failing` = 130 and `passing` = 105, so about 7 of the 123/112 come from `failing` runs that return rows. The ">20 rows" assertion is met by `passing` (bad rows filtered below the cast, which is legitimate) and not by the failing cast itself. Split the counters per variant. outer-join counts (82/75 of 157 `failing`) are observed per run of one variant, which is fine.
+
+**m2 — minor.**
+- The slice4b "one filter" assertion `PushFilterArrayJoin` = 0 never pins the Deviation 3 fence: its expansion is a known call, so the rule cannot fire. My Dev3 probe now pins it natively (`r.arr` expansion, inner and LEFT, one and two parts): 0/16 with the fence, 8/16 (push-down 0) without.
+- `ciLimit` doubles for any non-empty `CI`, including `'false'`.
+
+**Probed, no finding.**
+- Completeness, all seen by `fallibleComputation` with the merge withheld: Decimal ±/×, `avg`, `quantile(0.5)`, `arrayElement` (constant and Param), scalar subquery projection, cast sort key, Union branch (only the total branch merges), CTE, expansion, Raw projection. Named-tuple `element` and integer arithmetic stay total.
+- Total guards over IN guards, a fallible IN subquery, and FINAL scan/join: 0/16. The `left join: isNull, fallible, guard` shape: 0/16.
+- Prefetch, independently checked: the planned stream equals `fc.check`'s and `fc.sample`'s for all six real arbitraries. Each cached evaluation is bound to its value under scrambled completion. A content-based fault at run 34 (outer-join), in evaluate or in the property, gives the same `numRuns`, path, counterexample and 12 shrinks as live, with `prefetched` = 35. Replay is live (0 prefetched). No evaluation starts after return. A later concurrent rejection is not reported and raises no unhandled error.
+- Suite diffs vs HEAD: seeds and run counts unchanged; aggregate-union/cte/pruning/join-block assertions unchanged; outer-join/pushdown only add asserts; fault filters exclude `failing` only and still shrink.
+- Oracles: hand-written. outer-join nests per node. pushdown's input cast is its own derived scope, and its total filters were already one WHERE at HEAD.
+- Over-fencing (`compile` at HEAD vs worktree):
+  - EXPLAIN corpus (62 entries, every API example): 0 SQL changed.
+  - Docs `--check`: compiler, readme, guides, query-builder and functions all 0.
+  - 500 values of each of 11 arbitraries: 0 changes except pushdown (171 changed: +228 SELECTs, +9.6%; 4 fewer) and outer-join (38 changed: +38, +1.3%). Every changed value is an input-cast recipe. Cost is reasonable.
+- Invariants: `emit-naive.ts` untouched (it imports only a type from plan-selects). lowStock test passes, and fixtures, snapshots, `test/types/**` and `budget.json` are untouched. 4 flipped pin lines carry "4d" comments.
+
+**Flips** (each once, restored with `cp` + `cmp`, `git diff --stat` unchanged; `flip-*.log`):
+- F1, MergeFilter fence: 1 Worker unit, 2 Tester units, both differentials, both pins, matrix, variants.
+- F2, planner arm: 7 table rows, both differentials, both pins, matrix, variants.
+- F3, PushFilterArrayJoin: 1 unit and the pushdown differential; my Dev3 pin shows 8/16.
+- F4, exclusion: 1 table row, 2 rewrite-rel tests, the slice4b variants test, my unit.
+- F5, `ciLimit` always doubles: 2 tests.
+
+**Protocol.** typecheck 0; `dlx tsc` 5.5.4 0 and latest 0; `pnpm test` 0 (94 files, 1,266 tests, 66 s, load 10.8–13.3, no flake); build 0; verify:core-package 0; verify:query-package 0 (98 s); test:compiler-integration 0 (31 files, 325 tests, 277 s: outer-join 27 s, pushdown 23 s, aggregate-union 49 s, cte 13 s, pruning 11 s, join-block 52 s); check:all 0 (507 s: unit 94/1,266, codegen 1/7, integration 31/325).
+
+### Slice 4e — `ifNull` over `LowCardinality(Nullable(T))` (ACTIVE)
 
 **Source.** 4b Tester: `ifNull` over a `LowCardinality(Nullable(String))` column builds but fails `invalid_expression_type` on both emitters, even on a plain table. Every 4a outer join turns `LowCardinality(String)` into `LowCardinality(Nullable(String))`, so `r.b.lc.ifNull('…')` — the spec's own "ifNull first" advice for outer-join columns — is unusable there.
 
@@ -702,6 +813,8 @@ One more shape is pinned for parity, not counted against 4b. Key alias `id` name
 
 ### Slice 4f — descriptor-invisible ALIAS columns (QUEUED)
 
+**Scope note (after the 4d contract ruling).** 4f is about alias **capture** only — an output alias binding a column the descriptor omits, so the optimized text fails (215) where naive succeeds, which violates the results-only contract and remains a defect. The 4d Tester's D2 (a descriptor-visible `ALIAS CAST(…)` column being reordered relative to a guard) is **out of 4f scope**: under the ruling it is "naive fails, optimized fails or returns guard-first rows", not a defect.
+
 **Source.** 4c Tester Finding 1 (major, pre-existing, not a 4c regression). Every alias guard builds its shadow set `N` from **table descriptors**, so a real column the descriptor omits is invisible: ClickHouse `ALIAS` columns dropped by `typedhouse generate --skip-alias`, or any hand-written descriptor listing fewer columns than the table. Repro (pinned in `packages/client/test/slice4c-adversarial.integration.ts`): table `xm (id, v, hidden Int64 ALIAS toInt64(id) * 10)` declared as `{ id, v }`; a join aggregate with output alias `hidden` and `HAVING hidden > 1` folds and fails 215 under `prefer_column_name_to_alias = 1`, while naive returns rows. The same capture exists on a single-table block under the slice 1/3 computed-selection guard.
 
 **Options (decide in the slice; PM recommends (a) + (b)).** (a) Codegen records omitted ALIAS/MATERIALIZED column names as shadow-only metadata on the table descriptor (e.g. `table(name, columns, { …, hiddenColumns: ['hidden'] })`), never selectable or typed, and every guard (slice 1/3 scan guard, 4c Aggregate guard) includes them in `N`. (b) Contract text in spec/docs: a descriptor must list every column the server can resolve by name, or declare it hidden; `typedhouse check` warns when the live table has resolvable columns absent from the descriptor. (c) Fallback considered and not recommended: fence whenever HAVING/ORDER BY names an alias over a bare-table side (broad perf cost).
@@ -710,7 +823,9 @@ One more shape is pinned for parity, not counted against 4b. Key alias `id` name
 
 **Acceptance / hazards.** The 4c pin flips (join and single-table forms) under alias 0/1 × prewhere 0/1; codegen snapshot regenerated and `typedhouse check` stale-detection unchanged; existing descriptors without the option behave as today; hidden names must never become select items or TS fields; MATERIALIZED columns resolve by name too (include them); budget `inputHash` only if a bench input changes.
 
-**Sequencing and status.** Slices 1, 2, 3, 3b, 3c, 4a, 4b and 4c are ACCEPTED and committed on `m4-optimizations` (`5edfbe2`, `fd6c25c`, `ac1299b`, `c4a38cc`, `9ec1c3a`, `6f9d333`, `da46b13`, and the 4c commit after `0106121`). `0106121` is a lead infrastructure commit giving the root typecheck an 8 GB Node heap (`ci: give the root typecheck an 8 GB Node heap`). Next: 4d ACTIVE (starting with item 0, CI integration headroom), then 4e, then 4f (QUEUED). Each slice starts only after the previous slice's Tester verdict reads ACCEPTED and the PM has committed it.
+**Sequencing and status.** Slices 1, 2, 3, 3b, 3c, 4a, 4b, 4c and 4d are ACCEPTED and committed on `m4-optimizations` (`5edfbe2`, `fd6c25c`, `ac1299b`, `c4a38cc`, `9ec1c3a`, `6f9d333`, `da46b13`, `f73b234`, and the 4d commit after it); `0106121` is a lead infrastructure commit (8 GB Node heap for the root typecheck). Slice 4e is ACTIVE; 4f is QUEUED after it. Each slice starts only after the previous slice's Tester verdict reads ACCEPTED and the PM has committed it.
+
+**M4 closure, remaining after 4f.** Once 4f is committed: push the branch and obtain **two consecutive green CI runs on both matrix jobs** (TypeScript 5.5.4 and latest), with per-file integration timings logged; that also discharges 4d item 0's CI acceptance. Then M4's three acceptance clauses (500-case naive/optimized differential, byte-exact `lowStockCategories('acme')`, EXPLAIN corpus clauses) stand on committed, CI-green evidence.
 
 # v1 implementation coverage and next batch
 

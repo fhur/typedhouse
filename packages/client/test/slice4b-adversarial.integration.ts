@@ -311,16 +311,97 @@ it('re-verification: total aggregates in a converted input, fallible projection 
 /** FINDING (pre-existing at HEAD, not a 4b rule; the Worker's MergeFilter finding, minimal form): two total Filters over
  * an outer join whose preserved input projects a failing cast. Naive nests them; 24.8 does not push the outer guard
  * through the inner non-pushable `isNull(b.id)` filter, so the cast runs on every row of qa (code 6, as the oracle).
- * MergeFilter merges them into one WHERE and the server pushes the `a.id != 3` part below the cast: rows. */
-it('FINDING pin (pre-existing, MergeFilter + join-block fold): merged filters let the server guard a fallible input projection', async () => {
+ * MergeFilter merged them into one WHERE and the server pushed the `a.id != 3` part below the cast: rows.
+ * 4d: flipped. Neither MergeFilter nor the planner combines the two Filters over a subtree computing a non-total value. */
+it('fixed (4d) FINDING pin (MergeFilter + join-block fold): merged filters no longer let the server guard a fallible input projection', async () => {
   const projA = A.map(r => ({ id: r.id, c: bad(r.s) }));
   const q = leftJoin({ a: projA }, { b: B }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.id.isNull()).where(r => r.a.id.ne(3)).map(r => ({ id: r.a.id, c: r.a.c }));
-  expect(rewriteRel(q.ir).hits).toMatchObject({ MergeFilter: 1, LeftToInner: 0, PushFilterJoin: 0 });
+  expect(rewriteRel(q.ir).hits).toMatchObject({ MergeFilter: 0, LeftToInner: 0, PushFilterJoin: 0 }); // 4d: was MergeFilter: 1
   const optimized = compile(q.ir), naive = emitNaive(q.ir);
   expect((await execute(`SELECT id, c FROM (SELECT a.id AS id, a.c AS c FROM (SELECT id, CAST(s AS UInt8) AS c FROM qa) a LEFT ALL JOIN qb b ON a.id = b.id WHERE b.id IS NULL) WHERE id != 3 ${J}`)).error).toBe('6');
   expect((await execute(naive.sql, naive.params)).error).toBe('6');
-  expect((await execute(optimized.sql, optimized.params)).data).toEqual([[4, 4]]); // observed; expected once fixed: code 6
+  expect((await execute(optimized.sql, optimized.params)).error).toBe('6'); // 4d: was rows [[4, 4]]
   expect((await execute(optimized.sql, optimized.params, { query_plan_filter_push_down: 0 })).error).toBe('6');
+  await agree(q.ir, { label: '4d pin, every cell', error: '6' });
+});
+
+/** Slice 4d native matrix: two total Filters (a non-pushable one, then a guard on the fallible input's key) over each join
+ * kind, with a failing (`CAST(s AS UInt8)`, 'y' on qa id 3) or a total input projection, the guard excluding the bad row
+ * (`id != 3`) or keeping it (`id != 2`). Every cell of `cells` (both emitters x prefer_column_name_to_alias 0/1 x
+ * optimize_move_to_prewhere 0/1 x query_plan_filter_push_down 0/1 x max_threads 1/default, wait_end_of_query = 1) agrees
+ * on rows, meta and error code, as does a hand-written oracle nesting each Filter in its own scope. */
+it('4d: native matrix, inner/left/right/full x fallible/total input x bad row filtered-out/kept', async () => {
+  const kinds = ['inner', 'left', 'right', 'full'] as const;
+  let failed = 0, rows = 0;
+  for (const kind of kinds) for (const fallible of [true, false]) for (const guard of [3, 2]) {
+    const input = A.map(r => ({ id: r.id, c: fallible ? bad(r.s) : r.id.plus(1) }));
+    const joined: any = kind === 'inner' ? join({ a: input, b: B }).on(r => r.a.id.eq(r.b.id))
+      : kind === 'right' ? rightJoin({ b: B }, { a: input }).on(r => r.a.id.eq(r.b.id))
+      : (kind === 'left' ? leftJoin : fullJoin)({ a: input }, { b: B }).on(r => r.a.id.eq(r.b.id));
+    // Inner: a cross-input conjunct cannot be pushed into either input; outer: isNull over the extended side cannot either.
+    const q = joined.where((r: any) => kind === 'inner' ? r.a.id.plus(r.b.n).ne(0n) : r.b.id.isNull()).where((r: any) => r.a.id.ne(guard)).map((r: any) => ({ id: r.a.id, c: r.a.c }));
+    expect(rewriteRel(q.ir).hits.MergeFilter, `${kind} ${fallible}`).toBe(fallible ? 0 : 1);
+    const inner = `SELECT id, ${fallible ? 'CAST(s AS UInt8)' : 'id + 1'} AS c FROM qa`;
+    const from = kind === 'right' ? `qb b RIGHT ALL JOIN (${inner}) a ON a.id = b.id` : `(${inner}) a ${kind.toUpperCase()} ALL JOIN qb b ON a.id = b.id`;
+    const first = kind === 'inner' ? 'id + bn != 0' : 'bid IS NULL';
+    const oracle = `SELECT id, c FROM (SELECT id, c FROM (SELECT a.id AS id, a.c AS c, b.id AS bid, b.n AS bn FROM ${from}) WHERE ${first}) WHERE id != ${guard} ${J}`;
+    const result = await agree(q.ir, { label: `4d ${kind} fallible=${fallible} guard=${guard}`, oracle, ...(fallible ? { error: '6' } : {}) });
+    if (result.first.error) failed++; else rows++;
+  }
+  // Every fallible combination fails identically (naive evaluates the cast on qa id 3 whichever guard), every total one returns rows.
+  expect({ failed, rows }).toEqual({ failed: 8, rows: 8 });
+});
+
+/** Slice 4d: the other block kinds. ARRAY JOIN (a fallible expansion, or a fallible selection below it) and GROUP BY (a
+ * fallible aggregate argument under two HAVING filters) reproduced before the fix: the merged clause's `id != 3` was
+ * pushed below the expansion / GROUP BY ahead of the cast (rows where naive and the oracle fail with code 6), and the
+ * single-filter PushFilterArrayJoin variant did the same under query_plan_filter_push_down = 0. The scan variant (a
+ * fallible computed selection under `c > 0` then `id != 3`) never reproduced: 24.8 keeps the merged conjunction in one
+ * PREWHERE/Filter step above the projection (EXPLAIN: one `and(greater(c, 0), notEquals(id, 3))` filter column, also on
+ * a 20,000-row table with a wide column), never splitting a conjunct below an Expression step, so the cast runs on every
+ * row in both texts; it is fenced anyway by the same rule (the rule does not depend on what lies between). Two Filters
+ * over a non-total Filter still merge: 24.8 never pushes a predicate across a Filter step (probed below). */
+it('4d: ARRAY JOIN, GROUP BY and scan variants agree in every cell; filters above a fallible Filter still merge', async () => {
+  const { fn: known } = createKnownFunctions({ array: { isAggregate: false, deterministic: true, aliasTo: '' } } as const);
+  // `bad` is untyped (any), so the expansion's element type is not inferred: the chain is written over `any`.
+  const expansion = (A as any).arrayJoin((r: any) => known.array(bad(r.s)).as(col.Array(col.UInt8)), 'x').where((r: any) => r.x.gt(0)).where((r: any) => r.id.ne(3)).map((r: any) => ({ id: r.id, x: r.x }));
+  expect(rewriteRel(expansion.ir).hits.MergeFilter).toBe(0);
+  await agree(expansion.ir, { label: '4d fallible ARRAY JOIN expansion', error: '6', oracle: 'SELECT id, x FROM (SELECT id, x FROM (SELECT id, x FROM qa ARRAY JOIN array(CAST(s AS UInt8)) AS x) WHERE x > 0) WHERE id != 3' });
+  const selection = A.map(r => ({ id: r.id, c: bad(r.s), s: r.s })).arrayJoin(r => known.array(r.s).as(col.Array(col.String)), 'x');
+  const twoFilters = selection.where(r => r.x.ne('')).where(r => r.id.ne(3)).map(r => ({ id: r.id, c: r.c }));
+  expect(rewriteRel(twoFilters.ir).hits).toMatchObject({ MergeFilter: 0, PushFilterArrayJoin: 0 });
+  await agree(twoFilters.ir, { label: '4d fallible selection below an ARRAY JOIN, two filters', error: '6' });
+  // Tester m2: the expansion must be a column for PushFilterArrayJoin to be reachable at all (over a known call it never
+  // fires), so the one-filter case expands a projected array column. Without the 4d fence it pushes `id != 3` (hits 1).
+  const columnExpansion = A.map(r => ({ id: r.id, c: bad(r.s), arr: known.array(r.s).as(col.Array(col.String)) })).arrayJoin(r => r.arr, 'x');
+  const oneFilter = columnExpansion.where(r => r.x.ne('').and(r.id.ne(3))).map(r => ({ id: r.id, c: r.c }));
+  expect(rewriteRel(oneFilter.ir).hits.PushFilterArrayJoin).toBe(0); // 4d fence; flip-verified: 1 without it
+  // One user filter: the texts agree cell by cell, and the outcome is the server's (rows when it pushes `id != 3` below the
+  // expansion and the cast, code 6 under query_plan_filter_push_down = 0), the same in both texts.
+  const [o1, n1] = [compile(oneFilter.ir), emitNaive(oneFilter.ir)];
+  for (const settings of cells) {
+    const [a, b] = [await execute(o1.sql, o1.params, settings), await execute(n1.sql, n1.params, settings)];
+    expect.soft(a, `one filter ${JSON.stringify(settings)}`).toEqual(b);
+    expect.soft(a.error, `one filter ${JSON.stringify(settings)}`).toBe(settings.query_plan_filter_push_down ? undefined : '6');
+  }
+  const grouped = A.groupBy(r => ({ id: r.id })).aggregate(g => ({ t: sum(bad(g.s)), n: count() })).where((r: any) => r.t.gt(0n)).where(r => r.id.ne(3));
+  expect(rewriteRel(grouped.ir).hits.MergeFilter).toBe(0);
+  await agree(grouped.ir, { label: '4d fallible aggregate under two HAVING filters', error: '6', oracle: 'SELECT id, t, n FROM (SELECT id, t, n FROM (SELECT id, sum(CAST(s AS UInt8)) AS t, count() AS n FROM qa GROUP BY id) WHERE t > 0) WHERE id != 3' });
+  // Scan variant: immune before the fix (the merged text failed like naive in every cell); now also kept apart.
+  const scan = A.map(r => ({ id: r.id, c: bad(r.s) })).where(r => r.c.gt(0)).where(r => r.id.ne(3));
+  expect(rewriteRel(scan.ir).hits.MergeFilter).toBe(0);
+  await agree(scan.ir, { label: '4d fallible computed selection under two filters', error: '6', oracle: 'SELECT id, c FROM (SELECT id, c FROM (SELECT id, CAST(s AS UInt8) AS c FROM qa) WHERE c > 0) WHERE id != 3' });
+  const merged = `SELECT id, c FROM (SELECT id, CAST(s AS UInt8) AS c FROM qa) WHERE c > 0 AND id != 3`;
+  for (const settings of cells) expect.soft((await execute(merged, {}, settings)).error, `scan immunity ${JSON.stringify(settings)}`).toBe('6');
+  // Filters above a fallible Filter: no computation below, so MergeFilter still fires; 24.8 never crosses the Filter step.
+  const overFilter = A.where(r => bad(r.s).gt(0)).where(r => r.n.gt(0n)).where(r => r.id.ne(3));
+  expect(rewriteRel(overFilter.ir).hits.MergeFilter).toBe(1);
+  await agree(overFilter.ir, { label: '4d two filters over a fallible filter', error: '6' });
+  for (const sql of ['SELECT id FROM (SELECT * FROM qa WHERE CAST(s AS UInt8) > 0) WHERE id != 3',
+    'SELECT x, id FROM (SELECT * FROM qa WHERE CAST(s AS UInt8) > 0) LEFT ARRAY JOIN [lc] AS x WHERE id != 3',
+    'SELECT id, count() FROM (SELECT * FROM qa WHERE CAST(s AS UInt8) > 0) GROUP BY id HAVING id != 3',
+    `SELECT a.id FROM (SELECT * FROM qa WHERE CAST(s AS UInt8) > 0) a LEFT ALL JOIN qb b ON a.id = b.id WHERE b.id = 0 AND a.id != 3 ${J}`])
+    for (const settings of cells) expect.soft((await execute(sql, {}, settings)).error, `${sql} ${JSON.stringify(settings)}`).toBe('6');
 });
 
 /** DEFECT (4b rewrap; the 4c alias-capture class, but introduced by the conversion): an identity group key `e: r.b.e`

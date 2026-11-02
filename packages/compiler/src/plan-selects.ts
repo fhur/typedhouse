@@ -1,6 +1,7 @@
 import { outputLeaves, type ExprNode, type Rel } from '@typedhouse/core';
 import { deterministicExpression, safePredicate, totalPredicate } from './rewrite-expressions.js';
 import { directSelection, type ColumnDemand } from './prune-columns.js';
+import { fallibleComputation } from './rewrite-rel.js';
 import type { CtePlan } from './plan-ctes.js';
 
 export type SelectClause = Extract<Rel, { kind: 'Filter' | 'Sort' | 'Limit' }>;
@@ -53,6 +54,16 @@ function physicalNames(rel: Rel, into = new Set<string>(), seen = new Set<Rel>()
   if (rel.kind === 'Scan') for (const name of Object.keys(rel.table.columns)) into.add(name);
   for (const input of relInputs(rel)) physicalNames(input, into, seen);
   return into;
+}
+
+/** Slice 4d: whether the relation under a block's leading Filter clauses (its FROM side: join inputs and ON, a derived
+ * or CTE source, a folded ARRAY JOIN, or the aggregate under HAVING) evaluates an expression outside the total fragment.
+ * A later total Filter then keeps its own block: 24.8 splits one WHERE/HAVING conjunct by conjunct and pushes the parts it can
+ * into a join input, below the ARRAY JOIN or below GROUP BY, ahead of that subtree's casts, while the naive nesting
+ * stops at the earlier, non-pushable Filter (MergeFilter applies the same condition, `fallibleComputation`). */
+export function fallibleBelowFilters(block: SelectBlock): boolean {
+  const first = block.clauses[0];
+  return first?.kind === 'Filter' && fallibleComputation(first.input);
 }
 
 /** Identity selections need no alias substitution and cannot duplicate evaluation. */
@@ -200,8 +211,9 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       // PREWHERE, push-down below a join), so a predicate outside the total fragment must only ever see the
       // rows the earlier filters pass, and a later total conjunct must not be AND-ed into it either. The
       // first Filter of a block always folds; nothing can be reordered against it.
+      // Slice 4d: and only when nothing below the held Filters is fallible (`fallibleBelowFilters`), as MergeFilter.
       const together = rel.kind !== 'Filter' || last?.kind !== 'Filter'
-        || (totalPredicate(rel.pred) && child!.clauses.every(n => n.kind !== 'Filter' || totalPredicate(n.pred)));
+        || (totalPredicate(rel.pred) && child!.clauses.every(n => n.kind !== 'Filter' || totalPredicate(n.pred)) && !fallibleBelowFilters(child!));
       // WHERE precedes DISTINCT; a Filter above a folded Distinct opens a new block.
       block = child && !child.project && safe && together && !(child.distinct && rel.kind === 'Filter') && (!last || rank[last.kind] < rank[rel.kind] || (last.kind === 'Filter' && rel.kind === 'Filter'))
         ? { ...child, clauses: Object.freeze([...child.clauses, rel]) }

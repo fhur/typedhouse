@@ -1,7 +1,7 @@
 import { outputLeaves, type ExprNode, type Rel } from '@typedhouse/core';
 import { validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
-import { planSelects, type SelectBlock, type SqlPlan } from '../src/plan-selects.js';
+import { fallibleBelowFilters, planSelects, type SelectBlock, type SqlPlan } from '../src/plan-selects.js';
 import { pruneColumns, type ColumnDemand } from '../src/prune-columns.js';
 import { mapExpression, totalPredicate } from '../src/rewrite-expressions.js';
 import { rewriteRel } from '../src/rewrite-rel.js';
@@ -61,9 +61,10 @@ export function structure(root: Rel): Structure {
     // "Last clause is a Filter" is defence in depth: a block root that is a Filter never ends in Sort/Limit, and a Sort/
     // Limit root is already classified by the rel-kind rule that runs first (currently unreachable-false).
     if (consumer.kind !== 'Filter' || !inner || inner.project || inner.distinct || inner.clauses.at(-1)?.kind !== 'Filter') return false;
-    // The totality disjunction is defence in depth too: a total Filter over a block of total Filters never opens a boundary
-    // (MergeFilter merges total pairs before planning, and the planner folds them), so this is currently never false here.
-    return !totalPredicate(consumer.pred) || inner.clauses.some(n => n.kind === 'Filter' && !totalPredicate(n.pred));
+    // The totality disjunction is defence in depth too: a total Filter over a block of total Filters over a total subtree never
+    // opens a boundary (MergeFilter merges such pairs before planning, and the planner folds them).
+    // Slice 4d: two total Filters over a fallible subtree (`fallibleBelowFilters`, the planner's own condition) keep apart too.
+    return !totalPredicate(consumer.pred) || inner.clauses.some(n => n.kind === 'Filter' && !totalPredicate(n.pred)) || fallibleBelowFilters(inner);
   };
   const fenceOf = (rel: Rel, role: Role, consumer?: Rel): EmittedSelect['fence'] => {
     switch (role) {

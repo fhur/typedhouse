@@ -5,6 +5,7 @@ import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainer
 import { col, from, print, parseCHType, table, type Caps } from '@typedhouse/core';
 import { createClickHouseBackend } from '../src/index.js';
 import { collect, keys } from './backend-harness.js';
+import { prefetchedCheck } from './prefetch-check.js';
 import { build, buildColliding, colliding, collidingShape, native, nativeColliding, recipes, seed, shape, type Colliding, type Recipe } from './join-block-arbitrary.js';
 let container: StartedTestContainer;
 let driver: ReturnType<typeof createClient>;
@@ -98,14 +99,11 @@ it('4c: runs 500 colliding-alias join aggregate recipes in both emitters x prefe
   const shapes = new Set<string>();
   const forms = { folded: 0, fenced: 0 };
   const start = performance.now();
-  const result = await fc.check(fc.asyncProperty(colliding, async r => {
-    shapes.add(collidingShape(r));
+  // Slice 4d: every cell's IO and assertions run prefetched, 8 recipes at a time; the accounting stays in generation order.
+  const evaluate = async (r: Colliding) => {
     const q = buildColliding(r);
     const cells = [...backends, ...preferColumn];
     const plans = cells.map(b => b.compile(q.ir));
-    const optimized = plans[0]!.compiled.sql;
-    // A root join block uses newline separators: folded = the root groups by a side read, fenced = by a derived leaf.
-    forms[/\nGROUP BY `[ab]`\./.test(optimized) ? 'folded' : 'fenced']++;
     const expected = await directColliding(r);
     try {
       for (const p of plans) expect(p.compiled.columns).toEqual(plans[0]!.compiled.columns);
@@ -115,8 +113,14 @@ it('4c: runs 500 colliding-alias join aggregate recipes in both emitters x prefe
         expect(await serverMeta(plans[i]!.compiled.sql, plans[i]!.compiled.params, i < 2 ? 0 : 1)).toEqual(printed);
       }
     } catch (cause) { throw new Error(`${String(cause)}\n${JSON.stringify(plans.slice(0, 2).map(p => ({ sql: p.compiled.sql, params: p.compiled.params })))}\n${nativeColliding(r)}`, { cause }); }
-  }), { seed: Number(process.env.TYPEDHOUSE_JOIN_BLOCK_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_JOIN_BLOCK_PATH ? { path: process.env.TYPEDHOUSE_JOIN_BLOCK_PATH } : {}) });
-  console.info('join-block 4c colliding differential', { runs: result.numRuns, seed: result.seed, shapes: shapes.size, forms, milliseconds: Math.round(performance.now() - start) });
+    return plans[0]!.compiled.sql;
+  };
+  const { result, prefetched } = await prefetchedCheck(colliding, { seed: Number(process.env.TYPEDHOUSE_JOIN_BLOCK_SEED ?? seed), numRuns: 500, ...(process.env.TYPEDHOUSE_JOIN_BLOCK_PATH ? { path: process.env.TYPEDHOUSE_JOIN_BLOCK_PATH } : {}) }, evaluate, (r, optimized) => {
+    shapes.add(collidingShape(r));
+    // A root join block uses newline separators: folded = the root groups by a side read, fenced = by a derived leaf.
+    forms[/\nGROUP BY `[ab]`\./.test(optimized) ? 'folded' : 'fenced']++;
+  });
+  console.info('join-block 4c colliding differential', { runs: result.numRuns, prefetched, seed: result.seed, shapes: shapes.size, forms, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(500); expect(shapes.size).toBeGreaterThan(200);
   expect(forms.folded).toBeGreaterThan(0); expect(forms.fenced).toBeGreaterThan(0);

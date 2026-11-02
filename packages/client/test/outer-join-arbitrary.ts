@@ -34,8 +34,8 @@ export interface Recipe {
   order: 'first' | 'last' | null;
   distinct: boolean;
   /** 4b fix round 1: every oj_a leaf reads `k` through a cast (outside the total fragment), so `fallibleWithin` fences
-   * LeftToInner and PushFilterJoin over it. `safe` = CAST(CAST(id AS String) AS UInt32) never fails; `failing` =
-   * CAST(s AS UInt32) fails on every non-numeric s the server computes. */
+   * LeftToInner and PushFilterJoin over it. `safe` = CAST(CAST(id AS String) AS UInt32) never fails (anchors only since
+   * 4d); `failing` = CAST(s AS UInt32) fails on every non-numeric s the server computes (generated since 4d). */
   inputCast: 'none' | 'safe' | 'failing';
 }
 const leaf: fc.Arbitrary<Node> = fc.record({ node: fc.constant('table' as const), table: fc.constantFrom(0 as const, 1 as const, 2 as const), pre: fc.option(fc.integer({ min: 0, max: 4 }), { nil: null }) });
@@ -51,10 +51,11 @@ export const recipes: fc.Arbitrary<Recipe> = fc.record({
   project: fc.constantFrom('none' as const, 'direct' as const, 'computed' as const, 'aggregate' as const, 'aggregates' as const),
   order: fc.constantFrom('first' as const, 'last' as const, null),
   distinct: fc.boolean(),
-  // `failing` is not generated: with a non-pushable conjunct (e.g. isNull on an extended input) beside a guard, MergeFilter's
-  // merged WHERE lets 24.8 push the guard below the input's cast where naive's nested filters do not (pre-existing, pinned in
-  // outer-join.integration.ts "FINDING pin (pre-existing, MergeFilter)"); real failures over fenced joins are the Tester's anchors.
-  inputCast: fc.oneof({ weight: 2, arbitrary: fc.constant('none' as const) }, { weight: 1, arbitrary: fc.constant('safe' as const) }),
+  // 4d: `failing` (CAST(s AS UInt32) over oj_a, whose s is non-numeric on every row but id 3) replaces 4b's never-failing
+  // `safe` cast, which stays for anchors only. With MergeFilter no longer merging over a fallible computation the merged
+  // guard cannot skip the cast's bad rows, so these runs fail exactly where naive and the oracle do; recipes without an
+  // oj_a leaf, or whose oj_a leaves are pre-filtered to nothing, return rows.
+  inputCast: fc.oneof({ weight: 2, arbitrary: fc.constant('none' as const) }, { weight: 1, arbitrary: fc.constant('failing' as const) }),
 });
 const label = (n: Node): string => n.node === 'table' ? `${n.table}${n.pre === null ? '' : '>'}` : `${n.kind}(${label(n.left)},${label(n.right)};${n.on.left}${n.on.leftKey[0]}${n.on.right}${n.on.rightKey[0]}${n.on.text ? '+' : ''})`;
 export function shape(r: Recipe) { return `${label(r.root)}:${r.shared}:${r.post ? `${r.post.side}${r.post.op}` : '-'}:${r.fallible ? `cast${r.fallible.side}${r.fallible.guard}` : '-'}:${r.project}:${r.order ?? '-'}:${r.distinct ? 'distinct' : '-'}:${r.inputCast}`; }

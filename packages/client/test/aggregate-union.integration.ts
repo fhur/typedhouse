@@ -9,6 +9,7 @@ import { source } from './pruning-arbitrary.js';
 import { build, buildComposition, native, recipeArbitrary, seed, shape, anchor, type Recipe } from './aggregate-union-arbitrary.js';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { assertAggregateUnionAccounting } from './aggregate-union-accounting.js';
+import { ciLimit, prefetchedCheck } from './prefetch-check.js';
 let container: StartedTestContainer;
 let driver: ReturnType<typeof createClient>;
 const backends: ReturnType<typeof createClickHouseBackend>[] = [];
@@ -59,36 +60,23 @@ async function check(r: Recipe) { return assertEvaluation(await evaluate(r)); }
  * spent 62 s in naive SQL, 23 s optimized, 14 s native and 36 s compiling and rewriting, one
  * after another. The campaign is unchanged: a first, always-true pass over the same seed records
  * exactly the values `fc.check` will generate, their evaluations run `PREFETCH` at a time, and
- * the real property asserts each one (live, for any value not prefetched: shrinks and replays). */
+ * the real property asserts each one (live, for any value not prefetched: shrinks and replays). Slice 4d: the loop is the
+ * shared `prefetchedCheck` (pruning, cte, pushdown and outer-join use it too). */
 const PREFETCH = 8;
 it('runs 500 fixed-seed recursive aggregate/Union recipes against native bags with rule evidence', async () => {
   const path = process.env.TYPEDHOUSE_AGG_UNION_PATH;
   const options = { seed: Number(process.env.TYPEDHOUSE_AGG_UNION_SEED ?? seed), numRuns: 500, ...(path ? { path } : {}) };
-  const shapes = new Set<string>(); let agg = 0, union = 0, prefetched = 0;
+  const shapes = new Set<string>(); let agg = 0, union = 0;
   const start = performance.now();
-  const cache = new Map<string, Promise<Evaluation>>();
-  if (!path) {
-    const planned: Recipe[] = [];
-    fc.assert(fc.property(recipeArbitrary, r => { planned.push(r); }), options);
-    let next = 0;
-    const settled = planned.map(() => { let resolve!: (e: Evaluation) => void; const promise = new Promise<Evaluation>(res => { resolve = res; }); return { promise, resolve }; });
-    planned.forEach((r, i) => { if (!cache.has(JSON.stringify(r))) cache.set(JSON.stringify(r), settled[i]!.promise); });
-    const worker = async () => { while (next < planned.length) { const i = next++; settled[i]!.resolve(await evaluate(planned[i]!)); } };
-    void Promise.all(Array.from({ length: PREFETCH }, worker));
-  }
-  const result = await fc.check(fc.asyncProperty(recipeArbitrary, async r => {
-    const key = JSON.stringify(r), cached = cache.get(key);
-    // A value is consumed once: shrinking re-evaluates live.
-    if (cached) { cache.delete(key); prefetched++; }
-    const e = await (cached ?? evaluate(r));
+  const { result, prefetched } = await prefetchedCheck(recipeArbitrary, options, evaluate, (r, e) => {
     shapes.add(shape(r.composition));
     assertEvaluation(e);
     if (e.ok) { agg += e.hits.PushFilterAggKey; union += e.hits.PushFilterUnion; }
-  }), options);
+  }, PREFETCH);
   console.info('aggregate/Union differential', { mode: path ? 'replay-only (not full acceptance)' : 'full-500', path, runs: result.numRuns, prefetched, seed: result.seed, shapes: shapes.size, agg, union, milliseconds: Math.round(performance.now() - start) });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   assertAggregateUnionAccounting(result.numRuns, path, { shapes: shapes.size, agg, union });
-}, 180000);
+}, ciLimit(180000));
 it('anchors rollups, shared latest, repeated/empty branches, HAVING and ordered run/stream', async () => {
   const expected = [{ key: 'a', n: 2n, total: 7n, highest: 5n }];
   await verify(backends, build(anchor), expected, () => direct(anchor), true);

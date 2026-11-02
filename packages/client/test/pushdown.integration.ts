@@ -6,6 +6,7 @@ import { canonicalKey, crossJoin, join, leftJoin, unionAll, val, col } from '@ty
 import { components, parts } from './differential-arbitrary.js';
 import { createClickHouseBackend, type Backend } from '../src/index.js';
 import { collect, differential, multiplicityDiff, decodedRecord } from './backend-harness.js';
+import { ciLimit, prefetchedCheck } from './prefetch-check.js';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
 import { build, fails, intDiv, native, recipeArbitrary, seed, shape, shapeCount, type Recipe } from './pushdown-arbitrary.js';
 let container: StartedTestContainer;
@@ -35,22 +36,37 @@ async function failure(backend: Backend, q: ReturnType<typeof build>): Promise<s
 }
 /** Executions of fallible recipes that failed (in both emitters and the oracle alike). */
 let failedExecutions = 0;
+/** Slice 4d: executions of `inputCast` recipes that failed (CANNOT_PARSE_TEXT or, beside the fallible filter, either code)
+ * and that returned rows, identically in both emitters and the oracle, split by variant (Tester m1): the variant is the
+ * recipe's content, the outcome is observed. */
+const inputCasts = { failing: { failed: 0, rows: 0 }, passing: { failed: 0, rows: 0 } };
+async function nativeFailure(sql: string): Promise<string> {
+  try { const r = await driver.query({ query: sql, format: 'JSONEachRow' }); try { await r.json(); } finally { r.close(); } return 'none'; }
+  catch (error) { return String((error as { type?: string }).type ?? error); }
+}
 async function check(recipe: Recipe) {
   const q = build(recipe);
-  if (recipe.fallible) {
+  if (recipe.fallible || recipe.inputCast !== 'none') {
     // Slice 3b: the two texts must fail or succeed alike, with the same server code, and so must the independent nested
     // SQL. Which rows the server actually divides is its own business (it pushes an alias-independent predicate below an
     // inner ARRAY JOIN in every text); `fails` only names the recipes where the amount = 0 row certainly reaches the filter.
+    // Slice 4d: the same for a failing input cast (CANNOT_PARSE_TEXT), alone or beside the fallible filter.
     const outcomes: string[] = [];
     for (const backend of backends) outcomes.push(await failure(backend, q));
+    outcomes.push(await nativeFailure(native(recipe)));
     const context = `${native(recipe)}\n${JSON.stringify(backends.map(b => b.compile(q.ir).compiled.sql))}`;
     if (outcomes.some(o => o !== 'none')) {
-      expect(outcomes, context).toEqual(['ILLEGAL_DIVISION', 'ILLEGAL_DIVISION']);
-      await expect(driver.query({ query: native(recipe), format: 'JSONEachRow' }), context).rejects.toMatchObject({ type: 'ILLEGAL_DIVISION' });
-      failedExecutions++;
+      const allowed = [...(recipe.fallible ? ['ILLEGAL_DIVISION'] : []), ...(recipe.inputCast === 'failing' ? ['CANNOT_PARSE_TEXT'] : [])];
+      // One code per recipe kind of failure; with both a failing cast and the division, all three texts must still fail
+      // (which of the two the server raises first is its evaluation order).
+      if (allowed.length === 1) expect(outcomes, context).toEqual([allowed[0], allowed[0], allowed[0]]);
+      else for (const o of outcomes) expect(allowed, context).toContain(o);
+      if (outcomes.includes('ILLEGAL_DIVISION') && recipe.inputCast !== 'failing') failedExecutions++;
+      if (recipe.inputCast !== 'none') inputCasts[recipe.inputCast].failed++;
       return [];
     }
     expect(fails(recipe), context).toBe(false);
+    if (recipe.inputCast !== 'none') inputCasts[recipe.inputCast].rows++;
   }
   const rows = await differential(backends, q, true);
   const sql = native(recipe);
@@ -64,7 +80,7 @@ async function check(recipe: Recipe) {
     return rows;
   } finally { result.close(); }
 }
-const anchor: Recipe = { kind: 'inner', tenant: 'acme', minimum: 0, renames: 2, nullable: false, fence: 'none', take: 9, offset: 0, expansion: 'column', mixed: false, fallible: false, reject: false };
+const anchor: Recipe = { kind: 'inner', tenant: 'acme', minimum: 0, renames: 2, nullable: false, fence: 'none', take: 9, offset: 0, expansion: 'column', mixed: false, fallible: false, reject: false, inputCast: 'none' };
 it('anchors duplicate, empty-array, NULL, tenant and shared-occurrence cardinalities independently', async () => {
   const decoded = values.map(r => ({ ...r, at: new Date(r.at), amount: BigInt(r.amount) }));
   expect(await check(anchor)).toEqual([...Array(5).fill(decoded[0]), ...Array(2).fill(decoded[1])]);
@@ -164,9 +180,18 @@ it('executes 700 bounded shrinkable multi-operator recipes with actual rule/topo
   const hits = new Set<string>(), shapes = new Set<string>();
   let certain = 0;
   const outerRuns = { converted: 0, kept: 0 };
-  failedExecutions = 0;
+  failedExecutions = 0; for (const v of Object.values(inputCasts)) { v.failed = 0; v.rows = 0; }
   const start = performance.now();
-  const result = await fc.check(fc.asyncProperty(recipeArbitrary, async recipe => {
+  // Slice 4d: `check` (all IO and the differential assertions) runs prefetched, 8 recipes at a time; the accounting below
+  // stays in generation order. A failure is rethrown at its own run, with both texts.
+  const evaluate = async (recipe: Recipe) => {
+    try { return await check(recipe); } catch (cause) {
+      const sqls = backends.map(b => { const p = b.compile(build(recipe).ir).compiled; return { name: b.name, sql: p.sql, params: p.params }; });
+      throw new Error(`${String(cause)}\n${JSON.stringify(sqls)}`, { cause });
+    }
+  };
+  const { result, prefetched } = await prefetchedCheck(recipeArbitrary, { seed: Number(process.env.TYPEDHOUSE_PUSHDOWN_SEED ?? seed), numRuns: 700, // 4b: 700 runs reach all 132 shapes (500: 129)
+    ...(process.env.TYPEDHOUSE_PUSHDOWN_PATH ? { path: process.env.TYPEDHOUSE_PUSHDOWN_PATH } : {}) }, evaluate, recipe => {
     const rewritten = rewriteRel(build(recipe).ir);
     for (const [rule, n] of Object.entries(rewritten.hits)) if (n) hits.add(rule);
     if (recipe.kind === 'left' || recipe.kind === 'right' || recipe.kind === 'full') {
@@ -175,13 +200,8 @@ it('executes 700 bounded shrinkable multi-operator recipes with actual rule/topo
     }
     shapes.add(shape(recipe));
     if (fails(recipe)) certain++;
-    try { await check(recipe); } catch (cause) {
-      const sqls = backends.map(b => { const p = b.compile(build(recipe).ir).compiled; return { name: b.name, sql: p.sql, params: p.params }; });
-      throw new Error(`${String(cause)}\n${JSON.stringify(sqls)}`, { cause });
-    }
-  }), { seed: Number(process.env.TYPEDHOUSE_PUSHDOWN_SEED ?? seed), numRuns: 700, // 4b: 700 runs reach all 132 shapes (500: 129)
-    ...(process.env.TYPEDHOUSE_PUSHDOWN_PATH ? { path: process.env.TYPEDHOUSE_PUSHDOWN_PATH } : {}) });
-  console.info('pushdown differential', { runs: result.numRuns, seed: result.seed, milliseconds: Math.round(performance.now() - start), rules: [...hits], topologies: shapes.size, certainFailures: certain, failedExecutions, outer: outerRuns });
+  });
+  console.info('pushdown differential', { runs: result.numRuns, prefetched, seed: result.seed, milliseconds: Math.round(performance.now() - start), rules: [...hits], topologies: shapes.size, certainFailures: certain, failedExecutions, inputCasts, outer: outerRuns });
   if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
   expect(result.numRuns).toBe(700);
   expect([...hits].sort()).toEqual(['LeftToInner', 'MergeFilter', 'MergeProject', 'PushFilterArrayJoin', 'PushFilterJoin', 'PushFilterProject']);
@@ -193,7 +213,12 @@ it('executes 700 bounded shrinkable multi-operator recipes with actual rule/topo
   expect(certain).toBeGreaterThan(20);
   expect(failedExecutions).toBeGreaterThanOrEqual(certain);
   expect(failedExecutions).toBeLessThan(250);
-}, 180000);
+  // 4d (m1): the failing cast itself fails in some runs (identically everywhere) and returns rows in others (its bad rows
+  // filtered out below the cast); the passing variant mostly returns rows.
+  expect(inputCasts.failing.failed, 'failing-cast runs that failed').toBeGreaterThan(20);
+  expect(inputCasts.failing.rows, 'failing-cast runs with rows').toBeGreaterThan(0);
+  expect(inputCasts.passing.rows, 'passing-cast runs with rows').toBeGreaterThan(20);
+}, ciLimit(180000));
 it('detects real decoded duplicate loss, genuinely shrinks and exactly replays', async () => {
   const source = backends[1]!;
   const faulty: Backend = { name: 'pushdown-duplicate-loss', compile: r => source.compile(r), async *run(plan) {
@@ -206,7 +231,7 @@ it('detects real decoded duplicate loss, genuinely shrinks and exactly replays',
   } };
   // Slice 3b: fallible recipes can fail on the server before any duplicate is lost, so the campaign that must find the
   // injected loss (and shrink to it) runs over the recipes that execute; the 500-run differential above covers the rest.
-  const property = fc.asyncProperty(recipeArbitrary.filter(recipe => !recipe.fallible), async recipe => { await differential([backends[0]!, faulty], build(recipe), true); });
+  const property = fc.asyncProperty(recipeArbitrary.filter(recipe => !recipe.fallible && recipe.inputCast !== 'failing') /* 4d: a failing input cast fails before IO */, async recipe => { await differential([backends[0]!, faulty], build(recipe), true); });
   const result = await fc.check(property, { seed, numRuns: 500 });
   expect(result.failed).toBe(true);
   expect(result.numShrinks).toBeGreaterThan(0);

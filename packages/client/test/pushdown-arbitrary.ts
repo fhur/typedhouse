@@ -21,6 +21,11 @@ export const recipeArbitrary = fc.record({
    * ILLEGAL_DIVISION on the `amount = 0` row whenever that row reaches it (see `fails`), so the kept and the filtered-out
    * cases both occur. The planner keeps it in its own SELECT above the earlier filters (slice 3b). */
   fallible: fc.boolean(),
+  /** Slice 4d: the components input computes `amount + CAST(ifNull(category, '0') AS UInt64) * 0` (value-preserving,
+   * outside the total fragment) over a pre-filter. `failing` keeps the acme rows, whose categories 'visible' and '' fail
+   * CANNOT_PARSE_TEXT in every text; `passing` keeps only the NULL-category row, so those runs return rows. Two total
+   * Filters above such an input must not merge (MergeFilter), nor a filter cross an expansion over it. */
+  inputCast: fc.oneof({ weight: 4, arbitrary: fc.constant('none' as const) }, { weight: 1, arbitrary: fc.constant('failing' as const) }, { weight: 1, arbitrary: fc.constant('passing' as const) }),
 });
 export type Recipe = typeof recipeArbitrary extends fc.Arbitrary<infer T> ? T : never;
 /** ClickHouse's integer division as a user function: outside the total fragment, and 10 / 0 raises ILLEGAL_DIVISION. */
@@ -28,7 +33,8 @@ export const intDiv = defineFunction({ name: 'intDiv', args: [col.UInt64, col.UI
 const failing = (amount: Expr<bigint, string, 'row'>) => intDiv(val(10n, col.UInt64), amount).gt(0n);
 export function build(recipe: Recipe) {
   const { kind } = recipe;
-  const base = components;
+  const base = recipe.inputCast === 'none' ? components : components.where(r => recipe.inputCast === 'failing' ? r.tenant.eq('acme') : r.category.isNull())
+    .map(r => ({ tenant: r.tenant, id: r.id, category: r.category, ids: r.ids, at: r.at, amount: r.amount.plus(cast(r.category.ifNull('0'), col.UInt64).multiply(0n)) })) as unknown as typeof components;
   const constant = val(['p', 'q'], col.Array(col.String));
   const array = recipe.expansion === 'column' ? (r: typeof base.row) => r.ids : () => constant;
   const expanded = kind === 'leftArray' ? base.leftArrayJoin(array, 'part') : base.arrayJoin(array, 'part');
@@ -93,6 +99,8 @@ export function build(recipe: Recipe) {
 export function fails(recipe: Recipe): boolean {
   // Outer kinds: only the identical-outcome contract is asserted (orphans read amount 0 under right/full).
   if (recipe.kind === 'left' || recipe.kind === 'right' || recipe.kind === 'full') return false;
+  // 4d: a failing input cast may raise first (CANNOT_PARSE_TEXT); `passing` drops the amount = 0 row's peers, not the row.
+  if (recipe.inputCast === 'failing') return false;
   const reaches = recipe.kind === 'cross' || recipe.kind === 'leftArray' || ((recipe.kind === 'inner' || recipe.kind === 'array') && recipe.expansion === 'constant');
   // LIMIT 0 below the final filters: 24.8 plans an empty read and evaluates nothing (seen once the 4b `reject` field
   // shifted the seed stream onto such a recipe).
@@ -101,7 +109,8 @@ export function fails(recipe: Recipe): boolean {
 }
 /** Independent native SQL: generated values come only from this closed arbitrary. */
 export function native(recipe: Recipe): string {
-  const table = 'differential_components';
+  const table = recipe.inputCast === 'none' ? 'differential_components'
+    : `(SELECT tenant, id, category, ids, at, amount + CAST(ifNull(category, '0') AS UInt64) * 0 AS amount FROM differential_components WHERE ${recipe.inputCast === 'failing' ? "tenant = 'acme'" : 'category IS NULL'})`;
   const fields = 'c.tenant,c.id,c.category,c.ids,c.at,c.amount';
   const t = `'${recipe.tenant}'`;
   const expansion = recipe.expansion === 'column' ? 'ids' : "['p','q']";

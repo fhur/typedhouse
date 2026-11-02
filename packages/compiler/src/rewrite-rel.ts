@@ -93,12 +93,21 @@ function totalAggregate(e: ExprNode): boolean {
   const integer = (t: CHType | null | undefined): boolean => !!t && (t.kind === 'Nullable' || t.kind === 'LowCardinality' ? integer(t.inner) : t.kind === 'scalar' && /^U?Int(8|16|32|64|128|256)$/.test(t.name));
   return e.fn.name === 'sum' && e.args.every(a => integer(a.type));
 }
-export function fallibleWithin(node: Rel): boolean {
-  const known = fallibleMemo.get(node);
+export function fallibleWithin(node: Rel): boolean { return fallible(node, true); }
+/** Slice 4d: `fallibleWithin` without the Filters' own predicates: whether a subtree computes a value outside the total
+ * fragment (a projected, expanded, sort, grouping or aggregate expression, an ON, a RawRel). 24.8 never pushes a
+ * predicate across a Filter step (probed in every `prefer_column_name_to_alias` x `optimize_move_to_prewhere` x
+ * `query_plan_filter_push_down` cell, below a scan, an ARRAY JOIN, a GROUP BY and a LEFT join), so a non-total Filter
+ * already sees exactly the rows it sees in naive SQL; only computations a pushed conjunct can get below matter. */
+export function fallibleComputation(node: Rel): boolean { return fallible(node, false); }
+const computationMemo = new WeakMap<Rel, boolean>();
+function fallible(node: Rel, filters: boolean): boolean {
+  const memo = filters ? fallibleMemo : computationMemo;
+  const known = memo.get(node);
   if (known !== undefined) return known;
   let own = false;
   switch (node.kind) {
-    case 'Filter': own = !conjuncts(node.pred).every(totalPredicate); break;
+    case 'Filter': own = filters && !conjuncts(node.pred).every(totalPredicate); break;
     case 'Project': own = !values(node.exprs).every(totalExpression); break;
     case 'ArrayJoin': own = !totalExpression(node.expr); break;
     case 'Aggregate': own = !values(node.keys).every(totalExpression) || !values(node.aggs).every(totalAggregate); break;
@@ -106,8 +115,8 @@ export function fallibleWithin(node: Rel): boolean {
     case 'Join': own = !node.on.every(totalPredicate); break;
     case 'RawRel': own = true; break;
   }
-  const result = own || edges(node).rels.some(fallibleWithin);
-  fallibleMemo.set(node, result);
+  const result = own || edges(node).rels.some(r => fallible(r, filters));
+  memo.set(node, result);
   return result;
 }
 /** Null-extended input occurrences of a Join kind: what LeftToInner strictly decreases. */
@@ -190,9 +199,14 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
       return { pushed, residual };
     };
     const above = (rewritten: Rel, residual: readonly ExprNode[]) => residual.length ? filter(rewritten, rebind(conjunction(residual), child, rewritten)) : rewritten;
-    // Merging changes no evaluation set, so both predicates need only be total.
+    // Merging changes no evaluation set, so both predicates need only be total, as long as nothing below them is
+    // fallible. Slice 4d: over a subtree that computes a value outside the total fragment (`fallibleComputation`), the
+    // two Filters stay apart. 24.8's filter push-down splits one WHERE conjunct by conjunct and moves the parts it can
+    // into a join input, below an ARRAY JOIN or below GROUP BY (a HAVING key conjunct), ahead of that input's casts. The
+    // naive nesting stops at the lower, non-pushable Filter, so a merged guard would skip rows on which naive fails
+    // (CANNOT_PARSE_TEXT there, rows here).
     if (child.kind === 'Filter') {
-      if (!totalPredicate(node.pred) || !totalPredicate(child.pred)) return node;
+      if (!totalPredicate(node.pred) || !totalPredicate(child.pred) || fallibleComputation(child.input)) return node;
       hits.MergeFilter++;
       return filter(child.input, conjunction([child.pred, rebind(node.pred, child, child.input)]));
     }
@@ -236,7 +250,10 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
     // An inner ARRAY JOIN drops empty-array rows before any later WHERE sees them, so a
     // conjunct moving below it is evaluated on rows it never saw: only total predicates
     // move, and the expansion expression itself must be total since it runs on fewer rows.
-    if (child.kind === 'ArrayJoin' && totalExpression(child.expr)) {
+    // Slice 4d: nor over an input that computes a non-total value (`fallibleComputation`): the conjunct would then run
+    // before that input's casts, while naive SQL evaluates them on every row unless the server pushes the WHERE itself
+    // (under query_plan_filter_push_down = 0 naive failed with CANNOT_PARSE_TEXT where the pushed text returned rows).
+    if (child.kind === 'ArrayJoin' && totalExpression(child.expr) && !fallibleComputation(child.input)) {
       const { pushed, residual } = split(pred => safePredicate(pred) && references(pred).every(r => r.rel === child.id && !(r.path.length === 1 && r.path[0] === child.alias)));
       if (!pushed.length) return node;
       const input = filter(child.input, rebind(conjunction(pushed), child, child.input));

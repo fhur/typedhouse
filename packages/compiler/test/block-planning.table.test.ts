@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cast, col, count, defineFunction, from, fullJoin, join, leftJoin, max, outputLeaves, rightJoin, table, unionAll, type Rel } from '@typedhouse/core';
+import { cast, col, count, createKnownFunctions, defineFunction, sum, from, fullJoin, join, leftJoin, max, outputLeaves, rightJoin, table, unionAll, type Rel } from '@typedhouse/core';
 import { compile } from '../src/index.js';
 import { emitPlanned, validateRel } from '../src/emit-naive.js';
 import { planCtes } from '../src/plan-ctes.js';
@@ -30,6 +30,19 @@ const nestedJoins = {
   right: () => rightJoin({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)) }, { b: u }).on(r => r.n.x.id.eq(r.b.id)),
   full: () => fullJoin({ n: join({ x: t, w }).on(r => r.x.id.eq(r.w.id)) }, { b: u }).on(r => r.n.x.id.eq(r.b.id)),
 } as const;
+// Slice 4d: two total Filters over a subtree that computes a non-total value keep apart (24.8 pushes a merged WHERE's
+// pushable conjunct into a join input, below an ARRAY JOIN or below GROUP BY, ahead of the cast naive evaluates).
+const { fn: known } = createKnownFunctions({ array: { isAggregate: false, deterministic: true, aliasTo: '' } } as const);
+const castInput = t.map(r => ({ id: r.id, k: cast(r.k, col.UInt64) })), totalInput = t.map(r => ({ id: r.id, k: r.id.plus(1n) }));
+const fallibleRows = (['inner', 'left', 'right', 'full'] as const).flatMap(kind => {
+  // Dynamic kind: the four builders' row types differ only in nullability, which these filters do not depend on.
+  const make = (a: typeof t): any => kind === 'inner' ? join({ a, b: u }).on(r => r.a.id.eq(r.b.id)) : (kind === 'left' ? leftJoin : kind === 'right' ? rightJoin : fullJoin)({ a }, { b: u }).on(r => r.a.id.eq(r.b.id));
+  const twice = (a: any): Rel => make(a).where((r: any) => r.b.v.gt(1n)).where((r: any) => r.a.id.ne(3n)).ir;
+  return [
+    { name: `4d ${kind}: two total filters over a join with a fallible input keep apart`, build: () => twice(castInput), blocks: [['Filter'], ['Filter', 'Join']] },
+    { name: `4d ${kind}: two total filters over a join whose inputs are total share WHERE`, build: () => twice(totalInput), blocks: [['Filter', 'Filter', 'Join']] },
+  ];
+});
 const fenced = [['Filter', 'Aggregate'], ['Join']], sortedFence = [['Sort', 'Aggregate'], ['Join']];
 const aliasRows = (['inner', 'left', 'right', 'full'] as const).flatMap(kind => {
   const j = joins[kind] as () => ReturnType<typeof joins.inner>;
@@ -169,6 +182,14 @@ const rows: { readonly name: string; readonly build: () => Rel; readonly blocks:
   { name: 'distinct over a join block folds', build: () => join({ a: t, b: u }).on(r => r.a.id.eq(r.b.id)).map(r => ({ id: r.a.id })).distinct().ir, blocks: [['Distinct', 'Project', 'Join']] },
   { name: 'union always opens a block', build: () => unionAll(t, t).where(safe).ir, blocks: [['Filter'], ['Union']] },
   ...aliasRows,
+  ...fallibleRows,
+  { name: '4d: two total filters over a fallible ARRAY JOIN expansion keep apart', build: () => t.arrayJoin(r => known.array(cast(r.k, col.UInt64)).as(col.Array(col.UInt64)), 'x').where(r => r.x.gt(0n)).where(safe).ir, blocks: [['Filter'], ['Filter', 'ArrayJoin', 'Scan']] },
+  { name: '4d: two total filters over a total ARRAY JOIN expansion share WHERE', build: () => t.arrayJoin(r => r.ids, 'x').where(r => r.x.eq('a')).where(safe).ir, blocks: [['Filter', 'Filter', 'ArrayJoin', 'Scan']] },
+  { name: '4d: two total HAVING filters over a fallible aggregate keep apart', build: () => t.groupBy(r => ({ id: r.id })).aggregate(g => ({ s: sum(cast(g.k, col.UInt64)) })).where(r => r.s.gt(0n)).where(r => r.id.ne(3n)).ir, blocks: [['Filter'], ['Filter', 'Aggregate', 'Scan']] },
+  { name: '4d: two total HAVING filters over a total aggregate share HAVING', build: () => t.groupBy(r => ({ id: r.id })).aggregate(() => ({ n: count() })).where(r => r.n.gt(0n)).where(r => r.id.ne(3n)).ir, blocks: [['Filter', 'Filter', 'Aggregate', 'Scan']] },
+  { name: '4d: two total filters over a fallible computed selection keep apart (natively immune, fenced by the same rule)', build: () => castInput.where(r => r.k.gt(0n)).where(r => r.id.ne(3n)).ir, blocks: [['Filter'], ['Filter'], ['Project', 'Scan']] },
+  { name: '4d: two total filters over a total computed selection share WHERE', build: () => totalInput.where(r => r.k.gt(0n)).where(r => r.id.ne(3n)).ir, blocks: [['Filter', 'Filter'], ['Project', 'Scan']] },
+  { name: '4d: two total filters over a non-total filter share WHERE (24.8 never pushes across a Filter step)', build: () => t.where(unsafe).where(safe).where(r => r.k.eq('a')).ir, blocks: [['Filter', 'Filter'], ['Filter', 'Scan']] },
   // 4c CTE-source probe: `n: max(n)` over a CTE folds only while no HAVING/ORDER BY names `n` (else 215 under alias = 1).
   { name: '4c: name: agg(name) over a CTE without HAVING/ORDER BY reads the CTE directly', build: () => t.cte().groupBy(r => ({ k: r.k })).aggregate(g => ({ id: max(g.id) })).ir, blocks: [['Aggregate', 'CTE']] },
   { name: '4c: name: agg(name) over a CTE with HAVING on that name keeps its own scope', build: () => t.cte().groupBy(r => ({ k: r.k })).aggregate(g => ({ id: max(g.id) })).where(r => r.id.gt(1n)).ir, blocks: [['Filter'], ['Aggregate'], ['CTE']] },

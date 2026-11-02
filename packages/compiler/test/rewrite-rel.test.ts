@@ -500,3 +500,35 @@ it('fix round 2 (D2): a total key over a converted join groups by its bare reads
   // Unconverted (LEFT) aggregate blocks keep their single rendering.
   expect(compile(lj().groupBy(r => ({ s: r.b.s })).aggregate(() => ({ c: count() })).ir).sql).toMatch(/SELECT `b`\.`s` AS `s`, count\(\) AS `c`[^]*LEFT ALL JOIN[^]*GROUP BY `b`\.`s`/);
 });
+
+// Slice 4d: MergeFilter across fallible computations (24.8 splits a merged WHERE and pushes the guard below the cast).
+it('4d: MergeFilter keeps two total Filters apart over a subtree that computes a non-total value, and merges otherwise', () => {
+  const castA = oa.map(r => ({ id: r.id, c: cast(r.s, col.UInt8) }));
+  const pin = leftJoin({ a: castA }, { b: ob }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.id.isNull()).where(r => r.a.id.ne(3));
+  expect(rewrite(pin.ir).hits).toMatchObject({ MergeFilter: 0, LeftToInner: 0, PushFilterJoin: 0 });
+  expect(rewrite(pin.ir).root).toBe(pin.ir);
+  const total = leftJoin({ a: oa.map(r => ({ id: r.id, c: r.id.plus(1) })) }, { b: ob }).on(r => r.a.id.eq(r.b.id)).where(r => r.b.id.isNull()).where(r => r.a.id.ne(3));
+  expect(rewrite(total.ir).hits.MergeFilter).toBe(1);
+  // Through a total selection over the join: PushFilterProject moves both Filters onto the Join, where they stay apart.
+  const viaProject = leftJoin({ a: castA }, { b: ob }).on(r => r.a.id.eq(r.b.id)).map(r => ({ id: r.a.id, bid: r.b.id, c: r.a.c })).where(r => r.bid.isNull()).where(r => r.id.ne(3));
+  const projected = rewrite(viaProject.ir);
+  expect(projected.hits).toMatchObject({ MergeFilter: 0, PushFilterProject: 2 });
+  // Inner join: the 4b fence already stops PushFilterJoin; the merge is the remaining path.
+  expect(rewrite(join({ a: castA, b: ob }).on(r => r.a.id.eq(r.b.id)).where(r => r.a.id.plus(r.b.id).ne(0n)).where(r => r.a.id.ne(3)).ir).hits.MergeFilter).toBe(0);
+  // Aggregate (a fallible aggregate argument) and a fallible ARRAY JOIN expansion.
+  const agg = oa.groupBy(r => ({ id: r.id })).aggregate(g => ({ t: sum(cast(g.s, col.UInt8)) })).where(r => r.t.gt(0n)).where(r => r.id.ne(3));
+  expect(rewrite(agg.ir).hits.MergeFilter).toBe(0);
+  const { fn } = createKnownFunctions({ array: { isAggregate: false, deterministic: true, aliasTo: '' } } as const);
+  const expanded = oa.arrayJoin(r => fn.array(cast(r.s, col.UInt8)).as(col.Array(col.UInt8)), 'x').where(r => r.x.gt(0)).where(r => r.id.ne(3));
+  expect(rewrite(expanded.ir).hits.MergeFilter).toBe(0);
+  // A non-total Filter below is not a computation: 24.8 never pushes across a Filter step, so the two above still merge.
+  expect(rewrite(oa.where(r => cast(r.s, col.UInt8).gt(0)).where(r => r.k.isNotNull()).where(r => r.id.ne(3)).ir).hits.MergeFilter).toBe(1);
+});
+it('4d: PushFilterArrayJoin does not cross an expansion whose input computes a non-total value', () => {
+  const fallible = q.map(r => ({ id: r.id, n: cast(r.text, col.Nullable(col.UInt8)), ids: r.ids })).arrayJoin(r => r.ids, 'x').where(r => r.x.ne('').and(r.id.ne(3)));
+  expect(rewrite(fallible.ir).hits.PushFilterArrayJoin).toBe(0);
+  const total = q.map(r => ({ id: r.id, n: r.id.plus(1), ids: r.ids })).arrayJoin(r => r.ids, 'x').where(r => r.x.ne('').and(r.id.ne(3)));
+  expect(rewrite(total.ir).hits.PushFilterArrayJoin).toBe(1);
+  // A non-total Filter below the expansion is not a computation either: the conjunct still crosses (above that Filter).
+  expect(rewrite(q.where(r => cast(r.text, col.Nullable(col.UInt8)).gt(0)).arrayJoin(r => r.ids, 'x').where(r => r.x.ne('').and(r.id.ne(3))).ir).hits.PushFilterArrayJoin).toBe(1);
+});

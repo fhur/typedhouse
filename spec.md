@@ -862,6 +862,7 @@ These are settled so the implementer does not relitigate them; change one only w
 | Single-expression forms | `groupBy`, `aggregate`, `map` take one expression; named by the Polars rule (root column, else function name); unnamed or colliding names are errors that point to the object form |
 | `ARRAY JOIN` | the `arrayJoin` and `leftArrayJoin` operators, in v1; one per SELECT block |
 | Window functions, `LIMIT BY` | `sql` only in v1 |
+| Error contract of the optimizing path | Results-only (user ruling, M4 slice 4d): whenever the naive emission succeeds, the optimized query returns identical rows and types and never fails; when naive fails, the optimized query may fail or succeed, and if it succeeds its rows equal a guard-first oracle (fallible expressions evaluated only on rows that pass the guards, in IR order). Reason: ClickHouse's filter order, PREWHERE and primary-key/part pruning make whether an error is raised plan-dependent (24.8 prunes the part holding a bad row from a guard above an isolated fallible WHERE), so naive's failures are partly an artifact of its nesting. Existing fences stay; relaxing them is a later decision |
 | Incremental engine | A TypeScript DBSP implementation over the same IR, later; not the Rust `dbsp` crate. The eight constraints in Part 4 are part of milestone 3 |
 
 Still open, to decide during milestone 3 when the code makes the trade-off concrete:
