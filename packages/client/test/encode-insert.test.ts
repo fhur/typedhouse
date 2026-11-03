@@ -34,6 +34,7 @@ describe('insert encoding', () => {
     expect(encode('Float32', 3.4028234663852886e38)).toBe(3.4028234663852886e38);
     rejects('Float32', 3.402823466385289e38);
     expect(encode('Float64', Number.MAX_VALUE)).toBe(Number.MAX_VALUE);
+    for (const type of ['Float32', 'Float64']) { expect(encode(type, -0)).toBe('-0'); expect(encode(type, 0)).toBe(0); }
     for (const type of ['Float32', 'Float64']) for (const value of [NaN, Infinity, -Infinity, '1', null]) rejects(type, value);
     expect(encode('Bool', false)).toBe(false);
     rejects('Bool', 1);
@@ -70,9 +71,12 @@ describe('insert encoding', () => {
     for (let precision = 0; precision <= 3; precision++) {
       const type = `DateTime64(${precision})`;
       const step = 10 ** (3 - precision);
-      expect(encode(type, new Date(step))).toBe(new Date(step).toISOString());
+      // Ticks of 10^-precision seconds, as an exact JSON number (pre-1970 included).
+      expect(encode(type, new Date(step))).toBe(1);
+      expect(encode(type, new Date(-step))).toBe(-1);
       if (precision < 3) rejects(type, new Date(step + 1));
-      expect(encode(type, new Date('1900-01-01Z'))).toBe('1900-01-01T00:00:00.000Z');
+      expect(encode(type, new Date('1900-01-01Z'))).toBe(Date.UTC(1900, 0, 1) / step);
+      expect(encode(type, new Date(Date.UTC(2300, 0, 1) - step))).toBe((Date.UTC(2300, 0, 1) - step) / step);
       rejects(type, new Date('1899-12-31Z'));
       rejects(type, new Date('2300-01-01Z'));
     }

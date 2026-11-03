@@ -130,8 +130,11 @@ function encodeValue(type: CHType, value: unknown, fail: Fail, path: string, anc
     case 'DateTime64': {
       const ms = dateMillis(value, fail, path);
       if (ms < Date.UTC(1900, 0, 1) || ms >= Date.UTC(2300, 0, 1) || ms % (10 ** (3 - type.precision)) !== 0) return invalid();
-      // The transport selects date_time_input_format=best_effort for this UTC ISO form.
-      return new Date(ms).toISOString();
+      // Send ticks (units of 10^-precision s since the epoch) as a JSON number, like DateTime's
+      // seconds. Text is not safe: ClickHouse 24.8 best_effort parsing flips the fraction of
+      // pre-1970 instants (1969-12-31T23:59:59.999Z is stored as -1999 ms instead of -1).
+      // Ticks are integers below 2^53 across 1900..2299, so the number is exact.
+      return ms / 10 ** (3 - type.precision);
     }
     case 'scalar': {
       const match = integer.exec(type.name);
@@ -150,7 +153,11 @@ function encodeValue(type: CHType, value: unknown, fail: Fail, path: string, anc
         case 'String': return typeof value === 'string' ? value : invalid();
         case 'UUID': return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : invalid();
         case 'Bool': return typeof value === 'boolean' ? value : invalid();
-        case 'Float32': case 'Float64': return typeof value === 'number' && Number.isFinite(value) && (type.name === 'Float64' || Math.abs(value) <= 3.4028234663852886e38) ? value : invalid();
+        case 'Float32': case 'Float64': {
+          if (typeof value !== 'number' || !Number.isFinite(value) || (type.name === 'Float32' && Math.abs(value) > 3.4028234663852886e38)) return invalid();
+          // JSON.stringify(-0) is "0"; ClickHouse reads the quoted "-0" as negative zero.
+          return Object.is(value, -0) ? '-0' : value;
+        }
         case 'DateTime': return encodeValue({ kind: 'DateTime' }, value, fail, path, ancestors);
         case 'Date': case 'Date32': {
           const ms = dateMillis(value, fail, path);
