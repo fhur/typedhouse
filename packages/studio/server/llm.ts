@@ -210,6 +210,9 @@ export async function createLlm(options: {
     },
     async selectModel(ref) {
       if (!options.models.getModel(ref.provider, ref.modelId)) return { ok: false, error: `Unknown model ${ref.provider}/${ref.modelId}.` };
+      // Same rule as listModels: only models whose provider has credentials.
+      const available = await options.models.getAvailable(ref.provider);
+      if (!available.some(m => m.id === ref.modelId)) return { ok: false, error: `No credentials for ${ref.provider}: log in with pi to use ${ref.provider}/${ref.modelId}.` };
       model = { provider: ref.provider, modelId: ref.modelId };
       return { ok: true };
     },

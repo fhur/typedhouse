@@ -4,7 +4,9 @@ import { extname, join, normalize, sep } from 'node:path';
 import { initTRPC } from '@trpc/server';
 import { createHTTPHandler } from '@trpc/server/adapters/standalone';
 import superjson from 'superjson';
-import { homedir } from 'node:os';
+import { randomBytes } from 'node:crypto';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import type { Connection } from './clickhouse.js';
 import { savedStore, type SavedStore } from './saved.js';
 import { MAX_SAMPLE_ROWS, unavailableLlm, type ChartInput, type Llm, type ModelStatus } from './llm.js';
@@ -52,10 +54,24 @@ const modelInput = (value: unknown) => {
   return { provider: v.provider, modelId: v.modelId };
 };
 
+/**
+ * Without an explicit data dir (tests, embedding), saved queries go to a fresh temp directory, never the
+ * user's real `~/.typedhouse/studio`; only `main.ts` resolves that default.
+ */
+export function defaultSavedStore(): SavedStore {
+  // Created lazily by the first save (savedStore mkdirs on write) and removed when the process exits.
+  const dir = join(tmpdir(), `typedhouse-studio-${process.pid}-${randomBytes(6).toString('hex')}`);
+  if (!defaultDirs.size) process.once('exit', () => { for (const d of defaultDirs) rmSync(d, { recursive: true, force: true }); });
+  defaultDirs.add(dir);
+  return savedStore(dir);
+}
+const defaultDirs = new Set<string>();
+
 /** The LLM is injected so tests can pass a faux-backed one; without one, generation reports why it is off. */
-export function createRouter(conn: Connection, llm: Llm = unavailableLlm('not configured'), saved: SavedStore = savedStore(join(homedir(), '.typedhouse', 'studio'))) {
+export function createRouter(conn: Connection, llm: Llm = unavailableLlm('not configured'), saved: SavedStore = defaultSavedStore()) {
   const meta = () => ({
     connection: conn.label,
+    database: conn.database,
     model: llm.status as ModelStatus,
     schemaError: conn.schemaError() ?? null,
     tables: conn.tables(),

@@ -45,7 +45,7 @@ body { margin: 0; -webkit-font-smoothing: antialiased; background: var(--typedho
 
 .panes { flex: 1; min-width: 0; min-height: 0; display: flex; padding: 20px; }
 .pane-left { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 16px; }
-.ask { display: flex; align-items: center; gap: 12px; padding: 0 10px 0 16px; min-height: 52px; background: var(--typedhouse-surface); border: 1px solid var(--typedhouse-border-strong); border-radius: 12px; }
+.ask { display: flex; align-items: center; gap: 12px; padding: 0 10px 0 16px; min-height: 52px; background: var(--typedhouse-surface); border: 1px solid var(--typedhouse-accent); border-radius: 12px; }
 .ask:focus-within { border-color: var(--typedhouse-accent); box-shadow: 0 0 0 4px var(--typedhouse-accent-soft); }
 .ask input { all: unset; flex: 1; min-width: 0; font-size: 15px; color: var(--typedhouse-text); }
 .ask input::placeholder { color: var(--typedhouse-muted); }
@@ -152,3 +152,13 @@ body { margin: 0; -webkit-font-smoothing: antialiased; background: var(--typedho
 .palette-empty { padding: 16px 12px; font-size: 13px; color: var(--typedhouse-muted); }
 .palette-foot { display: flex; flex-wrap: wrap; gap: 16px; padding: 10px 16px; border-top: 1px solid var(--typedhouse-border); font-size: 12px; color: var(--typedhouse-muted); background: var(--typedhouse-surface-sunken); }
 .palette-foot > span { display: flex; gap: 6px; align-items: center; }
+.palette-item.disabled { cursor: default; color: var(--typedhouse-muted); }
+.chart-card { display: flex; flex-direction: column; gap: 14px; }
+.chart-title { display: flex; flex-direction: column; gap: 6px; }
+.chart-title h2 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.12; color: var(--typedhouse-text); }
+.side-row.on { background: var(--typedhouse-surface-selected); color: var(--typedhouse-text); font-weight: 500; }
+.editor-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; flex-shrink: 0; color: var(--typedhouse-on-night); }
+.row-type .ty { color: var(--tk-fn); }
+.chart-spec summary { cursor: pointer; font-size: 12px; color: var(--typedhouse-muted); }
+.chart-spec pre { margin: 8px 0 0; padding: 14px 16px; border-radius: 10px; background: var(--typedhouse-night-alt); color: var(--typedhouse-on-night); font-size: 12px; line-height: 1.6; overflow: auto; max-height: 320px; }
+.tk-kw { color: var(--tk-kw); } .tk-fn { color: var(--tk-fn); } .tk-val { color: var(--tk-val); } .tk-num { color: var(--tk-num); }

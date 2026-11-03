@@ -40,6 +40,8 @@ export function Editor(props: { value: string; onChange: (value: string) => void
         doc: props.value,
         extensions: [
           basicSetup, javascript({ typescript: true }), keymap.of([indentWithTab]), theme, syntaxHighlighting(highlight),
+          // Wrap long lines (no horizontal scrolling); continuation lines keep the line's indentation visually.
+          EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': 'query.ts' }),
           EditorView.updateListener.of(update => { if (update.docChanged) onChange.current(update.state.doc.toString()); }),
         ],

@@ -110,12 +110,26 @@ export function checkChartSpec(input: unknown, columns: readonly ChartColumn[]):
 function escapeColumnFields(spec: Record<string, unknown>, columns: readonly ChartColumn[]): Record<string, unknown> {
   const special = new Set(columns.map(c => c.name).filter(name => /[.[\]\\]/.test(name)));
   if (!special.size) return spec;
-  const fix = (field: unknown) => (typeof field === 'string' && special.has(plain(field)) ? escapeField(plain(field)) : field);
+  // The column a field names: as written (a raw name with a backslash, F9), or after unescaping (`e\.name`).
+  const columnOf = (field: unknown) => (typeof field !== 'string' ? undefined : special.has(field) ? field : special.has(plain(field)) ? plain(field) : undefined);
+  const fix = (field: unknown) => { const column = columnOf(field); return column === undefined ? field : escapeField(column); };
+  // Axis/legend titles default to the field string, which would show the escape (F7): title it with the column name.
+  const titled = (def: unknown) => {
+    if (!isObject(def) || 'title' in def) return def;
+    const column = columnOf(def['field']);
+    return column === undefined ? def : { ...def, title: column };
+  };
   const LIST_KEYS = new Set(['groupby', 'fold', 'pivot', 'value', 'repeat']);
   const walk = (node: unknown, key?: string): unknown => {
     if (Array.isArray(node)) return node.map(item => (key && LIST_KEYS.has(key) ? fix(item) : walk(item)));
     if (!isObject(node)) return key === 'field' || (key && LIST_KEYS.has(key)) ? fix(node) : node;
-    return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v, k)]));
+    // Object-form repeat (F8): { row: [...], column: [...], layer: [...] }.
+    if (key === 'repeat') return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, Array.isArray(v) ? v.map(fix) : v]));
+    const entries = Object.entries(node).map(([k, v]): [string, unknown] => {
+      if (key === 'encoding') v = Array.isArray(v) ? v.map(titled) : titled(v);
+      return [k, walk(v, k)];
+    });
+    return Object.fromEntries(entries);
   };
   return walk(spec) as Record<string, unknown>;
 }

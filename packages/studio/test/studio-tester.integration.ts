@@ -1,7 +1,9 @@
 // Tester (S1): adversarial checks for query.run against ClickHouse 24.8 — auto-limit exactness at the
 // boundaries, row order under the wrapping LIMIT, superjson round-trip of every decodable fixture type,
 // and readonly=2 enforcement beyond INSERT/CREATE/DROP.
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient as createDriver } from '@clickhouse/client';
@@ -14,6 +16,7 @@ const fixtures = new URL('../../compiler/test/fixtures/', import.meta.url);
 let container: StartedTestContainer, conn: Connection, server: Awaited<ReturnType<typeof startServer>>;
 let api: ReturnType<typeof createTRPCClient<AppRouter>>;
 let total: number;
+let dataDir: string;
 
 beforeAll(async () => {
   container = await new GenericContainer('clickhouse/clickhouse-server:24.8')
@@ -34,7 +37,8 @@ beforeAll(async () => {
   await setup.close();
   conn = connect({ url, username: 'fixture', password: 'test-secret', database: 'fixture' });
   await conn.refresh();
-  server = await startServer({ conn, port: 0, ui: 'none', packageRoot: '.' });
+  dataDir = await mkdtemp(join(tmpdir(), 'studio-tester-data-'));
+  server = await startServer({ conn, dataDir, port: 0, ui: 'none', packageRoot: '.' });
   api = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: `${server.url}/trpc`, transformer: superjson })] });
 }, 180_000);
 
@@ -42,6 +46,7 @@ afterAll(async () => {
   await server?.close();
   await conn?.close();
   await container?.stop();
+  if (dataDir) await rm(dataDir, { recursive: true, force: true });
 });
 
 async function ok(source: string, autoLimit = true) {

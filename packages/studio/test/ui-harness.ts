@@ -2,8 +2,12 @@
 // Playwright without network. Usage:
 //   tsx test/ui-harness.ts <clickhouse-url> <user> <password> <database> <port> [--no-llm]
 // Prompt keywords pick the scripted model behaviour:
+//   "dumpschema" → dumps the model context to $HARNESS_DUMP; "src:<source>" → answers with that source;
 //   "fail" → never compiles (turn limit); "slow" → waits 2 s before answering; anything else → passes first try.
 //   Chart prompts are recognised by the result-column list in the message (see respond()).
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-works/pi-ai';
 import { connect } from '../server/clickhouse.js';
 import { createLlm, unavailableLlm } from '../server/llm.js';
@@ -31,6 +35,11 @@ async function respond(context: { messages: { role: string; content: unknown }[]
     if (user.includes('slow')) await new Promise(resolve => setTimeout(resolve, 2_000));
     return chartCall({ mark: 'bar', encoding: { x: { field: 'id', type: 'nominal' }, y: { field: 'parts', type: 'quantitative' } } });
   }
+  // "dumpschema": write what the model was shown (system prompt + messages) to $HARNESS_DUMP.
+  if (user.includes('dumpschema') && process.env['HARNESS_DUMP']) writeFileSync(process.env['HARNESS_DUMP'], JSON.stringify(context));
+  // "src:<source>" answers with that exact source.
+  const custom = /src:(.*?)(?:\\n|"$)/.exec(user);
+  if (custom) return call(JSON.parse(`"${custom[1]}"`) as string);
   if (user.includes('fail')) return call(bad);
   if (user.includes('slow')) await new Promise(resolve => setTimeout(resolve, 2_000));
   return call(good);
@@ -47,8 +56,11 @@ else {
   const model = faux.getModel();
   llm = await createLlm({ models, model: { provider: model.provider, modelId: model.id }, schema: conn.schemaSource, check: conn.check, maxTurns: 3 });
 }
-const dataDir = process.env['HARNESS_DATA_DIR'];
-const server = await startServer({ conn, llm, ...(dataDir ? { dataDir } : {}), port: Number(port), ui: 'dev', packageRoot: new URL('..', import.meta.url).pathname });
+// Saved queries go to $HARNESS_DATA_DIR, else a temp dir (never the home dir).
+const ownDir = process.env['HARNESS_DATA_DIR'] ? undefined : mkdtempSync(join(tmpdir(), 'studio-harness-'));
+const dataDir = process.env['HARNESS_DATA_DIR'] ?? ownDir!;
+process.once('exit', () => { if (ownDir) rmSync(ownDir, { recursive: true, force: true }); });
+const server = await startServer({ conn, llm, dataDir, port: Number(port), ui: 'dev', packageRoot: new URL('..', import.meta.url).pathname });
 // Lets the Playwright script count model requests (duplicate-request checks).
 process.stdout.write(`HARNESS ${server.url}\n`);
 setInterval(() => process.stdout.write(`CALLS ${calls}\n`), 500).unref();

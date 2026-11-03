@@ -10,6 +10,7 @@ import { Chart } from './chart.js';
 import { chartSample, toChartData } from './chart-data.js';
 import { Editor } from './editor.js';
 import { Palette, type PaletteItem, type PaletteStep } from './palette.js';
+import { chartHeading, viewAfterGeneration, type View } from './rules.js';
 import { isMac, matchShortcut, type Action } from './keymap.js';
 import './styles.css';
 
@@ -21,7 +22,6 @@ type Success = Extract<RunResult, { ok: true }>;
 type Generated = Outputs['ai']['generateQuery'];
 type ChartOutcome = Outputs['ai']['generateChart'];
 type Saved = Extract<Outputs['saved']['list'], { ok: true }>['queries'][number];
-type View = 'table' | 'chart' | 'sql';
 
 const MOD = isMac(navigator.platform) ? '⌘' : 'Ctrl+';
 const SOURCE_KEY = 'typedhouse-studio:source';
@@ -33,6 +33,7 @@ const loadSpec = (): Record<string, unknown> | undefined => { try { return JSON.
 const store = {
   get(key: string): string | null { try { return localStorage.getItem(key); } catch { return null; } },
   set(key: string, value: string) { try { localStorage.setItem(key, value); } catch { /* private mode */ } },
+  remove(key: string) { try { localStorage.removeItem(key); } catch { /* private mode */ } },
 };
 
 function starter(meta: Meta | undefined): string {
@@ -53,6 +54,12 @@ function cellText(value: unknown): string {
 }
 const numericType = (type: string) => /^(Nullable\()?(LowCardinality\()?(U?Int|Float|Decimal)/.test(type);
 const valueAt = (row: unknown, path: readonly string[]) => path.reduce<unknown>((v, k) => (v !== null && typeof v === 'object' ? (v as Record<string, unknown>)[k] : undefined), row);
+
+/** The inferred row type with TypeScript types in the function color (Main.dc.html). */
+function RowType(props: { text: string }) {
+  const parts = props.text.split(/\b(string|number|bigint|boolean|Date|null|unknown|Array|Record|Decimal|UUID)\b/);
+  return <>{parts.map((part, i) => (i % 2 ? <span key={i} className="ty">{part}</span> : part))}</>;
+}
 
 function Kbd(props: { children: ReactNode }) { return <span className="kbd">{props.children}</span>; }
 
@@ -88,11 +95,26 @@ function ResultsTable(props: { result: Success }) {
   );
 }
 
+// Display-only SQL highlighting with the code-theme tokens: `identifiers` plain, {pN:Type} as values.
+const SQL_TOKEN = /(`(?:[^`\\]|\\.)*`)|(\{[A-Za-z_]\w*:[^}]*\})|('(?:[^'\\]|\\.)*')|\b(SELECT|FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|OFFSET|AS|AND|OR|NOT|IN|IS|NULL|JOIN|INNER|LEFT|RIGHT|FULL|OUTER|CROSS|ALL|ANY|ON|USING|UNION|DISTINCT|WITH|ARRAY JOIN|DESC|ASC|NULLS|FIRST|LAST|CASE|WHEN|THEN|ELSE|END|BETWEEN|LIKE|SETTINGS)\b|\b([A-Za-z_]\w*)(?=\()|\b(\d+(?:\.\d+)?)\b/g;
+function SqlText(props: { sql: string }) {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of props.sql.matchAll(SQL_TOKEN)) {
+    if (m.index > last) out.push(props.sql.slice(last, m.index));
+    const cls = m[1] ? '' : m[2] || m[3] ? 'tk-val' : m[4] ? 'tk-kw' : m[5] ? 'tk-fn' : 'tk-num';
+    out.push(cls ? <span key={m.index} className={cls}>{m[0]}</span> : m[0]);
+    last = m.index + m[0].length;
+  }
+  out.push(props.sql.slice(last));
+  return <>{out}</>;
+}
+
 function SqlView(props: { result: Success }) {
   const params = Object.entries(props.result.params);
   return (
     <div className="sql-view">
-      <pre className="mono sql">{formatSql(props.result.sql)}</pre>
+      <pre className="mono sql"><SqlText sql={formatSql(props.result.sql)} /></pre>
       <div className="params">
         <div className="eyebrow">Parameters</div>
         {params.length === 0 && <div className="muted small">None.</div>}
@@ -164,14 +186,19 @@ function App() {
   /** Replace the editor content (undoable in the editor) and keep it as the source of truth. */
   const replaceSource = useCallback((text: string) => {
     const view = editor.current;
-    if (view) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    if (view) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: 0 } });
+      // Show line 1, top-left, after a generate / load replaced everything.
+      view.scrollDOM.scrollTop = 0;
+      view.scrollDOM.scrollLeft = 0;
+    }
     setSource(text);
     store.set(SOURCE_KEY, text);
   }, []);
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (override?: string) => {
     const { source: current, generating: busy } = latest.current;
-    const text = prompt.current?.value.trim() ?? '';
+    const text = (override ?? prompt.current?.value ?? '').trim();
     if (busy || !text) return;
     setGenerating(true);
     setGenerated(undefined);
@@ -180,7 +207,7 @@ function App() {
       setGenerated(outcome);
       if (outcome.ok) {
         replaceSource(outcome.source);
-        setView('table');
+        setView(v => viewAfterGeneration(v, latest.current.chartSpec !== undefined));
         void run(outcome.source);
       }
     } catch (error) {
@@ -239,7 +266,9 @@ function App() {
     store.set(PROMPT_KEY, query.prompt);
     const chart = query.chart ?? undefined;
     setChartSpec(chart);
-    if (chart) store.set(CHART_SPEC_KEY, JSON.stringify(chart));
+    // A saved query without a chart also clears the persisted chart, so a reload shows none (F14).
+    if (chart) store.set(CHART_SPEC_KEY, JSON.stringify(chart)); else store.remove(CHART_SPEC_KEY);
+    setCharted(undefined);
     setLoaded({ name: query.name, source: query.source });
     setGenerated(undefined);
   }, [replaceSource]);
@@ -256,7 +285,7 @@ function App() {
   const insertAtCursor = useCallback((text: string) => {
     const view = editor.current;
     if (!view) return;
-    view.dispatch(view.state.replaceSelection(text));
+    view.dispatch({ ...view.state.replaceSelection(text), scrollIntoView: true });
     view.focus();
   }, []);
 
@@ -341,6 +370,22 @@ function App() {
     ];
   };
 
+  /** The palette's first row with typed text: generate from it, or say why the LLM is off (inert). */
+  const askItem = (text: string): PaletteItem => {
+    const off = meta && !meta.model.available ? meta.model.reason : undefined;
+    return off
+      ? { id: 'ask', group: 'Ask', icon: 'ask', label: `Ask: LLM unavailable (${off})`, disabled: true, run: () => undefined }
+      : { id: 'ask', group: 'Ask', icon: 'ask', label: `Ask: ${text}`, kbd: '↵', run: () => {
+          paletteReturn.current = null;
+          setAsk(text);
+          store.set(PROMPT_KEY, text);
+          void generate(text);
+        } };
+  };
+
+  /** Tables the editor reads (`from(binding)`), highlighted in the sidebar like the mockup's selected row. */
+  const usedTables = useMemo(() => new Set([...(source ?? '').matchAll(/\bfrom\(\s*([A-Za-z_$][\w$]*)/g)].map(m => m[1]!)), [source]);
+
   const modified = loaded !== undefined && source !== loaded.source;
 
   const onSourceChange = useCallback((value: string) => { setSource(value); store.set(SOURCE_KEY, value); }, []);
@@ -357,6 +402,7 @@ function App() {
   };
 
   const ok = result?.ok ? result : undefined;
+  const chartHead = useMemo(() => (chartSpec ? chartHeading(chartSpec) : undefined), [chartSpec]);
   const chartData = useMemo(() => (ok ? toChartData(ok.rows, ok.columns) : []), [ok]);
   const status = running ? 'Running…' : ok ? `${ok.rowCount.toLocaleString()} ${ok.rowCount === 1 ? 'row' : 'rows'}${ok.limited ? ' (limited)' : ''} · ${ok.elapsedMs} ms` : '';
   const tabs: [View, string, string][] = [['table', 'Table', `${MOD}1`], ['chart', 'Chart', `${MOD}2`], ['sql', 'SQL', `${MOD}3`]];
@@ -365,12 +411,12 @@ function App() {
     <div className="app">
       <header className="on-night header">
         <div className="brand"><Logo /><span className="display brand-name">TypedHouse</span><span className="display brand-sub">Studio</span></div>
-        <div className="mono chip" title={metaError ?? meta?.schemaError ?? undefined}>
+        <div className="mono chip" title={metaError ?? meta?.schemaError ?? meta?.connection}>
           <span className="dot" style={{ background: meta && !meta.schemaError ? '#8fd8f0' : '#faca60' }} />
-          {meta ? `clickhouse · ${meta.connection}` : metaError ? 'server unreachable' : 'connecting…'}
+          {meta ? `clickhouse · ${meta.database}` : metaError ? 'server unreachable' : 'connecting…'}
         </div>
         <div className="chip muted-chip model-chip" title={meta && !meta.model.available ? meta.model.reason : undefined}>
-          pi durable <span className="mono on">{!meta ? '…' : meta.model.available ? `${meta.model.provider} · ${meta.model.modelId}` : `LLM unavailable: ${meta.model.reason}`}</span>
+          pi durable <span className="mono on">{!meta ? '…' : meta.model.available ? `${meta.model.provider} · ${meta.model.modelId}` : 'LLM unavailable'}</span>
         </div>
         <div className="spacer" />
         <button className="btn palette-btn" type="button" title="Command palette" onClick={openPalette}>
@@ -385,7 +431,7 @@ function App() {
             <div className="eyebrow side-title"><span>Tables</span><span>{meta?.tables.length ?? ''}</span></div>
             {meta?.schemaError && <div className="side-error">{meta.schemaError}</div>}
             {meta?.tables.map(t => (
-              <div key={t.name} className="row side-row" role="button" tabIndex={0} title={`Insert from(${t.binding})\n\n${t.columns.map(c => `${c.name}: ${c.type}`).join('\n')}`}
+              <div key={t.name} className={`row side-row${usedTables.has(t.binding) ? ' on' : ''}`} role="button" tabIndex={0} title={`Insert from(${t.binding})\n\n${t.columns.map(c => `${c.name}: ${c.type}`).join('\n')}`}
                 onClick={() => insertAtCursor(`from(${t.binding})`)} onKeyDown={e => { if (e.key === 'Enter') insertAtCursor(`from(${t.binding})`); }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="var(--typedhouse-icon)" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 10v10" /></svg>
                 <span className="mono side-name">{t.name}</span>
@@ -437,17 +483,18 @@ function App() {
                 {saveError && <div className="save-error" role="alert">{saveError}</div>}
               </form>
             )}
-            {generated && (generated.ok
-              ? <div className="notice" role="status"><div>Generated in {generated.attempts} {generated.attempts === 1 ? 'attempt' : 'attempts'} and ran with auto-limit {autoLimit ? 'on' : 'off'}. It is a proposal: edit it and press <Kbd>{MOD}↵</Kbd> to rerun.</div></div>
-              : <div className="notice notice-error" role="alert">
+            {/* A successful generation shows no notice (user request); only failures are reported. */}
+            {generated && !generated.ok && (
+              <div className="notice notice-error" role="alert">
                   <div><strong>Could not generate a query.</strong> {generated.error}</div>
                   {generated.source && <button type="button" className="btn link-btn" onClick={() => { replaceSource(generated.source!); setGenerated(undefined); }}>Load the last attempt (it does not compile)</button>}
-                </div>)}
+                </div>
+            )}
 
             <section aria-label="Query editor" className="on-night editor-card">
               <div className="editor-head">
-                <span className="mono">{loaded ? loaded.name : 'query.ts'}{modified && <span className="modified" title="Edited since loading" aria-label="modified"> ●</span>}</span>
-                {ok && <span className="mono row-type" title={ok.rowType}>→ {ok.rowType}</span>}
+                <span className="mono editor-name">{loaded ? loaded.name : 'query.ts'}{modified && <span className="modified" title="Edited since loading" aria-label="modified"> ●</span>}</span>
+                {ok && <span className="mono row-type" title={ok.rowType}>→ <RowType text={ok.rowType} /></span>}
                 <div className="spacer" />
                 {result && (result.ok
                   ? <span className="compiles"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12l5 5L20 7" /></svg>Compiles</span>
@@ -498,7 +545,20 @@ function App() {
                   {charting ? <span className="muted small generating">Generating…</span> : <><span className="muted small">Chart</span><Kbd>↵</Kbd></>}
                 </label>
                 {charted && !charted.ok && <div className="notice notice-error" role="alert"><div><strong>Could not generate a chart.</strong> {charted.error}</div></div>}
-                {ok && chartSpec && <Chart spec={chartSpec} data={chartData} />}
+                {ok && chartHead && (
+                  <div className="chart-card">
+                    <div className="chart-title">
+                      <span className="eyebrow">{chartHead.eyebrow}</span>
+                      {chartHead.title && <h2 className="display">{chartHead.title}</h2>}
+                      {(chartHead.subtitle ?? chartAsk) && <span className="muted small">{chartHead.subtitle ?? chartAsk}</span>}
+                    </div>
+                    <Chart spec={chartHead.spec} data={chartData} />
+                    <details className="chart-spec">
+                      <summary>Vega-Lite spec · validated against result columns</summary>
+                      <pre className="mono on-night">{JSON.stringify(chartSpec, null, 2)}</pre>
+                    </details>
+                  </div>
+                )}
                 {ok && !chartSpec && <div className="empty">Describe a chart above (<Kbd>{MOD}G</Kbd>); the table stays the default view.</div>}
               </div>
             )}
@@ -516,7 +576,7 @@ function App() {
         <span className="hint"><Kbd>{MOD}S</Kbd> save</span>
         <span className="hint"><Kbd>{MOD}K</Kbd> commands</span>
       </footer>
-      {paletteOpen && <Palette items={paletteItems()} onClose={closePalette} />}
+      {paletteOpen && <Palette items={paletteItems()} onClose={closePalette} ask={askItem} />}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { rank } from './palette-match.js';
 
-export type Group = 'Actions' | 'Tables' | 'Saved' | 'Models';
+export type Group = 'Ask' | 'Actions' | 'Tables' | 'Saved' | 'Models';
 /** A palette entry. `run` closes the palette, unless it returns a next step (e.g. the model list). */
 export interface PaletteItem {
   id: string;
@@ -10,18 +10,21 @@ export interface PaletteItem {
   hint?: string | undefined;
   kbd?: string | undefined;
   mono?: boolean;
-  icon?: 'action' | 'table' | 'saved' | 'model';
+  icon?: 'action' | 'table' | 'saved' | 'model' | 'ask';
+  /** Shown but inert (e.g. "Ask" while the LLM is unavailable). */
+  disabled?: boolean;
   run: () => void | PaletteStep | Promise<void | PaletteStep>;
 }
 export interface PaletteStep { title: string; items: PaletteItem[]; empty?: string }
 
-const ORDER: Group[] = ['Actions', 'Saved', 'Tables', 'Models'];
+const ORDER: Group[] = ['Ask', 'Actions', 'Saved', 'Tables', 'Models'];
 
 function Icon(props: { kind: PaletteItem['icon'] }) {
   const common = { width: 16, height: 16, viewBox: '0 0 24 24', 'aria-hidden': true, fill: 'none', stroke: 'var(--typedhouse-icon)', strokeWidth: 2, strokeLinecap: 'round' as const };
   switch (props.kind) {
     case 'table': return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 10v10" /></svg>;
     case 'saved': return <svg {...common}><path d="M6 3h12v18l-6-4-6 4z" /></svg>;
+    case 'ask': return <svg {...common} stroke="var(--typedhouse-accent)" strokeLinejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /></svg>;
     case 'model': return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
     default: return <svg {...common}><path d="M4 7h16M4 12h10M4 17h6" /></svg>;
   }
@@ -43,7 +46,7 @@ function highlight(text: string, indices: readonly number[]): ReactNode {
 }
 
 /** ⌘K command palette (Palette.dc.html): one input, grouped results, arrows + Enter + Esc, mouse too. */
-export function Palette(props: { items: PaletteItem[]; onClose: () => void }) {
+export function Palette(props: { items: PaletteItem[]; onClose: () => void; ask?: (text: string) => PaletteItem }) {
   const [step, setStep] = useState<PaletteStep | undefined>();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -55,14 +58,16 @@ export function Palette(props: { items: PaletteItem[]; onClose: () => void }) {
   const items = step?.items ?? props.items;
   const ranked = useMemo(() => {
     const matches = rank(items, query, item => item.label);
+    // With typed text, the first row asks the LLM (Palette.dc.html); it is not ranked.
+    const ask = !step && query.trim() && props.ask ? [{ item: props.ask(query.trim()), match: { score: 0, indices: [] } }] : [];
     // Grouped in a fixed order; inside a group, best match first (or the given order with an empty query).
-    return ORDER.flatMap(group => matches.filter(m => m.item.group === group));
-  }, [items, query]);
+    return [...ask, ...ORDER.flatMap(group => matches.filter(m => m.item.group === group))];
+  }, [items, query, step, props.ask]);
   useEffect(() => { setActive(0); }, [query, step]);
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }); }, [active]);
 
   async function choose(item: PaletteItem) {
-    if (busy) return;
+    if (busy || item.disabled) return;
     setBusy(true);
     try {
       const next = await item.run();
@@ -97,7 +102,7 @@ export function Palette(props: { items: PaletteItem[]; onClose: () => void }) {
             return (
               <div key={item.id}>
                 {header}
-                <div id={`palette-${item.id}`} role="option" aria-selected={i === active} className={`palette-item${i === active ? ' on' : ''}`}
+                <div id={`palette-${item.id}`} role="option" aria-selected={i === active} className={`palette-item${i === active ? ' on' : ''}${item.disabled ? ' disabled' : ''}`} aria-disabled={item.disabled || undefined}
                   onMouseMove={() => setActive(i)} onClick={() => void choose(item)}>
                   <Icon kind={item.icon} />
                   <span className={`palette-text${item.mono ? ' mono' : ''}`}>{highlight(item.label, match.indices)}</span>

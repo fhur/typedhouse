@@ -209,3 +209,25 @@ describe('saved queries and model switch over tRPC', () => {
     }
   });
 });
+
+describe('F13: tables named like core functions', () => {
+  it('get non-colliding bindings; from(from_table) and count() both work, and db.from keeps the name', async () => {
+    const writer = createDriver({ url, username: 'fixture', password: 'test-secret', database: 'fixture' });
+    await writer.command({ query: 'CREATE TABLE `from` (id UInt32) ENGINE = Memory' });
+    await writer.command({ query: 'CREATE TABLE `count` (n UInt32) ENGINE = Memory' });
+    await writer.command({ query: 'INSERT INTO `from` VALUES (1), (2), (3)' });
+    await writer.close();
+    const s = await startServer({ conn, port: 0, ui: 'none', packageRoot: '.' });
+    try {
+      const client = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: `${s.url}/trpc`, transformer: superjson })] });
+      const meta = await client.schema.refresh.mutate();
+      expect(meta.tables.filter(t => t.name === 'from' || t.name === 'count').map(t => [t.name, t.binding])).toEqual([['count', 'count_table'], ['from', 'from_table']]);
+      expect(conn.schemaSource()).toContain('const from_table = table("from"');
+      expect(await client.query.run.mutate({ source: 'export default from(from_table).aggregate(() => ({ n: count() }))', autoLimit: true })).toMatchObject({ ok: true, rows: [{ n: 3n }] });
+      expect(await client.query.run.mutate({ source: 'export default from(db.from).map(r => ({ id: r.id }))', autoLimit: false })).toMatchObject({ ok: true, rowCount: 3 });
+      expect(await client.query.run.mutate({ source: 'export default from(count_table)', autoLimit: true })).toMatchObject({ ok: true, rowCount: 0 });
+    } finally {
+      await s.close();
+    }
+  });
+});

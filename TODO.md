@@ -72,7 +72,65 @@ Brief: requirements R1–R11 in the session's `studio-brief.md` (it's the source
   - The ⌘K button is a placeholder (S6).
   - Root `pnpm build` (`pnpm -r build`) now builds studio too: a Vite build plus a tsup build.
 
-### Next Worker slice: S5+S6 — saved queries, ⌘K palette, full keymap, "Switch model…" (selected 2026-11-03)
+### Next Worker slice: S7 — visual fidelity and polish (selected 2026-11-03)
+Mockups (read-only) are in the session scratchpad, `studio/project/`: `Main.dc.html`, `Chart.dc.html`, `Palette.dc.html`. Tokens and fonts come from `apps/docs/src/styles/tokens.css`; syntax colors from `apps/docs/src/styles/code-themes.mjs`. After this slice: S8.
+- **Fidelity: match the three mockups at 1440 px, plus the responsive rules under 1000 px and 760 px.**
+  - Header:
+    - Night background; logo, then "TypedHouse Studio".
+    - Connection chip: `clickhouse · <db>` with a status dot.
+    - Model chip: "pi durable <model>", or "LLM unavailable" with the reason as a tooltip.
+    - The "Commands, tables, queries ⌘K" button.
+  - Sidebar:
+    - "Tables" with a count; each row has an icon, the name and "N cols", and a hover/selected state.
+    - "Saved", then the shortcut hints at the bottom.
+  - Left pane:
+    - Prompt row: sparkle icon, input, "Generate ↵".
+    - `query.ts` card on night, with line numbers, the inferred row type `→ { … }`, the "Compiles"/error badge, and a Run ⌘↵ button.
+    - CodeMirror highlighting uses the `code-themes.mjs` token colors (kw/fn/val/num/punct/plain).
+  - Results:
+    - Tabs with kbd hints; status shows "N rows (limited) · M ms".
+    - Table: index column; numeric columns right-aligned in mono; NULL muted.
+    - SQL view with a parameters panel.
+  - Footer: ready dot, the auto-limit state, and hints.
+  - Chart tab per `Chart.dc.html`: chart prompt row, title area, brand palette.
+  - Palette per `Palette.dc.html`: an "Ask" row at the top, then grouped results with kbd hints.
+  - Light theme is the default. Dark via `prefers-color-scheme` is optional; if done, the editor and chart follow it.
+- **Editor scrolling (S1 limitation).** Enable line wrapping, keeping indentation readable. After any programmatic replace (generate, load saved, insert table), scroll to the top-left.
+- **F4a:** the kbd inside the generation notice renders inline, not as a full-width block. *Superseded 2026-11-03: the user removed the success notice; see the S7 entry.*
+- **F7:** chart axis and legend titles default to the plain column name (`c.entityId`, not `c\.entityId`) when the model gave no `title`.
+- **F11:** a generation keeps the current tab, unless the current tab is Chart with no spec; then it switches to Table.
+- **Palette "Ask" row (per mockup):**
+  - With typed text, the first row is "Ask: <text>". Enter on it closes the palette, puts the text in the prompt and generates.
+  - It is shown only when the LLM is available. Otherwise the row says why and is inert.
+- **F13: tables shadowing core exports.**
+  - When a table binding collides with a `@typedhouse/core` export name, it gets a non-colliding binding (e.g. `from_table`; the scheme is the Worker's choice but must be deterministic), so core functions keep working.
+  - `db.<name>` keeps the original name.
+  - The sidebar, the palette's table insertion and the LLM schema section all use the same binding as the editor scope.
+  - Test: a fixture table named `from` and one named `count`. `from(from_table)` runs, and `count()` still works.
+- **F14:** loading a saved query without a chart also clears the persisted chart state, so a reload shows no stale chart.
+- **F15:** `models.select` refuses a model whose provider has no credential (the same check as `models.list`), with a clear error.
+- **F18:** `startServer`/`createRouter` no longer default `dataDir` to `~/.typedhouse/studio`. Make it required; `main.ts` resolves the default. Update the tests that start servers to pass a temp dir.
+- **Optional, only if cheap:**
+  - F8: escape object-form `repeat`.
+  - F9: backslash in column names.
+  - F10: a chart-only rename for `[__proto__]`.
+  - If skipped, leave them as follow-ups.
+- **Tests:**
+  - Unit tests for F13 binding names, F15, and the F11 tab rule (a pure function is fine).
+  - An F7 headless render test.
+  - An integration case for F13 on the fixture, and an F18 temp dir everywhere.
+  - Playwright:
+    - wrapping: no horizontal scrollbar for a 200-character line;
+    - after a replace, the editor shows line 1;
+    - the F4a notice layout;
+    - the palette Ask row generates;
+    - F14 across a reload;
+    - the tab rule.
+- **Evidence:** screenshots at 1440 px and 900 px of the workspace (table and SQL), the chart tab and the palette, each next to its mockup, saved to the session scratchpad. List any intentional differences.
+- **Gates:** root `pnpm typecheck` and `pnpm test`, studio `typecheck`, `test:integration` and `build`.
+- **Out of scope:** F12, README and `check:all` (all S8), F16, F17, the landing page, and persisting the model choice.
+
+### Done slice: S5+S6 — saved queries, ⌘K palette, full keymap, "Switch model…" (selected 2026-11-03, done 2026-11-03)
 Merged because the palette lists saved queries, and both add shortcuts (⌘S, ⌘K) to the same `keymap.ts`/`main.tsx`. After this: S7 (visual fidelity, with F4a/F7/F11), then S8.
 - **Saved store, `server/saved.ts`.**
   - File: `<data-dir>/saved.json`, shaped `{ version: 1, queries: [{ name, prompt, source, chart: spec | null, updatedAt }] }`.
@@ -294,8 +352,44 @@ Merged because S2 has no user-visible value on its own and both touch the same f
   - Save stores the current prompt+source under a name in `<data-dir>/saved.json` (atomic write; the same name overwrites after confirming). The list shows in the sidebar's "Saved" section; clicking loads the prompt and source without running. Delete is available.
   - Unit tests for the store (create, list order, overwrite, delete, corrupt-file message).
 - Depends on: S1
-- Status: in progress (Worker slice S5+S6; detailed scope under "Next Worker slice")
-- Evidence:
+- Status: **done** (Tester OK on the first round, PM verified). Committed and pushed by the orchestrator on branch `studio`: `e36f68b` (S1–S6 WIP), then `967cf4f` (S5+S6 adversarial tests).
+- Evidence (shared with S6):
+  - Gates: root `pnpm typecheck` passes. Root `pnpm test`: 124 files, 1624 passed, 1 skipped, 0 failed (2 runs). Studio `test`: 10 files, 185/185. Studio `test:integration`: 39/39. Studio `build` passes.
+  - `test/s56-tester.test.ts` (Tester-owned):
+    - Name rules:
+      - Empty or whitespace names are refused; 101 characters is refused and 100 accepted.
+      - Unicode and path characters round-trip as data only, and names are trimmed.
+    - 5 corrupt-file variants plus an unreadable file: the file stays untouched and no temp files are left.
+    - Concurrency: 50 parallel saves and 20 overwrites.
+    - A 2 MB source and a chart-spec round-trip.
+    - Palette ranking order, and 2,000 items ranked in under 200 ms.
+    - `models.select` refuses bad ids, and a switch during a generation applies to the next one.
+  - `test/saved.test.ts` (Worker), and one integration case: the saved round trip over tRPC with a temp `dataDir`.
+  - Playwright, 31 checks:
+    - The palette opens; other shortcuts are inert while it is open; it doesn't stack.
+    - Ranking, Enter, and Esc with focus restored.
+    - A table result replaces the selection with `from(...)`. Odd, dotted, keyword and digit-leading table bindings all run.
+    - Save, overwrite confirmation, delete confirmation, and the modified ● marker.
+    - Loading restores without running, and the saved chart renders.
+    - Switch model is used by the next generation.
+    - Browser defaults are prevented for Ctrl+K/S/L/G/1/Enter inside CodeMirror.
+    - 0 page errors.
+  - PM code read:
+    - `server/saved.ts`:
+      - `{version:1, queries}`, trimmed names of 1–100 characters.
+      - In-process serialized writes, temp file + rename at 0600, data dir created at 0700.
+      - A corrupt or unreadable file is reported and never overwritten.
+      - `updatedAt` is strictly increasing, so "newest first" is exact.
+    - `server/server.ts`: `saved.list/save/delete`, and `models.list` (`models.getAvailable()`, no network) and `models.select`, held in memory for the session.
+    - `web/keymap.ts` adds `palette` (k) and `save` (s).
+    - `web/palette-match.ts` is the pure ranking module.
+- Follow-ups (non-blocking):
+  - **F13 (S7):** a table whose binding equals a core export (`from`, `count`, `sum`, `join`, `val`, …) shadows that function in the editor scope and breaks every query. Rename the table binding (e.g. `from_table`) and keep `db.<name>` working.
+  - **F14 (S7):** loading a saved query without a chart clears the chart in the page but not its localStorage copy, so a reload redraws a stale chart.
+  - **F15 (S7):** `models.select` accepts a model whose provider has no credential, though only via the API (the palette lists only `getAvailable()`). Refuse it.
+  - **F16 (accepted):** saved names are case-sensitive, so `Foo` and `foo` are separate entries.
+  - **F17 (accepted):** no cross-process lock on `saved.json`. Acceptable for a single user; writes are serialized in-process.
+  - **F18 (S7, PM):** `createRouter`/`startServer` default the saved store to the real `~/.typedhouse/studio` when `dataDir` is omitted. Four integration servers (`studio.integration.ts` lines 35/117/150, `studio-tester.integration.ts` line 37) omit it. They don't call `saved.*` today, so nothing is written, but a future test could touch the user's real data. Make `dataDir` required for `startServer`; only `main.ts` resolves the home default.
 
 ### S6 — Command palette and complete keyboard map
 - Refs: R6.
@@ -304,8 +398,8 @@ Merged because S2 has no user-visible value on its own and both touch the same f
   - All shortcuts work with ⌘ on macOS and Ctrl elsewhere, including while CodeMirror has focus (⌘↵, ⌘/, ⌘L, ⌘1–3, ⌘G, ⌘K), and don't fire the browser defaults. Footer hints match.
   - Test: a unit test of the keymap/dispatch table, plus one browser-level smoke test (or a documented manual checklist with a screenshot if no browser runner is available).
 - Depends on: S1 (S3–S5 add their entries)
-- Status: in progress (Worker slice S5+S6; detailed scope under "Next Worker slice")
-- Evidence:
+- Status: **done** (Tester OK on the first round, PM verified). "Switch model…" is included.
+- Evidence: see S5, which holds the shared S5+S6 evidence.
 
 ### S7 — Visual fidelity pass
 - Refs: R9.
@@ -318,14 +412,102 @@ Merged because S2 has no user-visible value on its own and both touch the same f
     - Results pane with Table/Chart/SQL tabs, row count and elapsed time; footer with the auto-limit state and shortcut hints.
   - Chart tab per `Chart.dc.html`. Tokens and fonts come from `apps/docs/src/styles/tokens.css`; syntax colors from `code-themes.mjs` (CodeMirror highlight style).
   - Light theme by default; dark via `prefers-color-scheme` is optional.
-  - Carried in:
-    - F4a: the kbd in the generation notice renders full-width.
-    - The S1 limitation: the editor scrolls horizontally on long lines; wrap or fit them.
-    - F7: plain column names in axis/legend titles.
-    - F11: decide whether generation keeps the current tab.
-    - Optional, if cheap: F8–F10, the chart field-name edge cases.
+  - Carried in: F4a, F7, F11, F13, F14, F15, F18, the S1 editor-scroll limitation, the palette "Ask" row, and optionally F8–F10. The exact scope is under "Next Worker slice".
   - Evidence: side-by-side screenshots against the mockups at 1440px and under 1000px.
+  - **Added 2026-11-03 (user decision; goes to the Worker after the current Tester round): remove the success notice.**
+    - A successful generation shows no notice at all; the notice is the box "Generated in N attempts and ran with auto-limit on. It is a proposal: edit it and press ⌘↵ to rerun."
+    - The replaced editor content and the auto-run results speak for themselves.
+    - The failure display stays: the error message plus "Load the last attempt".
+    - This makes F4a (the kbd layout in that notice) moot; drop it and its Playwright check.
+    - Test: Playwright, a faux success leaves no `role="status"` notice in the left pane, and a faux failure still shows the error and the load button.
 - Depends on: S1, S3, S4, S6
+- Status: in progress (Worker slice S7 with the Tester; the success-notice removal is queued for the next Worker round)
+- Evidence:
+
+### S9 — Editor language intelligence (R12)
+- Refs: R12 (added by the user 2026-11-03), R1/R2 (generation must type-check), R6.
+- Gap analysis (PM, 2026-11-03):
+  - **Editor today.** `web/editor.tsx` is CodeMirror 6 with `basicSetup` and `javascript({ typescript: true })`: syntax highlighting only. There is no lint source, no completion source and no hover tooltip. The badge says "Compiles" only after a run.
+  - **Server today.** `server/eval.ts` evaluates with `ts.transpileModule`, which never type-checks. Tables and core exports are injected as runtime parameters (`editorScope` = core exports + table bindings + `db`), so the editor source has no imports for a type checker to follow.
+  - `editorSchema(schema)` returns the `renderSchema` source with collision-safe bindings (F13) plus a `bindings` map. Codegen's `renderSchema` declares `const <binding> = table(...)` *without* `export` (only the `Row$…` types and `db` are exported). As a type source it needs `export const` on each binding, or ambient declarations; a one-line transform of the `editorSchema` output is enough.
+  - **Core types.** `@typedhouse/core` builds to one bundled, dependency-free `packages/core/dist/index.d.ts` (168 KB) with tsup `--dts`. That file exists only after `pnpm build`. The dev server runs from `src` through the root tsconfig `paths` (S1 item 0), so a dev checkout may have no `dist`. Source mode costs about 27% more instantiations than built mode (bench `5.8.3/source` 2.71 M vs `5.8.3/built` 2.13 M), and the type surface is heavy. A query editor file is far smaller than the bench corpus (`chain25`, `join10`, …).
+  - **Measured on this machine** (AMD Ryzen 7 255, 16 threads; TypeScript 5.8.3 in-process `LanguageService`, `dist/index.d.ts` plus the fixture schema snapshot with exported bindings; a PM probe run inline with `node -e`, nothing committed):
+    - First completion request (cold, includes lib + core load): 228 ms.
+    - Member completions after `c.` in a `where` callback, after an edit: 20–32 ms. They list the table's 8 columns (`category, countOfParts, entityId, …`).
+    - Column completions inside a `groupBy` callback: 85 ms.
+    - Semantic diagnostics after an edit: 131–189 ms. A wrong operand gives "Argument of type '1' is not assignable to parameter of type 'Operand<string | null, "row">'".
+    - Hover on `.groupBy`: 10 ms.
+    - Process RSS: about 340 MB.
+  - **Caveat:** completion details and hovers print the full `Expr<…> & { readonly ir: ExprNode & … }` intersection, and type errors on result types are very long. Both need trimming for display (see the acceptance criteria).
+- **Design options.**
+  1. **Server-side `ts.LanguageService` over tRPC (recommended).**
+     - TypeScript is already a server dependency (eval uses it).
+     - The schema and core types are on disk next to the server.
+     - `check_query` can reuse the same service for R12's generation requirement.
+     - The browser stays small: no TS bundle, no lib files shipped.
+     - Single user on localhost, so the network latency is about 1 ms.
+     - The cost: one resident service, about 340 MB RSS, which is fine.
+  2. **In-browser TS worker** (`@typescript/vfs` or a hand-rolled worker): this ships TypeScript (several MB) plus the lib `.d.ts` files and core's `.d.ts` to the browser. It needs a new transport for the schema types, and a second checker on the server anyway for `check_query`. More moving parts, so not chosen.
+- **Recommended shape (the Worker may refine it).**
+  - `server/types.ts` holds one `LanguageService` per server, with virtual files:
+    - `/core.d.ts`: core's types. Use the package's built `types` file when it exists, else `packages/core/src/index.ts` through `paths` (dev). Record which one is used in the startup log.
+    - `/schema.ts`: `editorSchema` output with exported bindings. It is replaced on `schema.refresh`.
+    - `/scope.d.ts`: `declare global { const from: typeof import('@typedhouse/core').from; …; const <binding>: typeof import('./schema').<binding>; const db: … }`. It is generated from core's export names and `bindings`, so the editor contract "no imports needed" type-checks.
+    - `/query.ts`: the editor text. `moduleDetection: 'force'`, so a user `import { from } from '@typedhouse/core'` or a local redeclaration shadows the globals instead of clashing.
+    - The compiler options mirror the repo's (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, ES2022 lib, `skipLibCheck`).
+  - Warm the service at startup (one diagnostics call) so the first keystroke never pays the cold cost.
+  - tRPC `types.diagnostics({ source })`, `types.completions({ source, pos })`, `types.hover({ source, pos })`. The full text is sent per call; it is small, so no incremental sync is needed.
+  - Web: CodeMirror `linter` (debounced about 300 ms), `autocompletion` with an override source, and `hoverTooltip`, all calling those procedures. Map TS ranges to CodeMirror offsets one-to-one (same text).
+  - **Runs are not blocked by type errors** (PM proposal; the user may override). ⌘↵ still evaluates and compiles, as now. Type errors are shown inline and in the badge. Generation (below) requires zero type errors.
+- Acceptance:
+  - **Diagnostics.**
+    - Type and syntax errors show as squiggles with the TS message on hover, inline in the editor.
+    - Messages are trimmed for display: first line, at most about 300 characters, with the full text in the tooltip's details.
+    - The editor badge shows "Typechecks" when there are 0 errors, or "N type errors". The run status ("Compiles"/stage error) is shown separately.
+    - Diagnostics clear when fixed.
+    - The "no imports needed" contract type-checks: `from(<table>)` with no import gives 0 errors on the fixture schema. A user `import { from } from '@typedhouse/core'` also gives 0 errors.
+  - **Completions.**
+    - At the top level: table bindings (the F13 names), `db`, and core exports (`from`, `count`, `sum`, `val`, `join`, …).
+    - After `.` on a query: builder methods (`where`, `map`, `groupBy`, `orderBy`, `limit`, …).
+    - Inside a callback (`e => e.`): the table's columns.
+    - Each column item shows its ClickHouse type, e.g. `String`, `Nullable(String)`, `DateTime64(3)`, taken from the schema rather than the raw `Expr<…>` intersection, plus its TS value type when short.
+  - **Hover:** shows a readable type for identifiers, columns and builder methods, trimmed like the diagnostics.
+  - **Latency on a warm service, measured on this machine and recorded as evidence:**
+    - completions p95 < 150 ms server time (R12's ceiling is 300 ms end-to-end);
+    - diagnostics p95 < 300 ms after an edit;
+    - hover p95 < 100 ms;
+    - the first request after startup < 1 s because of the warm-up.
+    Measure over at least 20 edits on the fixture schema, in both the core `dist` and `src` modes.
+  - **Generation (R12 and S3).**
+    - `check_query` runs type diagnostics on the candidate source, using the same service and the same globals, in addition to `prepare()`.
+    - Type errors are returned to the model in the tool result (trimmed, with line:col). A source passes only with 0 type errors *and* a successful compile.
+    - The GUIDE says that type errors must be fixed.
+  - **Schema refresh** updates `/schema.ts` and `/scope.d.ts`, and completions reflect new tables without a restart.
+  - **Tests.**
+    - Unit (`test/types.test.ts`, faux-free):
+      - no-import contract → 0 errors;
+      - wrong operand type → 1 error at the right range;
+      - an unknown column → an error;
+      - member completions after `c.` list the fixture columns with CH types;
+      - top-level completions include the table bindings and `from`/`count`;
+      - hover on a column shows its type;
+      - an F13-colliding table binding (`from_table`) type-checks;
+      - a latency smoke test asserting warm completions < 300 ms (generous, to avoid CI flakes).
+    - LLM (faux):
+      - a source that compiles at runtime but has a type error is refused by `check_query`, the model gets the type error back, and the fixed second attempt passes (`attempts === 2`);
+      - a type-correct source passes in one attempt.
+    - Integration: on the fixture ClickHouse, `types.diagnostics` for a generated or saved query is 0, and after `schema.refresh` a new table appears in completions.
+    - Playwright:
+      - typing `from(` offers the table bindings;
+      - `.where(c => c.` lists the columns, and accepting one inserts it;
+      - an introduced type error shows a squiggle and the badge "1 type error", and fixing it shows "Typechecks";
+      - hover shows a type;
+      - typing stays responsive, with no dropped keystrokes in a 40-character burst.
+  - **Gates:**
+    - root `pnpm typecheck` and `pnpm test`;
+    - studio `typecheck`, `test:integration` and `build`;
+    - `node scripts/check-type-performance.mjs` unchanged, since S9 must not touch core types or the bench inputs.
+- Depends on: S3 (`check_query`), S7 (editor and badge layout). Runs after S7 and before S8.
 - Status: todo
 - Evidence:
 
@@ -333,9 +515,19 @@ Merged because S2 has no user-visible value on its own and both touch the same f
 - Refs: all.
 - Acceptance:
   - Green: `pnpm typecheck`, `pnpm test`, `pnpm build`, the studio integration test, and studio's own typecheck/build.
+  - A full `pnpm check:all` passes, so the studio package, `pnpm -r build` and the lockfile changes don't regress the existing gate. Record its duration.
+  - F12 bundle size: sql-formatter is lazy-loaded for the SQL tab (dynamic `import()`, like vega). Record the main `index-*.js` size before and after; target a clear reduction from 861 KB. Formatting falls back to raw SQL while the chunk loads.
+  - `packages/studio/README.md`, short and requested by the orchestrator, covering:
+    - what it is;
+    - the start command and the flags/env vars (connection, `--model`, `--pi-dir`, `--data-dir`, `--port`);
+    - pi credentials, the default model `openai-codex/gpt-5.6-sol`, and the "LLM unavailable" behaviour;
+    - the keyboard shortcuts, auto-limit, and where saved queries live;
+    - the evaluation trust model (in-process, not a sandbox, single local user).
+  - Decide whether the studio integration tests join `check:all` (currently not wired). Record the decision.
   - Only when the orchestrator asks: one manual smoke with the real pi credential and a real ClickHouse, covering prompt → query → run → chart → save. Record model, latency and any auth refresh.
   - Nothing committed under `apps/playground/`.
-- Depends on: S1–S7
+  - The final gates and the real-model smoke cover S9: type-checked generation, plus completions and diagnostics in the browser.
+- Depends on: S1–S7, S9 (order: S7 → S9 → S8)
 - Status: todo
 - Evidence:
 

@@ -44,7 +44,7 @@ export function Chart(props: { spec: Record<string, unknown>; data: Record<strin
     setError(undefined);
     import('vega-embed').then(async ({ default: embed }) => {
       if (cancelled || !host.current) return;
-      const spec = { width: 'container', autosize: { type: 'fit', contains: 'padding' }, ...props.spec, data: { values: props.data } };
+      const spec = { width: 'container', autosize: { type: 'fit-x', contains: 'padding' }, ...props.spec, data: { values: props.data } };
       const result = await embed(host.current, spec as never, { actions: false, renderer: 'svg', config: chartConfig(isDark) as never });
       if (cancelled) result.finalize(); else finalize = () => result.finalize();
     }).catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
