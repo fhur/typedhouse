@@ -91,9 +91,13 @@ it('ifNull rule: every fallback kind over LC(Nullable) receivers, incl. Enum8, D
   for (const [k, v] of [['le8', 'a'], ['ldec', '1.5'], ['ldt64', new Date(0)], ['lip', '1.2.3.4'], ['luuid', '00000000-0000-0000-0000-000000000001']] as const) {
     out[k] = show(() => { const q = y.map(r => ({ v: (r as any)[k].ifNull(v) as never })); const c = compile(q.ir); const n = emitNaive(q.ir); return `${print((q.ir as any).exprs.v.type)} | ${print(c.columns.v!)} | ${print(n.columns.v!)} | ${c.sql}`; });
   }
-  // Enum8/Decimal/IPv4/UUID JS fallbacks are param_incompatible exactly as for their Nullable twins (pre-existing; and
-  // 24.8 rejects LC(Nullable) DDL for Enum8, Decimal and DateTime64 anyway, see the native probe).
-  for (const k of ['le8', 'ldec', 'lip', 'luuid']) expect(out[k], k).toMatch(/^!param_incompatible/);
+  // Enum8/Decimal/UUID JS fallbacks now serialize like their Nullable twins (scalar parameters for these types were
+  // added after this test, found by the round-trip property). IPv4 parameters remain unsupported. 24.8 rejects
+  // LC(Nullable) DDL for Enum8, Decimal and DateTime64 anyway, see the native probe.
+  expect(out.lip, 'lip').toMatch(/^!param_incompatible/);
+  for (const [k, placeholder] of [['le8', "{p0:Enum8('a' = 1, 'b' = 2)}"], ['ldec', '{p0:Decimal(10, 2)}'], ['luuid', '{p0:UUID}']] as const) {
+    expect(out[k], k).toContain(`SELECT ifNull(\`${k}\`, ${placeholder}) AS \`v\` FROM \`y\``);
+  }
   expect(out.ldt64).toBe("LowCardinality(DateTime64(3, 'UTC')) | LowCardinality(DateTime64(3, 'UTC')) | LowCardinality(DateTime64(3, 'UTC')) | SELECT ifNull(`ldt64`, {p0:DateTime64(3, 'UTC')}) AS `v` FROM `y`");
 });
 

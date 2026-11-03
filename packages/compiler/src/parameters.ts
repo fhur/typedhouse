@@ -25,19 +25,22 @@ function arrayLiteral(value: unknown, type: CHType): string {
   const encoded = serializeParameter(value, type);
   // Array text uses Bool words, unlike scalar HTTP parameters (1/0).
   if (type.kind === 'scalar' && type.name === 'Bool') return value ? 'true' : 'false';
-  if (type.kind === 'FixedString' || type.kind === 'DateTime' || type.kind === 'DateTime64' || (type.kind === 'scalar' && (type.name === 'String' || type.name === 'Date'))) {
+  if (type.kind === 'FixedString' || type.kind === 'DateTime' || type.kind === 'DateTime64' || type.kind === 'Enum' || (type.kind === 'scalar' && (type.name === 'String' || type.name === 'Date' || type.name === 'Date32' || type.name === 'UUID'))) {
     return "'" + encoded.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t').replaceAll('\0', '\\0') + "'";
   }
   return encoded;
 }
 
-/** LowCardinality over a date-time is not a parameter type we transport (CH 24.8 rejects
- * LowCardinality(DateTime64) and gates LowCardinality(DateTime) behind a "suspicious types" setting). */
-function temporal(t: CHType): boolean {
-  return t.kind === 'DateTime64' || t.kind === 'DateTime' || ((t.kind === 'Array' || t.kind === 'Nullable' || t.kind === 'LowCardinality') && temporal(t.inner));
+/** LowCardinality over these is not a parameter type we transport: CH 24.8 rejects
+ * LowCardinality(DateTime64) and gates DateTime, Date32, UUID, Decimal and Enum behind a
+ * "suspicious types" setting. They were rejected before their scalar forms gained support. */
+function noLowCardinalityParameter(t: CHType): boolean {
+  if (t.kind === 'Array' || t.kind === 'Nullable' || t.kind === 'LowCardinality') return noLowCardinalityParameter(t.inner);
+  return t.kind === 'DateTime64' || t.kind === 'DateTime' || t.kind === 'Decimal' || t.kind === 'Enum'
+    || (t.kind === 'scalar' && (t.name === 'Date32' || t.name === 'UUID'));
 }
 function invalidLowCardinality(t: CHType): boolean {
-  return t.kind === 'LowCardinality' ? temporal(t.inner) : (t.kind === 'Array' || t.kind === 'Nullable') && invalidLowCardinality(t.inner);
+  return t.kind === 'LowCardinality' ? noLowCardinalityParameter(t.inner) : (t.kind === 'Array' || t.kind === 'Nullable') && invalidLowCardinality(t.inner);
 }
 /** Values are serialized here, never delegated to the driver's inferred formatter. */
 export function serializeParameter(value: unknown, type: CHType): string {
@@ -64,12 +67,28 @@ export function serializeParameter(value: unknown, type: CHType): string {
     if (typeof value === 'number') return String(value);
   } else if (type.kind === 'scalar' && type.name === 'Bool') {
     if (typeof value === 'boolean') return value ? '1' : '0';
-  } else if (type.kind === 'scalar' && type.name === 'Date') {
+  } else if (type.kind === 'scalar' && (type.name === 'Date' || type.name === 'Date32')) {
     // A Date-only parameter is the UTC calendar day of the supplied instant.
+    const [min, max] = type.name === 'Date' ? ['1970-01-01', '2149-06-06'] : ['1900-01-01', '2299-12-31'];
     if (value instanceof Date && Number.isFinite(value.getTime())) {
       const day = value.toISOString().slice(0, 10);
-      if (/^\d{4}-\d\d-\d\d$/.test(day) && day >= '1970-01-01' && day <= '2149-06-06') return day;
+      if (/^\d{4}-\d\d-\d\d$/.test(day) && day >= min && day <= max) return day;
     }
+  } else if (type.kind === 'scalar' && type.name === 'UUID') {
+    // Canonical 8-4-4-4-12 hex text only; anything else is not a UUID value.
+    if (typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return value;
+  } else if (type.kind === 'Decimal') {
+    // Decimal values are exact decimal strings. Reject text that does not fit the declared
+    // precision/scale instead of letting the server round or overflow it.
+    const match = typeof value === 'string' ? /^-?(\d+)(?:\.(\d+))?$/.exec(value) : null;
+    if (match) {
+      const whole = match[1]!.replace(/^0+(?=\d)/, '');
+      const fraction = match[2] ?? '';
+      if (fraction.length <= type.scale && (whole === '0' ? 0 : whole.length) <= type.precision - type.scale) return value as string;
+    }
+  } else if (type.kind === 'Enum') {
+    // An enum value is one of its declared names, sent by name.
+    if (typeof value === 'string' && type.values.some(v => v.name === value)) return value;
   } else if (type.kind === 'DateTime') {
     // DateTime stores whole seconds as UInt32: 1970-01-01 00:00:00 to 2106-02-07 06:28:15 UTC.
     // Out-of-range instants would wrap on the server, so reject them; milliseconds floor, like DateTime64(0).
