@@ -1,6 +1,64 @@
-## Studio (@typedhouse/studio) — in progress
+## Studio (@typedhouse/studio) — done (2026-11-03, `cb3bfd6`)
 
-Brief: requirements R1–R11 in the session's `studio-brief.md` (it's the source of truth). Single user on localhost, so keep it simple: few files, few dependencies, no auth.
+Brief: requirements R1–R12 in the session's `studio-brief.md` (it's the source of truth; R12 was added 2026-11-03). Single user on localhost, so keep it simple: few files, few dependencies, no auth.
+
+### Completion check (PM, 2026-11-03): requested scope COMPLETE
+All slices S1–S9 are done. The final tree is `cb3bfd6` on `studio`, pushed by the orchestrator. Final gates on that tree (Tester):
+- root `pnpm typecheck` passes;
+- root `pnpm test`: 128 files, 1703 passed, 2 skipped;
+- studio: typecheck passes; test 264 passed, 1 skipped; integration 41/41; build passes;
+- type-perf budget unchanged;
+- **`pnpm check:all` exits 0 in 486 s**;
+- `~/.typedhouse` and `~/.pi` unchanged (mtime + md5).
+
+**Requirements → evidence:**
+
+| Req | Status | Evidence |
+|---|---|---|
+| R1 Text → query in an editable editor | done | S3. Faux tests: first try, fix on the second attempt, turn limit. Real smoke: 3/3 in F5, and 3/3 in S8 (1 attempt in 4.4 s; 1 in 3.6 s; 2 in 12.0 s for a `val()`-labelled union), all run. |
+| R2 pi durable + pi credentials, checked and fixed before shown | done | S2/S3/S9. `piCredentialStore` over `~/.pi/agent/auth.json` (pi's lock, atomic, format kept); pi-durable Harness with `check_query`, which compiles *and* type-checks. `auth.json` unchanged in both real smokes. The model default `openai-codex/gpt-5.6-sol` replaces pi's `settings.json` default (user decision). |
+| R3 ⌘↵ run, Table + SQL tab with params | done | S1. Integration (exact auto-limit, superjson types, readonly=2); Playwright Ctrl+Enter, tabs. |
+| R4 Prompt → Vega-Lite, Table default | done | S4. `checkChartSpec` (no model data, fields checked, escaping); 8 headless vega render tests; 15 Playwright chart checks; real smoke 1/1 chart on the first attempt in 3.2 s. |
+| R5 Auto-limit 100, ⌘/ toggle, no button | done | S1. `.limit(100)` shown, 101 executed so "limited" is exact; boundaries 0/99/100/101 in integration. |
+| R6 Keyboard navigation (⌘↵ ⌘L ⌘1–3 ⌘G ⌘K) | done | S1/S4/S6. Plus ⌘S and the palette (actions, tables, saved, Switch model, Ask row). Playwright preventDefault checks for Ctrl+K/S/L/G/1/Enter inside CodeMirror. |
+| R7 Node localhost, React, tRPC v11 + superjson, Vite | done | S1. No SSE was needed: generation is a single mutation. |
+| R8 ClickHouse via flags/env, codegen introspection, readonly client | done | S1/S7. `introspect` + `editorSchema` (collision-safe bindings); readonly=2 refuses writes/DDL/SYSTEM/GRANT/SET (integration). |
+| R9 Approved design | done | S7. 24 screenshots, light and dark, at 1440/900/700 px; no overflow, readable contrast. The landing page is out of scope. |
+| R10 One start command, prints the URL, 127.0.0.1 | done | S1, item 0 of S2+S3, and S8. `pnpm --filter @typedhouse/studio dev` (no prior build) and the `typedhouse-studio` bin, both run by the Tester per the README. |
+| R11 Saved queries in local JSON | done | S5. `<data-dir>/saved.json`, atomic, corrupt-safe; sidebar and palette; real smoke save + list round-trip with the chart. |
+| R12 Editor language intelligence | done, with one deferred target | S9. Diagnostics, completions, hover, and type-checked generation. Light queries meet the latency targets; heavy aggregate queries are about 263–295 ms (within R12's 300 ms, missing the internal 150 ms p95 target). Deferred by the user (F21). |
+
+**Follow-ups, final disposition:**
+- **Deferred (user decision):** F21, heavy-query type-check latency caused by core's aggregate overload types. "Not now"; a future core type-performance task under the `test/types/bench` budget rules.
+- **Accepted, known limitations (recorded in the README or here):**
+  - F10: a `[__proto__]` column shows a chart error.
+  - F16: case-sensitive saved names.
+  - F17: no cross-process lock on `saved.json`.
+  - F20: tables named after unreserved globals shadow them in editor code.
+  - F22: `export { q as default }` gives "No query found" (skipped test).
+  - F23: columns named `ir`, `_rowType` or starting with `__` are hidden from completions.
+  - F24: no completions inside `e['…`.
+  - F2: pass-then-fail `check_query` in one turn reports failure (safe).
+  - F3: unlocked `auth.json` reads can rarely show "LLM unavailable" during a pi write.
+  - The pi-ai all-providers dependency weight (lockfile).
+- **Decided:** studio integration tests stay out of `check:all` (user). They run via `pnpm --filter @typedhouse/studio test:integration`.
+- **Closed:**
+  - F1: abort grace;
+  - F4a: superseded by the notice removal;
+  - F4b: prompt-only;
+  - F5: real smoke;
+  - F6: `val()` labels;
+  - F7: plain chart titles;
+  - F8, F9: escaping;
+  - F11: tab rule;
+  - F12: lazy sql-formatter;
+  - F13: core-name collisions;
+  - F14: stale chart;
+  - F15: model credentials;
+  - F18: temp data dir;
+  - F19: test temp-dir cleanup.
+
+**Not done by design (the brief's out-of-scope list):** landing page, npm publishing (the package stays `private: true`), auth, multiple users, Electron, docs site changes.
 
 **Architecture sketch.**
 - `packages/studio` (`private: true`) runs one Node process on `127.0.0.1`. It serves tRPC v11 (superjson) at `/trpc`, plus the React+Vite UI: Vite middleware in dev, built `dist/web` static files from the `typedhouse-studio` bin.
@@ -74,7 +132,7 @@ Brief: requirements R1–R11 in the session's `studio-brief.md` (it's the source
   - The ⌘K button is a placeholder (S6).
   - Root `pnpm build` (`pnpm -r build`) now builds studio too: a Vite build plus a tsup build.
 
-### Next Worker slice: S8 — final gates, bundle, README (selected 2026-11-03; the final slice)
+### Done slice: S8 — final gates, bundle, README (selected 2026-11-03, done 2026-11-03 in `cb3bfd6`; the final slice, no next slice)
 This slice is kept small. Owners are marked; the full criteria are in the **S8** entry below.
 - **Worker:** F12 lazy-loads sql-formatter, then `packages/studio/README.md`.
 - **Tester:** F19 (fix the `/tmp` leak in its own `test/s7.test.ts`), then the final gates including `pnpm check:all`.
@@ -612,7 +670,32 @@ Merged because S2 has no user-visible value on its own and both touch the same f
     - Reload the page and load it again.
   - Nothing committed under `apps/playground/`.
 - Depends on: S1–S7, S9 (order: S7 → S9 → S8)
-- Status: in progress (the final slice; Worker: F12 + README; Tester: F19 + gates; orchestrator: smoke)
+- Status: **done** (Tester OK; committed and pushed by the orchestrator as `cb3bfd6` on `studio`).
+- Evidence:
+  - **F12 (Worker, Tester-checked):** sql-formatter is lazy (`import('sql-formatter')` in `web/main.tsx`). The main bundle went from 877,765 B to 788,645 B; the formatter chunk is 89,451 B and loads on the first SQL tab view. Vega stays lazy (851,238 B). The Tester checked:
+    - no formatter request is made before the SQL tab opens;
+    - opening the tab shows formatted SQL;
+    - with the chunk blocked, the raw SQL and params still render, with 0 page errors.
+  - **README (Worker, Tester-checked):** `packages/studio/README.md`, 73 lines; sections Start, The model, Using it, Limitations.
+    - The Tester checked every claim against the code and `--help`, and ran the documented dev and bin start commands.
+    - One inaccuracy, the table-renaming sentence, was fixed with the Tester's wording and accepted by the orchestrator.
+  - **F19 (Tester):** `test/s7.test.ts` cleans up with `afterAll` + `rm`. The `/tmp` count is unchanged across studio and root runs, and no assertion was weakened.
+  - **Final gates:** see "Completion check" at the top of this section. `pnpm check:all` exits 0 in 486 s.
+  - **Browser end-to-end (Tester, faux model):**
+    - run, tabs, auto-limit;
+    - generate success and failure;
+    - charts (15 checks);
+    - save/load/overwrite/delete;
+    - the palette with 85 items;
+    - Switch model;
+    - preventDefault for Ctrl+K/S/L/G/1/Enter;
+    - editor intelligence in light and dark themes.
+  - **Real-model smoke (orchestrator, `openai-codex/gpt-5.6-sol`, fixture):**
+    - 3/3 queries generated (1 attempt in 4.4 s; 1 in 3.6 s; 2 in 12.0 s for a union labelled with `val()`), and all three ran;
+    - 1/1 chart on the first attempt in 3.2 s, a valid spec;
+    - save + list round-tripped with the chart;
+    - `auth.json` unchanged.
+  - **User decisions:** F21 deferred ("not now"); studio integration tests stay out of `check:all`.
 - Evidence:
 
 ## Round-trip property: inserted rows read back and filter exactly (2026-11-03)
