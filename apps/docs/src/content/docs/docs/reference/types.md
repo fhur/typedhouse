@@ -64,3 +64,13 @@ ClickHouse does not return `NULL` for the unmatched side of a `LEFT`, `RIGHT` or
 ## Values you pass in
 
 JavaScript values in expressions become typed server-side parameters (`{p0:String}`), never inlined SQL; the parameter type follows the column the value is compared with. See [Parameters and compiler outputs](/docs/reference/parameters/).
+
+A JavaScript `Date` is an instant, and it is sent as UTC text, then cast to the column's declared type, so neither the server's nor the session's timezone can shift it:
+
+| Column | Sent as | Notes |
+| --- | --- | --- |
+| `Date` | the UTC calendar day, `2026-11-01` | `1970-01-01` to `2149-06-06` |
+| `DateTime`, `DateTime('tz')` | UTC seconds, `2026-11-01 12:34:56` | Milliseconds are floored; instants outside `1970-01-01 00:00:00` to `2106-02-07 06:28:15` UTC fail with `param_incompatible` before the query is sent |
+| `DateTime64(p)`, p ≤ 3 | UTC up to milliseconds, `2026-11-01 12:34:56.789` | Truncated to the column's precision |
+
+Pass a `Date`, not a date string: a string is a type error for these columns.

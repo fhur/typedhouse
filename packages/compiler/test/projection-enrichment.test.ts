@@ -51,9 +51,12 @@ it('checks authoritative arity, unit, timezone, branches, metadata, bindings and
   }
 });
 
-it('leaves DateTime parameters unsupported and existing UTC wire conversion intact', () => {
+it('sends DateTime parameters through the UTC wire conversion and leaves DateTime64 conversion intact', () => {
   for (const emit of [compile, emitNaive]) {
-    expect(() => emit(components.map(() => ({ at: val(new Date(0), col.DateTime()) })).ir)).toThrow('param_incompatible');
+    // DateTime parameters were unsupported when this test was written; they now share the UTC path (date.test.ts).
+    const plain = emit(components.map(() => ({ at: val(new Date(0), col.DateTime()) })).ir);
+    expect(plain.sql).toContain("CAST({p0:DateTime('UTC')} AS DateTime)");
+    expect(plain.params).toEqual({ p0: '1970-01-01 00:00:00' });
     const query = components.map(() => ({ age: dateDiff('day', val(new Date(0), col.DateTime64(3, 'Europe/Amsterdam')), now()) }));
     expect(emit(query.ir).sql).toContain("CAST({p1:DateTime64(3, 'UTC')} AS DateTime64(3, 'Europe/Amsterdam'))");
   }

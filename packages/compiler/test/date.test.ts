@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { col, table, from, val, Expr, exprNode, type CHType } from '@typedhouse/core';
-import { emitNaive } from '../src/index.js';
+import { compile, emitNaive } from '../src/index.js';
 import { serializeParameter } from '../src/parameters.js';
 
 const metadata = { engine: 'Memory', sortingKey: [], partitionKey: [] };
@@ -45,4 +45,31 @@ it('validates weekly metadata, arity, descriptors and original reference scope',
   const foreign = from(table('foreign_dates', { at: col.DateTime64(3) }, metadata));
   expect(() => emitNaive(source.map(() => foreign.row.at.toStartOfWeek()).ir)).toThrow(/unbound_column/);
   expect(emitNaive(source.map(() => ({ day: val(new Date('2024-02-29'), col.Date) })).ir).params).toEqual({ p0: '2024-02-29' });
+});
+it('transports DateTime parameters as UTC seconds and restores the declared timezone', () => {
+  // Spec: Date serializes as `YYYY-MM-DD HH:MM:SS` in UTC for a seconds-precision target.
+  expect(serializeParameter(new Date('2026-11-01T12:34:56.789Z'), col.DateTime().type)).toBe('2026-11-01 12:34:56');
+  expect(serializeParameter(new Date(0), col.DateTime('Europe/Amsterdam').type)).toBe('1970-01-01 00:00:00');
+  expect(serializeParameter(new Date(0xFFFF_FFFF * 1000), col.DateTime().type)).toBe('2106-02-07 06:28:15');
+  expect(serializeParameter([new Date('2026-03-29T01:00:00Z'), null], col.Array(col.Nullable(col.DateTime())).type)).toBe("['2026-03-29 01:00:00',NULL]");
+  // UInt32 seconds: anything outside would wrap on the server, so it never leaves the client.
+  for (const value of [new Date(-1), new Date((0xFFFF_FFFF + 1) * 1000), new Date(NaN), '2026-11-01 00:00:00', 1_700_000_000]) {
+    expect(() => serializeParameter(value, col.DateTime().type)).toThrow(/param_incompatible/);
+  }
+  expect(() => serializeParameter(new Date(0), col.LowCardinality(col.DateTime()).type)).toThrow(/param_incompatible/);
+  for (const [descriptor, cast] of [
+    [col.DateTime(), "CAST({p0:DateTime('UTC')} AS DateTime)"],
+    [col.DateTime('UTC'), "{p0:DateTime('UTC')}"],
+    [col.DateTime('Europe/Amsterdam'), "CAST({p0:DateTime('UTC')} AS DateTime('Europe/Amsterdam'))"],
+  ] as const) {
+    const events = from(table('dt_events', { at: descriptor }, metadata));
+    const query = events.where(e => e.at.ge(new Date('2026-11-01T00:00:00Z')));
+    for (const emit of [compile, emitNaive]) {
+      const compiled = emit(query.ir);
+      expect(compiled.sql).toContain(cast);
+      expect(compiled.params).toEqual({ p0: '2026-11-01 00:00:00' });
+      // parameterTypes reports the wire type the server parses: always UTC text.
+      expect(compiled.parameterTypes).toEqual({ p0: col.DateTime('UTC').type });
+    }
+  }
 });

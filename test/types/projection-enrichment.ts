@@ -14,3 +14,13 @@ expectTypeOf(multiIf(...pairs)).toEqualTypeOf<DescribedExpr<string, 'ok', 'row',
 const grouped = columnExpr(col.Bool, 1 as NodeId, ['ok'], 'ok', 'grouped');
 expectTypeOf(multiIf([grouped, val('x', col.String)], 'no').mode).toEqualTypeOf<'grouped'>();
 expectTypeOf(multiIf([val(true, col.Bool), 'constant'], [grouped, 'grouped'], 'no').mode).toEqualTypeOf<'grouped'>();
+// DateTime columns take JS Date parameters (sent as UTC seconds), not date strings.
+q.where(r => r.dt.ge(new Date('2026-11-01T00:00:00Z')));
+// @ts-expect-error a date string is not a DateTime parameter
+q.where(r => r.dt.ge('2026-11-01 00:00:00'));
+q.where(r => r.d.ge(new Date('2026-11-01')));
+q.where(r => r.p.ge(new Date('2026-11-01T00:00:00.123Z')));
+// @ts-expect-error a date string is not a Date parameter
+q.where(r => r.d.ge('2026-11-01'));
+// @ts-expect-error a date string is not a DateTime64 parameter
+q.where(r => r.p.ge('2026-11-01 00:00:00.123'));

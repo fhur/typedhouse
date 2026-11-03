@@ -6,7 +6,7 @@ import { print as printType, type CHType } from '@typedhouse/core';
  */
 export function parameterWireType(type: CHType): CHType {
   if (type.kind === 'Nullable' || type.kind === 'LowCardinality' || type.kind === 'Array') return { ...type, inner: parameterWireType(type.inner) };
-  if (type.kind === 'DateTime64' && type.precision <= 3) return { ...type, tz: 'UTC' };
+  if ((type.kind === 'DateTime64' && type.precision <= 3) || type.kind === 'DateTime') return { ...type, tz: 'UTC' };
   return type;
 }
 
@@ -25,14 +25,16 @@ function arrayLiteral(value: unknown, type: CHType): string {
   const encoded = serializeParameter(value, type);
   // Array text uses Bool words, unlike scalar HTTP parameters (1/0).
   if (type.kind === 'scalar' && type.name === 'Bool') return value ? 'true' : 'false';
-  if (type.kind === 'FixedString' || type.kind === 'DateTime64' || (type.kind === 'scalar' && (type.name === 'String' || type.name === 'Date'))) {
+  if (type.kind === 'FixedString' || type.kind === 'DateTime' || type.kind === 'DateTime64' || (type.kind === 'scalar' && (type.name === 'String' || type.name === 'Date'))) {
     return "'" + encoded.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t').replaceAll('\0', '\\0') + "'";
   }
   return encoded;
 }
 
+/** LowCardinality over a date-time is not a parameter type we transport (CH 24.8 rejects
+ * LowCardinality(DateTime64) and gates LowCardinality(DateTime) behind a "suspicious types" setting). */
 function temporal(t: CHType): boolean {
-  return t.kind === 'DateTime64' || ((t.kind === 'Array' || t.kind === 'Nullable' || t.kind === 'LowCardinality') && temporal(t.inner));
+  return t.kind === 'DateTime64' || t.kind === 'DateTime' || ((t.kind === 'Array' || t.kind === 'Nullable' || t.kind === 'LowCardinality') && temporal(t.inner));
 }
 function invalidLowCardinality(t: CHType): boolean {
   return t.kind === 'LowCardinality' ? temporal(t.inner) : (t.kind === 'Array' || t.kind === 'Nullable') && invalidLowCardinality(t.inner);
@@ -67,6 +69,13 @@ export function serializeParameter(value: unknown, type: CHType): string {
     if (value instanceof Date && Number.isFinite(value.getTime())) {
       const day = value.toISOString().slice(0, 10);
       if (/^\d{4}-\d\d-\d\d$/.test(day) && day >= '1970-01-01' && day <= '2149-06-06') return day;
+    }
+  } else if (type.kind === 'DateTime') {
+    // DateTime stores whole seconds as UInt32: 1970-01-01 00:00:00 to 2106-02-07 06:28:15 UTC.
+    // Out-of-range instants would wrap on the server, so reject them; milliseconds floor, like DateTime64(0).
+    if (value instanceof Date && Number.isFinite(value.getTime())) {
+      const seconds = Math.floor(value.getTime() / 1000);
+      if (seconds >= 0 && seconds <= 0xFFFF_FFFF) return value.toISOString().replace('T', ' ').slice(0, 19);
     }
   } else if (type.kind === 'DateTime64' && type.precision <= 3) {
     if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().replace('T', ' ').slice(0, type.precision === 0 ? 19 : 20 + type.precision);
