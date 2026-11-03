@@ -1,17 +1,16 @@
 import { col, from, table } from '@typedhouse/core';
 
-const events = table(
-  'events',
-  { tenant: col.String, category: col.String, id: col.UInt32 },
+const orders = table(
+  'orders',
+  { id: col.UInt32, status: col.String, country: col.String, amount: col.Float64 },
   { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] },
 );
 
 // #region example
-// A shared base query, reused by every report
-const acme = from(events)
-  .where(e => e.tenant.eq('acme'));
+// Define a rule once, reuse it in every report
+const paid = from(orders).where(o => o.status.eq('paid'));
 
-export default acme
-  .where(e => e.category.eq('purchase'))
-  .map(e => ({ id: e.id }));
+export default paid
+  .where(o => o.country.eq('DE'))
+  .map(o => ({ id: o.id, amount: o.amount }));
 // #endregion

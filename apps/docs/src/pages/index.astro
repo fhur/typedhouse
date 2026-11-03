@@ -41,7 +41,11 @@ const guides = [
           <Code code={hero.snippet} lang="ts" label="TypeScript example" />
           <p class="compile-step"><span aria-hidden="true">↓</span> compile(query.ir)</p>
           <Code code={hero.sql} lang="sql" label="Compiled SQL" />
-          <p class="hero-params">params <span>{hero.params}</span></p>
+          <dl class="hero-facts">
+            <dt>params</dt><dd class="value">{hero.params}</dd>
+            {hero.rowType && <dt>rows</dt>}
+            {hero.rowType && <dd>{hero.rowType}[]</dd>}
+          </dl>
         </CodeWindow>
       </div>
     </div>
@@ -52,7 +56,7 @@ const guides = [
       Each example is compiled when the site builds. Values you write in TypeScript (<span class="value-swatch">amber</span>) become typed ClickHouse parameters, never inlined SQL.
     </SectionHeading>
     <div class="examples">
-      <ExampleTabs examples={examples} label="Compiler examples" initial="compose" />
+      <ExampleTabs examples={examples} label="Compiler examples" initial="top-pages" />
     </div>
   </Section>
 
@@ -112,8 +116,13 @@ const guides = [
     font-family: var(--typedhouse-font-mono); font-size: .75rem; color: var(--typedhouse-on-night-muted);
   }
   .compile-step span { color: #c7a1f9; }
-  .hero-params { max-width: none; margin: -.5rem 0 0; padding: 0 1.375rem 1.25rem; font-family: var(--typedhouse-font-mono); font-size: .8125rem; color: var(--typedhouse-on-night-muted); overflow-wrap: anywhere; }
-  .hero-params span { color: var(--tk-val); }
+  .hero-facts {
+    margin: -.5rem 0 0; padding: 0 1.375rem 1.25rem; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .3rem 1rem;
+    font-family: var(--typedhouse-font-mono); font-size: .8125rem; line-height: 1.6; overflow-wrap: anywhere;
+  }
+  .hero-facts dt { color: var(--typedhouse-on-night-muted); }
+  .hero-facts dd { margin: 0; color: var(--tk-plain); }
+  .hero-facts .value { color: var(--tk-val); }
   .value-swatch { color: var(--tk-val); font-weight: 600; }
   .examples { margin-top: 2rem; }
   .features { margin-top: 2.75rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 2.75rem 3rem; }

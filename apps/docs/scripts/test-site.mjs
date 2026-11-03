@@ -48,7 +48,7 @@ for (const encoded of shared) {
   const source = gunzipSync(Buffer.from(encoded, 'base64url')).toString('utf8');
   assert.ok(exampleSources.includes(source), 'Playground links must receive the exact homepage example source');
 }
-for (const id of ['filter', 'compose', 'aggregate', 'join']) assert.match(home, new RegExp(`role="tabpanel"[^>]*id="[^"]*-panel-${id}"`), `Missing homepage example panel: ${id}`);
+for (const id of ['top-pages', 'filter', 'compose', 'join']) assert.match(home, new RegExp(`role="tabpanel"[^>]*id="[^"]*-panel-${id}"`), `Missing homepage example panel: ${id}`);
 assert.match(home, /\{p0:String\}/, 'Homepage examples must show parameterized SQL');
 const markdown = await readFile(join(dist, 'docs/getting-started.md'), 'utf8');
 assert.match(markdown, /import\s*\{\s*col,\s*table,\s*from,?\s*\}/);
