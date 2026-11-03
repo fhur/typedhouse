@@ -1,93 +1,121 @@
 ---
-import { compile } from '@typedhouse/compiler';
-import { format } from 'sql-formatter';
 import Site from '../layouts/Site.astro';
+import AnnouncementBar from '../components/site/AnnouncementBar.astro';
+import Section from '../components/site/Section.astro';
+import SectionHeading from '../components/site/SectionHeading.astro';
+import Button from '../components/site/Button.astro';
+import CodeWindow from '../components/site/CodeWindow.astro';
+import Code from '../components/site/Code.astro';
+import ExampleTabs from '../components/site/ExampleTabs.astro';
+import Feature from '../components/site/Feature.astro';
+import GuideList from '../components/site/GuideList.astro';
+import { compileExample } from '../lib/examples';
 import { withBase } from '../lib/urls';
-import query from '../examples/homepage';
-import source from '../examples/homepage.ts?raw';
-import { encodeShare } from '../playground/sharing';
+import { heroExample, homeExamples } from '../examples/home';
 
-const example = source.slice(source.indexOf('const base'));
-const compiled = compile(query.ir);
-const sql = format(compiled.sql, { language: 'clickhouse' });
-const playground = `${withBase('/playground/')}#${await encodeShare(source)}`;
+const examples = await Promise.all(homeExamples.map(compileExample));
+const hero = examples.find(example => example.id === heroExample.id)!;
 const guides = [
   { title: 'Getting started', description: 'Build and inspect your first query.', path: '/docs/getting-started/' },
   { title: 'Simple example', description: 'Reuse queries for reports and dashboards.', path: '/docs/tutorials/composition/' },
   { title: 'Advanced example', description: 'Combine tables without losing track of what you count.', path: '/docs/tutorials/advanced-example/' },
 ];
 ---
-<Site title="Type-safe ClickHouse query builder for TypeScript" description="TypedHouse is a type-safe ClickHouse query builder for TypeScript. Compose reusable queries, keep values parameterized, and inspect the SQL you run.">
-  <section class="home-hero" aria-labelledby="home-title">
-    <h1 id="home-title">TypedHouse</h1>
-    <p class="home-tagline">Type-safe ClickHouse query builder for TypeScript.</p>
-    <div class="actions">
-      <a class="button primary" href={withBase('/docs/getting-started/')}>Learn TypedHouse</a>
-      <a class="button" href={withBase('/playground/')}>Try the playground</a>
-    </div>
-  </section>
+<Site title="Type-safe ClickHouse query builder for TypeScript" description="TypedHouse is a type-safe ClickHouse query builder for TypeScript. Compose reusable queries, keep values parameterized, and inspect the SQL you run." bleed>
+  <AnnouncementBar slot="before-header" href={withBase('/blog/composition-without-hiding-sql/')} badge="Blog">Composition without hiding SQL</AnnouncementBar>
 
-  <section class="home-example" aria-labelledby="example-title">
-    <div class="section-intro">
-      <h2 id="example-title">Build queries from reusable pieces.</h2>
-      <p>Start with a shared query. Extend it without changing the original.</p>
+  <Section tone="night" slant="bottom" spacing="hero" aria-labelledby="home-title">
+    <div class="hero">
+      <div class="hero-copy">
+        <p class="pill">Type-safe ClickHouse query builder for TypeScript</p>
+        <h1 id="home-title">Write TypeScript.<br />Read the SQL.</h1>
+        <p class="hero-lead">Compose typed, reusable queries. TypedHouse compiles them into <span>flat, parameterized ClickHouse SQL</span> you can inspect before it runs.</p>
+        <div class="actions">
+          <Button href={withBase('/docs/getting-started/')} arrow>Get started</Button>
+          <Button href={withBase('/playground/')} variant="ghost">Open the playground</Button>
+        </div>
+        <p class="install"><span aria-hidden="true">$</span> <code>pnpm add @typedhouse/core @typedhouse/compiler</code></p>
+      </div>
+      <div class="hero-window">
+        <CodeWindow title={hero.filename}>
+          <Code code={hero.snippet} lang="ts" label="TypeScript example" />
+          <p class="compile-step"><span aria-hidden="true">↓</span> compile(query.ir)</p>
+          <Code code={hero.sql} lang="sql" label="Compiled SQL" />
+          <p class="hero-params">params <span>{hero.params}</span></p>
+        </CodeWindow>
+      </div>
     </div>
-    <div class="code-pair">
-      <figure>
-        <figcaption>TypeScript</figcaption>
-        <pre tabindex="0" aria-label="TypeScript example"><code>{example.trim()}</code></pre>
-      </figure>
-      <figure>
-        <figcaption>Generated SQL</figcaption>
-        <pre tabindex="0" aria-label="Generated SQL"><code>{sql}</code></pre>
-        <p class="parameters">Parameters: <code>{JSON.stringify(compiled.params)}</code></p>
-      </figure>
-    </div>
-    <p class="example-context">Uses the <a href={withBase('/docs/getting-started/#define-and-compile')}>events table from Getting started</a>. Values stay separate from SQL.</p>
-    <a class="example-link" href={playground}>Edit in the playground →</a>
-  </section>
+  </Section>
 
-  <section class="home-guides" aria-labelledby="guides-title">
-    <h2 id="guides-title">Learn TypedHouse in three small steps.</h2>
-    <ol>
-      {guides.map(guide => (
-        <li>
-          <a href={withBase(guide.path)}>{guide.title} <span aria-hidden="true">→</span></a>
-          <p>{guide.description}</p>
-        </li>
-      ))}
-    </ol>
-  </section>
+  <Section spacing="tight" aria-labelledby="example-title">
+    <SectionHeading id="example-title" eyebrow="How it compiles" title="See the SQL for every query you write.">
+      Each example is compiled when the site builds. Values you write in TypeScript (<span class="value-swatch">amber</span>) become typed ClickHouse parameters, never inlined SQL.
+    </SectionHeading>
+    <div class="examples">
+      <ExampleTabs examples={examples} label="Compiler examples" initial="compose" />
+    </div>
+  </Section>
+
+  <Section aria-labelledby="features-title">
+    <SectionHeading id="features-title" title="A query builder, not an ORM." />
+    <div class="features">
+      <Feature icon="cube" title="Typed end to end">Column types come from ClickHouse types. Wrong comparisons and missing columns fail in your editor.</Feature>
+      <Feature icon="lock" title="Values are always parameters">Every JavaScript value becomes a typed <code>{'{p0:String}'}</code> parameter.</Feature>
+      <Feature icon="compose" title="Compose without strings">Extend a shared query with more filters, joins or aggregates. The original never changes.</Feature>
+      <Feature icon="funnel" title="Flat, readable SQL">The compiler merges steps, pushes filters down and prunes columns. It never emits <code>SELECT *</code>.</Feature>
+      <Feature icon="database" title="Generated from your schema"><code>typedhouse generate</code> reads your database; <code>typedhouse check</code> catches drift in CI.</Feature>
+      <Feature icon="stream" title="Run or stream">The Node client returns typed rows, streams large results and decodes values exactly.</Feature>
+    </div>
+  </Section>
+
+  <Section spacing="tight" aria-labelledby="guides-title">
+    <GuideList id="guides-title" title="Learn TypedHouse in three small steps." guides={guides}>
+      Each guide builds one query and shows the SQL it compiles to.
+    </GuideList>
+  </Section>
+
+  <Section tone="night" slant="top" aria-labelledby="cta-title">
+    <div class="cta">
+      <SectionHeading id="cta-title" title="Try it without installing anything." align="center">
+        The playground compiles TypeScript to SQL in your browser, with the full type checker.
+      </SectionHeading>
+      <div class="actions center">
+        <Button href={withBase('/playground/')} arrow>Open the playground</Button>
+        <Button href={withBase('/docs/getting-started/')} variant="ghost">Read the docs</Button>
+      </div>
+    </div>
+  </Section>
 </Site>
 
 <style>
-  .home-hero { padding: 6rem 0 5rem; text-align: center; }
-  .home-hero h1 { margin: 0 auto 1.25rem; font-size: clamp(2.75rem, 8vw, 5rem); letter-spacing: -.05em; }
-  .home-tagline { margin: 0 auto; max-width: 32ch; font-size: clamp(1.35rem, 3vw, 1.85rem); line-height: 1.5; color: var(--muted); text-wrap: balance; }
-  .home-hero .actions { justify-content: center; margin: 1.75rem 0 1rem; }
-  .home-example { padding: 4rem 0; text-align: center; }
-  .section-intro p { margin: 0 auto 2.25rem; color: var(--muted); }
-  .code-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); text-align: left; border: 1px solid var(--border); border-radius: .75rem; overflow: hidden; }
-  figure { margin: 0; min-width: 0; background: var(--panel); }
-  figure + figure { border-left: 1px solid var(--border); }
-  figcaption { padding: .75rem 1.25rem; font-size: .8rem; color: var(--muted); border-bottom: 1px solid var(--border); }
-  .code-pair pre { margin: 0; border: 0; border-radius: 0; padding: 1.25rem; font-size: .8rem; background: transparent; }
-  .code-pair pre:focus-visible { outline-offset: -3px; }
-  .parameters { max-width: none; margin: 0; padding: 0 1.25rem 1.25rem; font-size: .75rem; color: var(--muted); }
-  .example-context { margin: 1.25rem auto .5rem; font-size: .85rem; color: var(--muted); }
-  .example-link { font-size: .9rem; }
-  .home-guides { padding: 4rem 0; max-width: 42rem; margin: 0 auto; }
-  .home-guides h2 { text-align: center; }
-  .home-guides ol { margin: 2rem 0 0; padding-left: 1.75rem; }
-  .home-guides li { padding: .75rem 0 .75rem .5rem; }
-  .home-guides li::marker { color: var(--muted); }
-  .home-guides a { font-weight: 600; text-decoration: none; }
-  .home-guides a:hover { text-decoration: underline; }
-  .home-guides li p { margin: .15rem 0 0; color: var(--muted); font-size: .95rem; }
-  @media (max-width: 800px) {
-    .home-hero { padding: 4rem 0; }
-    .home-example, .home-guides { padding: 3rem 0; }
-    .code-pair { grid-template-columns: 1fr; }
-    figure + figure { border-left: 0; border-top: 1px solid var(--border); }
+  .hero { display: flex; flex-wrap: wrap; align-items: center; gap: 3.5rem; }
+  .hero-copy { flex: 1 1 24rem; min-width: 0; }
+  .hero-window { flex: 1 1 28rem; min-width: 0; }
+  .pill {
+    display: inline-block; margin: 0; padding: .4rem 1rem; border-radius: 999px;
+    border: 1px solid rgb(255 255 255 / .1); background: rgb(255 255 255 / .05);
+    font-size: .75rem; font-weight: 500; color: var(--typedhouse-on-night-muted);
   }
+  h1 {
+    margin: 1.1rem 0 0; max-width: none; font-family: var(--typedhouse-font-display); font-weight: 700;
+    font-size: clamp(2.75rem, 6vw, 4.5rem); line-height: 1.04; letter-spacing: -.025em; color: var(--typedhouse-on-night);
+  }
+  .hero-lead { margin: 1.25rem 0 0; max-width: 34rem; font-size: 1.125rem; line-height: 1.6; color: var(--typedhouse-on-night-muted); }
+  .hero-lead span { color: var(--typedhouse-on-night); }
+  .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.75rem; }
+  .actions.center { justify-content: center; }
+  .install { margin: 1.75rem 0 0; font-family: var(--typedhouse-font-mono); font-size: .8125rem; color: #7c6f9b; overflow-wrap: anywhere; }
+  .install code { color: var(--typedhouse-on-night); font-size: inherit; background: none; padding: 0; }
+  .compile-step {
+    margin: 0; max-width: none; padding: .5rem 1.375rem; display: flex; gap: .6rem;
+    border-block: 1px solid rgb(255 255 255 / .07); background: rgb(0 0 0 / .18);
+    font-family: var(--typedhouse-font-mono); font-size: .75rem; color: var(--typedhouse-on-night-muted);
+  }
+  .compile-step span { color: #c7a1f9; }
+  .hero-params { max-width: none; margin: -.5rem 0 0; padding: 0 1.375rem 1.25rem; font-family: var(--typedhouse-font-mono); font-size: .8125rem; color: var(--typedhouse-on-night-muted); overflow-wrap: anywhere; }
+  .hero-params span { color: var(--tk-val); }
+  .value-swatch { color: var(--tk-val); font-weight: 600; }
+  .examples { margin-top: 2rem; }
+  .features { margin-top: 2.75rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 2.75rem 3rem; }
+  .cta { padding-bottom: 1rem; }
 </style>

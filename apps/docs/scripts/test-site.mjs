@@ -29,7 +29,7 @@ for (const route of ['docs/getting-started.md', 'docs/tutorials/composition.md',
   assert.ok(await exists(join(dist, route)), `Missing static output: ${route}`);
 }
 const home = await readFile(join(dist, 'index.html'), 'utf8');
-assert.equal((home.match(/<section\b/g) ?? []).length, 3, 'Homepage should have exactly three sections');
+assert.equal((home.match(/<section\b/g) ?? []).length, 5, 'Homepage should have hero, examples, features, guides and closing sections');
 assert.ok(!home.includes('<astro-island') && !home.includes('/Playground.'), 'Homepage must not load the editor');
 assert.ok(!home.includes('pagefind-ui'), 'Homepage must not load a search widget');
 assert.match(home, /Generated SQL/);
@@ -40,10 +40,16 @@ assert.match(home, /https:\/\/github\.com\/fhur\/typedhouse/);
 assert.match(await readFile(join(dist, 'llms.txt'), 'utf8'), /^# TypedHouse\n/);
 assert.match(await readFile(join(dist, 'blog/rss.xml'), 'utf8'), /<title>TypedHouse engineering notes<\/title>/);
 assert.match(await readFile(join(dist, 'docs/getting-started.md'), 'utf8'), /@typedhouse\/core/);
-const share = home.match(/#v1=([A-Za-z0-9_-]+)/);
-assert.ok(share, 'Homepage example needs an editable playground link');
-const sharedSource = gunzipSync(Buffer.from(share[1], 'base64url')).toString('utf8');
-assert.equal(sharedSource, await readFile(new URL('../src/examples/homepage.ts', import.meta.url), 'utf8'), 'Playground must receive the exact homepage example');
+const exampleDir = new URL('../src/examples/home/', import.meta.url);
+const exampleSources = await Promise.all((await readdir(exampleDir)).filter(name => name !== 'index.ts').map(name => readFile(new URL(name, exampleDir), 'utf8')));
+const shared = [...new Set([...home.matchAll(/#v1=([A-Za-z0-9_-]+)/g)].map(match => match[1]))];
+assert.equal(shared.length, exampleSources.length, 'Every homepage example needs an editable playground link');
+for (const encoded of shared) {
+  const source = gunzipSync(Buffer.from(encoded, 'base64url')).toString('utf8');
+  assert.ok(exampleSources.includes(source), 'Playground links must receive the exact homepage example source');
+}
+for (const id of ['filter', 'compose', 'aggregate', 'join']) assert.match(home, new RegExp(`role="tabpanel"[^>]*id="[^"]*-panel-${id}"`), `Missing homepage example panel: ${id}`);
+assert.match(home, /\{p0:String\}/, 'Homepage examples must show parameterized SQL');
 const markdown = await readFile(join(dist, 'docs/getting-started.md'), 'utf8');
 assert.match(markdown, /import\s*\{\s*col,\s*table,\s*from,?\s*\}/);
 assert.match(markdown, /SELECT/);

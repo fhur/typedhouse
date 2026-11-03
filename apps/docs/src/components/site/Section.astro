@@ -1,0 +1,37 @@
+---
+/**
+ * A full-bleed band with a centered content column.
+ * `tone="night"` makes the band dark in every color mode; `slant` draws the angled edge
+ * that blends it into the paper background above or below.
+ */
+import type { HTMLAttributes } from 'astro/types';
+interface Props extends HTMLAttributes<'section'> {
+  tone?: 'paper' | 'night';
+  slant?: 'top' | 'bottom' | 'none';
+  spacing?: 'normal' | 'tight' | 'hero';
+}
+const { tone = 'paper', slant = 'none', spacing = 'normal', class: className, ...attrs } = Astro.props;
+---
+<section class:list={['band', tone, `spacing-${spacing}`, slant !== 'none' && `slant-${slant}`, { 'on-night': tone === 'night' }, className]} {...attrs}>
+  <div class="band-inner"><slot /></div>
+</section>
+
+<style>
+  .band { position: relative; }
+  .night { background: var(--typedhouse-night); }
+  .band-inner { position: relative; z-index: 1; max-width: var(--typedhouse-content-width); margin: 0 auto; padding: 4.5rem 1.5rem; }
+  .spacing-tight .band-inner { padding-block: 1.5rem 4.5rem; }
+  .spacing-hero .band-inner { padding-block: 3.5rem 6rem; }
+  .slant-bottom::after, .slant-top::before {
+    content: ''; position: absolute; left: 0; right: 0; height: 48px; background: var(--typedhouse-bg);
+  }
+  .slant-bottom::after { bottom: -1px; clip-path: polygon(0 100%, 100% 0, 100% 100%); }
+  .slant-top::before { top: -1px; clip-path: polygon(0 0, 100% 0, 0 100%); }
+  .slant-top .band-inner { padding-top: 7.5rem; }
+  @media (max-width: 720px) {
+    .band-inner { padding-block: 3rem; }
+    .spacing-hero .band-inner { padding-block: 2.5rem 4.5rem; }
+    .slant-bottom::after, .slant-top::before { height: 24px; }
+    .slant-top .band-inner { padding-top: 4.5rem; }
+  }
+</style>

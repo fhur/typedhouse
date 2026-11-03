@@ -6,13 +6,12 @@ const events = table(
   { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] },
 );
 
-const base = from(events)
+// #region example
+// A shared base query, reused by every report
+const acme = from(events)
   .where(e => e.tenant.eq('acme'));
-const query = base
-  .where(e =>
-    e.category.eq('purchase'))
-  .map(e => ({ id: e.id }))
-  .orderBy(e => e.id)
-  .limit(10);
 
-export default query;
+export default acme
+  .where(e => e.category.eq('purchase'))
+  .map(e => ({ id: e.id }));
+// #endregion

@@ -1,0 +1,35 @@
+---
+/**
+ * A link styled as a button.
+ * - primary: filled brand color (works on paper and night)
+ * - secondary: hairline outline on paper
+ * - ghost: hairline outline on night surfaces
+ */
+interface Props {
+  href: string;
+  variant?: 'primary' | 'secondary' | 'ghost';
+  size?: 'md' | 'sm';
+  arrow?: boolean;
+}
+const { href, variant = 'primary', size = 'md', arrow = false } = Astro.props;
+---
+<a class:list={['button', variant, size]} href={href}><slot />{arrow && <span class="arrow" aria-hidden="true">→</span>}</a>
+
+<style>
+  .button {
+    display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+    min-height: 44px; padding: 0 1.4rem; border-radius: var(--typedhouse-radius); border: 1px solid transparent;
+    font-family: var(--typedhouse-font-sans); font-size: .875rem; font-weight: 500; line-height: 1;
+    text-decoration: none; white-space: nowrap; transition: background-color .15s, border-color .15s, color .15s;
+  }
+  .button:hover { text-decoration: none; }
+  .sm { min-height: 34px; padding: 0 .9rem; }
+  .primary { background: var(--typedhouse-primary); color: var(--typedhouse-on-primary); }
+  .primary:hover { background: var(--typedhouse-primary-hover); color: var(--typedhouse-on-primary); }
+  .secondary { border-color: var(--typedhouse-border-strong); color: var(--typedhouse-text); background: var(--typedhouse-surface); }
+  .secondary:hover { border-color: var(--typedhouse-text); color: var(--typedhouse-text); }
+  .ghost { border-color: rgb(255 255 255 / .15); color: var(--typedhouse-on-night); }
+  .ghost:hover { background: rgb(255 255 255 / .05); color: var(--typedhouse-on-night); }
+  .arrow { transition: transform .15s; }
+  .button:hover .arrow { transform: translateX(2px); }
+</style>

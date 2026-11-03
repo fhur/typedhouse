@@ -1,0 +1,43 @@
+---
+/** A titled card with a numbered list of guides. */
+import { withBase } from '../../lib/urls';
+interface Guide { title: string; description: string; path: string }
+interface Props { id: string; title: string; guides: readonly Guide[] }
+const { id, title, guides } = Astro.props;
+const hasIntro = Astro.slots.has('default');
+---
+<div class="guide-list">
+  <div class="intro">
+    <h2 id={id}>{title}</h2>
+    {hasIntro && <p><slot /></p>}
+  </div>
+  <ol>
+    {guides.map((guide, index) => (
+      <li>
+        <span class="number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+        <div>
+          <a href={withBase(guide.path)}>{guide.title} <span aria-hidden="true">→</span></a>
+          <p>{guide.description}</p>
+        </div>
+      </li>
+    ))}
+  </ol>
+</div>
+
+<style>
+  .guide-list {
+    display: flex; flex-wrap: wrap; overflow: hidden;
+    border: 1px solid var(--typedhouse-border); border-radius: var(--typedhouse-radius-card); background: var(--typedhouse-surface);
+  }
+  .intro { flex: 1 1 18rem; padding: 2.5rem; background: var(--typedhouse-surface-muted); }
+  h2 { margin: 0; font-family: var(--typedhouse-font-display); font-weight: 700; font-size: 2rem; line-height: 1.15; letter-spacing: -.02em; }
+  .intro p { margin: .75rem 0 0; font-size: .9375rem; line-height: 1.6; color: var(--typedhouse-muted); }
+  ol { flex: 2 1 26rem; margin: 0; padding: 1rem 2.5rem; list-style: none; }
+  li { display: flex; gap: 1.25rem; align-items: baseline; padding: 1.25rem 0; }
+  li + li { border-top: 1px solid var(--typedhouse-border); }
+  .number { font-family: var(--typedhouse-font-mono); font-size: .8125rem; color: var(--typedhouse-icon); }
+  a { font-size: 1.0625rem; font-weight: 600; color: var(--typedhouse-text); text-decoration: none; }
+  a:hover { text-decoration: underline; color: var(--typedhouse-text); }
+  li p { margin: .25rem 0 0; font-size: .9rem; color: var(--typedhouse-muted); }
+  @media (max-width: 720px) { .intro, ol { padding-inline: 1.5rem; } }
+</style>

@@ -1,0 +1,72 @@
+---
+/**
+ * TypeScript on one side, the SQL it compiles to on the other (react.dev-style code → preview).
+ * Everything comes from `compileExample()`, so the SQL, params and row type are real compiler output.
+ * `layout="split"` sits side by side when there is room; `layout="stacked"` always stacks (docs columns).
+ */
+import Code from './Code.astro';
+import type { CompiledExample } from '../../lib/examples';
+interface Props { example: CompiledExample; layout?: 'split' | 'stacked'; showNote?: boolean }
+const { example, layout = 'split', showNote = true } = Astro.props;
+---
+<figure class:list={['compile-example', layout]} aria-label={`${example.label}: TypeScript and generated SQL`}>
+  <div class="pane source">
+    <div class="pane-bar">
+      <span class="file-tab">{example.filename}</span>
+    </div>
+    <Code code={example.snippet} lang="ts" label={`${example.filename} source`} />
+  </div>
+  <div class="pane output">
+    <div class="pane-bar">
+      <span class="output-title">Generated SQL</span>
+      <a class="playground-link" href={example.playgroundHref}>Open in playground <span aria-hidden="true">↗</span></a>
+    </div>
+    <Code class="sql" code={example.sql} lang="sql" label={`${example.label} generated SQL`} />
+    <dl class="facts">
+      <dt>Params</dt>
+      <dd><Code class="inline" code={example.params} lang="json" label={`${example.label} parameters`} /></dd>
+      {example.rowType && <dt>Row type</dt>}
+      {example.rowType && <dd><Code class="inline" code={example.rowType} lang="ts" label={`${example.label} row type`} /></dd>}
+    </dl>
+  </div>
+</figure>
+{showNote && example.note && (
+  <p class="example-note">{example.lead && <strong>{example.lead}</strong>} {example.note}</p>
+)}
+
+<style>
+  .compile-example {
+    /* The 1px gap over a border-colored background draws the divider whether panes sit side by side or wrap. */
+    margin: 0; display: flex; flex-wrap: wrap; gap: 1px; overflow: hidden; text-align: left;
+    border: 1px solid var(--typedhouse-border); border-radius: var(--typedhouse-radius-card);
+    background: var(--typedhouse-border); box-shadow: var(--typedhouse-shadow-card);
+  }
+  .pane { min-width: 0; display: flex; flex-direction: column; }
+  .split .source { flex: 1 1 26rem; }
+  .split .output { flex: 1 1 24rem; }
+  .stacked .pane { flex: 1 1 100%; }
+  .source { background: var(--typedhouse-surface); }
+  .output { background: var(--typedhouse-surface-sunken); }
+  .pane-bar {
+    display: flex; align-items: stretch; justify-content: space-between; gap: 1rem;
+    min-height: 44px; padding: 0 1rem; border-bottom: 1px solid var(--typedhouse-border);
+  }
+  .source .pane-bar { background: var(--typedhouse-surface-sunken); }
+  .file-tab {
+    display: flex; align-items: center; padding: 0 .25rem; border-bottom: 2px solid var(--typedhouse-accent); margin-bottom: -1px;
+    font-family: var(--typedhouse-font-mono); font-size: .8125rem; font-weight: 500; color: var(--typedhouse-text);
+  }
+  .output-title { display: flex; align-items: center; font-family: var(--typedhouse-font-mono); font-size: .8125rem; font-weight: 500; color: var(--typedhouse-muted); }
+  .playground-link { display: flex; align-items: center; gap: .3rem; font-size: .8125rem; font-weight: 500; color: var(--typedhouse-link); text-decoration: none; white-space: nowrap; }
+  .playground-link:hover { color: var(--typedhouse-link-hover); text-decoration: underline; }
+  .output :global(.sql) { flex: 1; }
+  .facts {
+    margin: 0; padding: .85rem 1.375rem 1.1rem; border-top: 1px solid var(--typedhouse-border);
+    display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .35rem 1rem; align-items: baseline; font-size: .8125rem;
+  }
+  dt { color: var(--typedhouse-muted); }
+  dd { margin: 0; min-width: 0; }
+  .facts :global(.inline) { padding: 0; font-size: .8125rem; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .example-note { margin: 1rem 0 0; max-width: 46rem; font-size: .9375rem; line-height: 1.6; color: var(--typedhouse-muted); }
+  .example-note strong { color: var(--typedhouse-text); font-weight: 600; }
+</style>

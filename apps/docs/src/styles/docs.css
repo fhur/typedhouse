@@ -1,29 +1,91 @@
 @import './tokens.css';
 
+/*
+ * Starlight theme. Starlight's own variables are mapped onto our semantic tokens, which already
+ * switch between light and dark, so one mapping serves both modes.
+ * Starlight's scale is semantic: --sl-color-white is the strongest text and --sl-color-black the page.
+ */
 :root,
 :root[data-theme='light'],
 :root[data-theme='dark'] {
   --sl-font: var(--typedhouse-font-sans);
   --sl-font-mono: var(--typedhouse-font-mono);
-  --sl-color-bg: var(--typedhouse-bg);
-  --sl-color-bg-nav: var(--typedhouse-surface);
+  --sl-color-bg: var(--typedhouse-surface);
+  --sl-color-bg-nav: var(--typedhouse-night);
   --sl-color-bg-sidebar: var(--typedhouse-bg);
+  --sl-color-bg-inline-code: var(--typedhouse-surface-muted);
   --sl-color-hairline-light: var(--typedhouse-border);
   --sl-color-hairline: var(--typedhouse-border);
-  --sl-color-text: var(--typedhouse-text);
-  --sl-color-text-accent: var(--typedhouse-text);
-  --sl-color-accent-low: var(--typedhouse-surface-muted);
-  --sl-color-accent: var(--typedhouse-text);
-  --sl-color-accent-high: var(--typedhouse-text);
+  --sl-color-hairline-shade: var(--typedhouse-border-strong);
+  --sl-color-text: var(--typedhouse-text-body);
+  --sl-color-text-accent: var(--typedhouse-link);
+  --sl-color-white: var(--typedhouse-text);
+  --sl-color-gray-1: var(--typedhouse-text);
+  --sl-color-gray-2: var(--typedhouse-text-body);
+  --sl-color-gray-3: var(--typedhouse-muted);
+  --sl-color-gray-4: var(--typedhouse-muted);
+  --sl-color-gray-5: var(--typedhouse-border-strong);
+  --sl-color-gray-6: var(--typedhouse-surface-muted);
+  --sl-color-gray-7: var(--typedhouse-surface-sunken);
+  --sl-color-black: var(--typedhouse-surface);
+  --sl-color-accent-low: var(--typedhouse-accent-soft);
+  --sl-color-accent: var(--typedhouse-primary);
+  --sl-color-accent-high: var(--typedhouse-link-hover);
 }
-:focus-visible { outline: 2px solid var(--typedhouse-accent); outline-offset: 4px; }
+
+/* The docs header is a night surface in every mode, like the site header. */
+header.header {
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: var(--typedhouse-on-night);
+  --sl-color-gray-2: #d5cfe3;
+  --sl-color-gray-3: var(--typedhouse-on-night-muted);
+  --sl-color-gray-4: #6b5d8a;
+  --sl-color-gray-5: #3a3150;
+  --sl-color-gray-6: var(--typedhouse-night-alt);
+  --sl-color-black: var(--typedhouse-night);
+  --sl-color-text: var(--typedhouse-on-night-muted);
+  --sl-color-text-accent: var(--typedhouse-on-night);
+  --sl-color-hairline-shade: var(--typedhouse-night-border);
+  --sl-color-accent-low: #2f2740;
+  --sl-color-accent-high: var(--typedhouse-on-night);
+  border-bottom-color: var(--typedhouse-night);
+  color-scheme: dark;
+}
+.site-title { font-family: var(--typedhouse-font-display); font-weight: 700; font-size: 1.2rem; letter-spacing: -.01em; gap: .6rem; }
+.site-title img { height: 28px; width: auto; }
+
+/* Sidebar: paper background, lavender selection. */
+.sidebar-content a { border-radius: 6px; color: var(--typedhouse-muted); }
+.sidebar-content a:hover { color: var(--typedhouse-text); }
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+  background: var(--typedhouse-surface-selected); color: var(--typedhouse-text); font-weight: 600;
+}
+.sidebar-content .group-label .large { font-family: var(--typedhouse-font-sans); font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--typedhouse-muted); }
+
+/* Content typography. */
 .sl-markdown-content { line-height: 1.75; }
-.sl-markdown-content :is(h1, h2, h3) { letter-spacing: -.025em; }
-.sl-markdown-content pre { border-radius: .25rem; }
-.markdown-actions a { color: var(--typedhouse-text); text-underline-offset: .2em; }
-.markdown-actions button { background: var(--typedhouse-surface); border-color: var(--typedhouse-border); border-radius: .25rem; }
+h1#_top, .sl-markdown-content :is(h1, h2, h3) { font-family: var(--typedhouse-font-display); font-weight: 700; letter-spacing: -.02em; color: var(--typedhouse-text); }
+.sl-markdown-content a { color: var(--typedhouse-link); text-underline-offset: .2em; }
+.sl-markdown-content a:hover { color: var(--typedhouse-link-hover); }
+.sl-markdown-content :not(pre) > code { border-radius: 4px; padding: .1em .35em; }
+.sl-markdown-content blockquote { border: 1px solid var(--typedhouse-border-strong); background: var(--typedhouse-accent-soft); border-radius: 12px; padding: 1rem 1.25rem; color: var(--typedhouse-text-body); }
+.sl-markdown-content details { border: 1px solid var(--typedhouse-border); border-radius: 12px; padding: .6rem 1rem; }
+.sl-markdown-content details summary { cursor: pointer; font-weight: 500; }
+
+/* Code blocks: match the homepage compile examples. */
+.expressive-code .frame { border-radius: 14px !important; box-shadow: var(--typedhouse-shadow-card) !important; }
+.expressive-code .frame pre { border-color: var(--typedhouse-border) !important; }
+
+/* Pagination and markdown actions. */
+.pagination-links a { border-radius: 12px; border-color: var(--typedhouse-border); box-shadow: none; }
+.pagination-links a:hover { border-color: var(--typedhouse-border-strong); }
+.markdown-actions a { color: var(--typedhouse-link); text-underline-offset: .2em; }
+.markdown-actions button { background: var(--typedhouse-surface); border-color: var(--typedhouse-border-strong); border-radius: 6px; }
 .markdown-actions button:hover { border-color: var(--typedhouse-text); }
-.expressive-code pre { background: var(--typedhouse-surface) !important; }
+
+:focus-visible { outline: 2px solid var(--typedhouse-accent); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }

@@ -1,44 +1,131 @@
+/*
+ * Design tokens. Every component reads these; nothing else hard-codes colors.
+ * Light is the default; dark applies via [data-theme='dark'] or the system preference.
+ * "Night" tokens are mode-independent: the hero, header and code windows stay dark.
+ */
 :root {
-  --typedhouse-bg: #ffffff;
+  /* Night (always dark) */
+  --typedhouse-night: #1a1525;
+  --typedhouse-night-alt: #251e33;
+  --typedhouse-on-night: #f1eff5;
+  --typedhouse-on-night-muted: #9d93b3;
+  --typedhouse-night-border: rgb(255 255 255 / .1);
+
+  /* Page */
+  --typedhouse-bg: #f9f8fb;
   --typedhouse-surface: #ffffff;
-  --typedhouse-surface-muted: #f5f5f5;
-  --typedhouse-text: #111111;
-  --typedhouse-muted: #666666;
-  --typedhouse-border: #dedede;
-  --typedhouse-accent: #2457ed;
-  --typedhouse-accent-soft: #f0f3ff;
-  --typedhouse-on-accent: #ffffff;
-  --typedhouse-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --typedhouse-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  --typedhouse-surface-sunken: #fbfafd;
+  --typedhouse-surface-muted: #f1eff5;
+  --typedhouse-surface-selected: #eae8f2;
+  --typedhouse-text: #1a1525;
+  --typedhouse-text-body: #2e2640;
+  --typedhouse-muted: #52486a;
+  --typedhouse-border: #e8e4f0;
+  --typedhouse-border-strong: #d5cfe3;
+
+  /* Brand */
+  --typedhouse-primary: #7c6f9b;
+  --typedhouse-primary-hover: #6b5d8a;
+  --typedhouse-on-primary: #ffffff;
+  --typedhouse-icon: #6b5d8a;
+  --typedhouse-link: #7b68bf;
+  --typedhouse-link-hover: #574d7e;
+  --typedhouse-accent: var(--typedhouse-primary);
+  --typedhouse-accent-soft: #f3f1f8;
+  --typedhouse-on-accent: var(--typedhouse-on-primary);
+  --typedhouse-badge: #ffd236;
+  --typedhouse-on-badge: #461901;
+
+  /* Syntax: values (JS literals and SQL parameters) share one color on purpose */
+  --tk-plain: #1a1525;
+  --tk-kw: #6d3fc0;
+  --tk-fn: #1b62b5;
+  --tk-val: #a8530a;
+  --tk-num: #52486a;
+  --tk-punct: #6b6280;
+  --tk-comment: #6b6280;
+
+  --typedhouse-shadow-card: 0 1px 2px rgb(26 21 37 / .04), 0 12px 32px -16px rgb(26 21 37 / .14);
+  --typedhouse-radius: 8px;
+  --typedhouse-radius-card: 16px;
+  --typedhouse-content-width: 1152px;
+
+  --typedhouse-font-display: 'Bricolage Grotesque', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --typedhouse-font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --typedhouse-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --typedhouse-bg: #090909;
-    --typedhouse-surface: #101010;
-    --typedhouse-surface-muted: #181818;
-    --typedhouse-text: #f5f5f5;
-    --typedhouse-muted: #a3a3a3;
-    --typedhouse-border: #303030;
-    --typedhouse-accent: #87a5ff;
-    --typedhouse-accent-soft: #161c2d;
-    --typedhouse-on-accent: #090909;
+    --typedhouse-bg: #141019;
+    --typedhouse-surface: #1d1728;
+    --typedhouse-surface-sunken: #19141f;
+    --typedhouse-surface-muted: #251e33;
+    --typedhouse-surface-selected: #2f2740;
+    --typedhouse-text: #f1eff5;
+    --typedhouse-text-body: #dcd7e6;
+    --typedhouse-muted: #a79fbb;
+    --typedhouse-border: #2f2740;
+    --typedhouse-border-strong: #463e5c;
+    --typedhouse-icon: #a599c4;
+    --typedhouse-link: #b9adde;
+    --typedhouse-link-hover: #d5cfe3;
+    --typedhouse-accent: #a599c4;
+    --typedhouse-accent-soft: #221b2e;
+    --typedhouse-on-accent: #1a1525;
+    --tk-plain: #f1eff5;
+    --tk-kw: #c7a1f9;
+    --tk-fn: #8fd8f0;
+    --tk-val: #faca60;
+    --tk-num: #b5b9d8;
+    --tk-punct: #9d93b3;
+    --tk-comment: #9d93b3;
+    --typedhouse-shadow-card: 0 12px 32px -16px rgb(0 0 0 / .6);
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --typedhouse-bg: #090909;
-  --typedhouse-surface: #101010;
-  --typedhouse-surface-muted: #181818;
-  --typedhouse-text: #f5f5f5;
-  --typedhouse-muted: #a3a3a3;
-  --typedhouse-border: #303030;
-  --typedhouse-accent: #87a5ff;
-  --typedhouse-accent-soft: #161c2d;
-  --typedhouse-on-accent: #090909;
+  --typedhouse-bg: #141019;
+  --typedhouse-surface: #1d1728;
+  --typedhouse-surface-sunken: #19141f;
+  --typedhouse-surface-muted: #251e33;
+  --typedhouse-surface-selected: #2f2740;
+  --typedhouse-text: #f1eff5;
+  --typedhouse-text-body: #dcd7e6;
+  --typedhouse-muted: #a79fbb;
+  --typedhouse-border: #2f2740;
+  --typedhouse-border-strong: #463e5c;
+  --typedhouse-icon: #a599c4;
+  --typedhouse-link: #b9adde;
+  --typedhouse-link-hover: #d5cfe3;
+  --typedhouse-accent: #a599c4;
+  --typedhouse-accent-soft: #221b2e;
+  --typedhouse-on-accent: #1a1525;
+  --tk-plain: #f1eff5;
+  --tk-kw: #c7a1f9;
+  --tk-fn: #8fd8f0;
+  --tk-val: #faca60;
+  --tk-num: #b5b9d8;
+  --tk-punct: #9d93b3;
+  --tk-comment: #9d93b3;
+  --typedhouse-shadow-card: 0 12px 32px -16px rgb(0 0 0 / .6);
   color-scheme: dark;
 }
 
 :root[data-theme='light'] { color-scheme: light; }
+
+/* Anything on a night surface uses the dark syntax palette regardless of mode. */
+.on-night {
+  --tk-plain: #f1eff5;
+  --tk-kw: #c7a1f9;
+  --tk-fn: #8fd8f0;
+  --tk-val: #faca60;
+  --tk-num: #b5b9d8;
+  --tk-punct: #9d93b3;
+  --tk-comment: #9d93b3;
+  --typedhouse-link: #c7bce6;
+  --typedhouse-link-hover: #f1eff5;
+  color: var(--typedhouse-on-night);
+}

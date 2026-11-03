@@ -1,15 +1,20 @@
 ---
 import '../styles/site.css';
 import GoogleAnalytics from '../components/GoogleAnalytics.astro';
-import { withBase, withoutBase } from '../lib/urls';
-interface Props { title: string; description: string; fullPage?: boolean }
-const { title, description, fullPage = false } = Astro.props;
+import Fonts from '../components/site/Fonts.astro';
+import SiteHeader from '../components/site/SiteHeader.astro';
+import SiteFooter from '../components/site/SiteFooter.astro';
+import { withBase } from '../lib/urls';
+interface Props {
+  title: string;
+  description: string;
+  /** Viewport-filling workbench (playground): compact header, no footer. */
+  fullPage?: boolean;
+  /** Full-bleed pages build their own bands with <Section>; others get a centered content column. */
+  bleed?: boolean;
+}
+const { title, description, fullPage = false, bleed = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
-const pathname = withoutBase(Astro.url.pathname);
-const links = [
-  { href: '/docs/getting-started/', label: 'Guides', prefix: '/docs/' },
-  { href: '/playground/', label: 'Playground', prefix: '/playground/' },
-];
 ---
 <!doctype html>
 <html lang="en">
@@ -25,6 +30,7 @@ const links = [
     <meta property="og:url" content={canonical} />
     <link rel="canonical" href={canonical} />
     <link rel="alternate" type="application/rss+xml" title="TypedHouse blog" href={withBase('/blog/rss.xml')} />
+    <Fonts />
     <title>{title} · TypedHouse</title>
     <script is:inline>
       // Match Starlight's preference key and empty-string System convention.
@@ -39,45 +45,9 @@ const links = [
   </head>
   <body class:list={{ 'workbench-page': fullPage }}>
     <a class="skip" href="#main">Skip to content</a>
-    <header class="site-header">
-      <a class="wordmark" href={withBase('/')} aria-current={pathname === '/' ? 'page' : undefined}>TypedHouse</a>
-      <div class="header-tools">
-        <nav aria-label="Main">
-          {links.map(({ href, label, prefix }) => <a href={withBase(href)} aria-current={pathname.startsWith(prefix) ? 'page' : undefined}>{label}</a>)}
-          <a href="https://github.com/fhur/typedhouse">GitHub</a>
-        </nav>
-        <label class="theme-picker"><span class="visually-hidden">Theme</span>
-          <select id="site-theme" aria-label="Color theme">
-            <option value="auto">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </label>
-      </div>
-    </header>
-    <main id="main"><slot /></main>
-    {!fullPage && <footer><strong>TypedHouse</strong><nav aria-label="Footer"><a href={withBase('/blog/')}>Blog</a><a href={withBase('/llms.txt')}>For agents</a><a href="https://github.com/fhur/typedhouse">GitHub</a></nav></footer>}
-    <script>
-      const picker = document.querySelector<HTMLSelectElement>('#site-theme');
-      const systemTheme = matchMedia('(prefers-color-scheme: dark)');
-      let preference = 'auto';
-      const applyTheme = (value: string | null) => {
-        preference = value === 'light' || value === 'dark' ? value : 'auto';
-        document.documentElement.dataset.theme = preference === 'auto'
-          ? (systemTheme.matches ? 'dark' : 'light') : preference;
-        if (picker) picker.value = preference;
-      };
-      systemTheme.addEventListener('change', () => {
-        if (preference === 'auto') applyTheme('auto');
-      });
-      try { applyTheme(localStorage.getItem('starlight-theme')); } catch { applyTheme(null); }
-      picker?.addEventListener('change', () => {
-        applyTheme(picker.value);
-        try { localStorage.setItem('starlight-theme', picker.value === 'auto' ? '' : picker.value); } catch { /* In-memory selection still works. */ }
-      });
-      window.addEventListener('storage', (event) => {
-        if (event.key === 'starlight-theme' || event.key === null) applyTheme(event.newValue);
-      });
-    </script>
+    <slot name="before-header" />
+    <SiteHeader compact={fullPage} />
+    <main id="main" class:list={{ contained: !bleed && !fullPage }}><slot /></main>
+    {!fullPage && <SiteFooter />}
   </body>
 </html>

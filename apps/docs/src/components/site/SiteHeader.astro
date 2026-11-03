@@ -1,0 +1,79 @@
+---
+import Logo from './Logo.astro';
+import Button from './Button.astro';
+import { withBase, withoutBase } from '../../lib/urls';
+interface Props { compact?: boolean }
+const { compact = false } = Astro.props;
+const pathname = withoutBase(Astro.url.pathname);
+const links = [
+  { href: '/docs/getting-started/', label: 'Docs', prefix: '/docs/' },
+  { href: '/playground/', label: 'Playground', prefix: '/playground/' },
+  { href: '/blog/', label: 'Blog', prefix: '/blog/' },
+];
+---
+<header class:list={['site-header', 'on-night', { compact }]}>
+  <div class="inner">
+    <Logo current={pathname === '/'} />
+    <nav aria-label="Main">
+      {links.map(({ href, label, prefix }) => (
+        <a href={withBase(href)} aria-current={pathname.startsWith(prefix) ? 'page' : undefined}>{label}</a>
+      ))}
+      <a href="https://github.com/fhur/typedhouse">GitHub</a>
+    </nav>
+    <div class="tools">
+      <label class="theme-picker">
+        <span class="visually-hidden">Theme</span>
+        <select id="site-theme" aria-label="Color theme">
+          <option value="auto">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      {!compact && <Button href={withBase('/docs/getting-started/')} size="sm">Get started</Button>}
+    </div>
+  </div>
+</header>
+
+<script>
+  const picker = document.querySelector<HTMLSelectElement>('#site-theme');
+  const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+  let preference = 'auto';
+  const applyTheme = (value: string | null) => {
+    preference = value === 'light' || value === 'dark' ? value : 'auto';
+    document.documentElement.dataset.theme = preference === 'auto'
+      ? (systemTheme.matches ? 'dark' : 'light') : preference;
+    if (picker) picker.value = preference;
+  };
+  systemTheme.addEventListener('change', () => {
+    if (preference === 'auto') applyTheme('auto');
+  });
+  try { applyTheme(localStorage.getItem('starlight-theme')); } catch { applyTheme(null); }
+  picker?.addEventListener('change', () => {
+    applyTheme(picker.value);
+    try { localStorage.setItem('starlight-theme', picker.value === 'auto' ? '' : picker.value); } catch { /* In-memory selection still works. */ }
+  });
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'starlight-theme' || event.key === null) applyTheme(event.newValue);
+  });
+</script>
+
+<style>
+  .site-header { position: sticky; top: 0; z-index: 20; background: var(--typedhouse-night); }
+  .inner {
+    max-width: var(--typedhouse-content-width); margin: 0 auto; padding: .75rem 1.5rem;
+    display: flex; align-items: center; gap: 1rem 2rem; flex-wrap: wrap;
+  }
+  .compact .inner { max-width: none; padding: .5rem 1.25rem; }
+  nav { margin-left: auto; display: flex; align-items: center; gap: .5rem 1.75rem; flex-wrap: wrap; font-size: .9375rem; font-weight: 500; }
+  nav a { color: var(--typedhouse-on-night-muted); text-decoration: none; padding: .35rem 0; }
+  nav a:hover, nav a[aria-current='page'] { color: var(--typedhouse-on-night); text-decoration: none; }
+  .tools { display: flex; align-items: center; gap: 1rem; }
+  .theme-picker select {
+    font: inherit; font-size: .8125rem; color: var(--typedhouse-on-night); background: var(--typedhouse-night-alt);
+    border: 1px solid var(--typedhouse-night-border); border-radius: 6px; padding: .35rem .5rem; min-height: 34px;
+  }
+  @media (max-width: 720px) {
+    nav { margin-left: 0; order: 3; width: 100%; gap: .5rem 1.25rem; }
+    .tools { margin-left: auto; }
+  }
+</style>

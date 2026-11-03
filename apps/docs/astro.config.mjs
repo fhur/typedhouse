@@ -3,6 +3,7 @@ import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 import { unified } from '@astrojs/markdown-remark';
 import rehypeBaseLinks from './scripts/rehype-base-links.mjs';
+import { typedhouseDark, typedhouseLight } from './src/styles/code-themes.mjs';
 
 const base = process.env.BASE_PATH || '/';
 
@@ -17,7 +18,9 @@ export default defineConfig({
     starlight({
       title: 'TypedHouse',
       description: 'TypedHouse is a type-safe ClickHouse query builder for TypeScript. Compose reusable queries and inspect the SQL you run.',
+      logo: { src: './src/assets/logo.svg', alt: '' },
       customCss: ['./src/styles/docs.css'],
+      expressiveCode: { themes: [typedhouseDark, typedhouseLight], useStarlightUiThemeColors: true },
       components: { Head: './src/components/Head.astro', PageTitle: './src/components/DocTitle.astro' },
       sidebar: [
         {

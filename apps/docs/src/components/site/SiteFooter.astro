@@ -1,0 +1,52 @@
+---
+import { withBase } from '../../lib/urls';
+const columns = [
+  { title: 'Learn', links: [
+    { label: 'Getting started', href: withBase('/docs/getting-started/') },
+    { label: 'Query builder', href: withBase('/docs/query-builder/overview/') },
+    { label: 'Functions', href: withBase('/docs/functions/count/') },
+  ] },
+  { title: 'Tools', links: [
+    { label: 'Playground', href: withBase('/playground/') },
+    { label: 'Simplifying compiler', href: withBase('/docs/compiler/overview/') },
+    { label: 'For agents', href: withBase('/llms.txt') },
+  ] },
+  { title: 'Project', links: [
+    { label: 'Blog', href: withBase('/blog/') },
+    { label: 'GitHub', href: 'https://github.com/fhur/typedhouse' },
+    { label: 'npm', href: 'https://www.npmjs.com/package/@typedhouse/core' },
+  ] },
+];
+---
+<footer class="site-footer on-night">
+  <div class="inner">
+    <div class="about">
+      <strong>TypedHouse</strong>
+      <p>Type-safe ClickHouse query builder for TypeScript. MIT licensed.</p>
+    </div>
+    <nav aria-label="Footer">
+      {columns.map(column => (
+        <div class="column">
+          <span class="title">{column.title}</span>
+          {column.links.map(link => <a href={link.href}>{link.label}</a>)}
+        </div>
+      ))}
+    </nav>
+  </div>
+</footer>
+
+<style>
+  .site-footer { background: var(--typedhouse-night); }
+  .inner {
+    max-width: var(--typedhouse-content-width); margin: 0 auto; padding: 2.5rem 1.5rem 3rem;
+    border-top: 1px solid rgb(255 255 255 / .08); display: flex; flex-wrap: wrap; gap: 2.5rem; justify-content: space-between;
+  }
+  .about { flex: 1 1 240px; }
+  strong { font-family: var(--typedhouse-font-display); font-weight: 700; font-size: 1.125rem; color: var(--typedhouse-on-night); }
+  p { margin: .5rem 0 0; max-width: 22rem; font-size: .84rem; line-height: 1.6; color: var(--typedhouse-on-night-muted); }
+  nav { display: flex; flex-wrap: wrap; gap: 3.5rem; font-size: .875rem; }
+  .column { display: flex; flex-direction: column; gap: .6rem; }
+  .title { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--typedhouse-on-night); }
+  a { color: var(--typedhouse-on-night-muted); text-decoration: none; }
+  a:hover { color: var(--typedhouse-on-night); text-decoration: none; }
+</style>

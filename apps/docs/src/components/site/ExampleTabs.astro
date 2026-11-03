@@ -1,0 +1,74 @@
+---
+/**
+ * Pill tabs that switch between several CompileExamples (WAI-ARIA tabs pattern).
+ * Without JavaScript every example is shown in sequence.
+ */
+import CompileExample from './CompileExample.astro';
+import type { CompiledExample } from '../../lib/examples';
+interface Props { examples: readonly CompiledExample[]; label: string; initial?: string }
+const { examples, label, initial = examples[0]?.id } = Astro.props;
+const uid = `tabs-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+---
+<div class="example-tabs" data-example-tabs>
+  <div class="tablist" role="tablist" aria-label={label}>
+    {examples.map(example => (
+      <button
+        type="button"
+        role="tab"
+        id={`${uid}-tab-${example.id}`}
+        aria-controls={`${uid}-panel-${example.id}`}
+        aria-selected={example.id === initial ? 'true' : 'false'}
+        tabindex={example.id === initial ? 0 : -1}
+      >{example.label}</button>
+    ))}
+  </div>
+  {examples.map(example => (
+    <div
+      class="tab-panel"
+      role="tabpanel"
+      id={`${uid}-panel-${example.id}`}
+      aria-labelledby={`${uid}-tab-${example.id}`}
+      hidden={example.id !== initial}
+      data-tab-panel
+    >
+      <CompileExample example={example} />
+    </div>
+  ))}
+</div>
+<noscript><style>[data-tab-panel][hidden] { display: block; margin-top: 2rem; } .example-tabs [role='tablist'] { display: none; }</style></noscript>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-example-tabs]')) {
+    const tabs = [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const select = (tab: HTMLButtonElement, focus: boolean) => {
+      for (const other of tabs) {
+        const selected = other === tab;
+        other.setAttribute('aria-selected', String(selected));
+        other.tabIndex = selected ? 0 : -1;
+        const panel = document.getElementById(other.getAttribute('aria-controls')!);
+        if (panel) panel.hidden = !selected;
+      }
+      if (focus) tab.focus();
+    };
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => select(tab, false));
+      tab.addEventListener('keydown', event => {
+        const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+        if (step) { event.preventDefault(); select(tabs[(index + step + tabs.length) % tabs.length]!, true); }
+        else if (event.key === 'Home') { event.preventDefault(); select(tabs[0]!, true); }
+        else if (event.key === 'End') { event.preventDefault(); select(tabs.at(-1)!, true); }
+      });
+    });
+  }
+</script>
+
+<style>
+  .tablist { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem; }
+  [role='tab'] {
+    min-height: 40px; padding: 0 1rem; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--typedhouse-border); background: var(--typedhouse-surface); color: var(--typedhouse-muted);
+    font: inherit; font-size: .875rem; font-weight: 500; transition: border-color .15s, color .15s, background-color .15s;
+  }
+  [role='tab']:hover { border-color: var(--typedhouse-border-strong); color: var(--typedhouse-text); }
+  [role='tab'][aria-selected='true'] { background: var(--typedhouse-text); border-color: var(--typedhouse-text); color: var(--typedhouse-bg); }
+</style>

@@ -1,0 +1,24 @@
+---
+interface Props { href: string; badge: string }
+const { href, badge } = Astro.props;
+---
+<a class="announcement" href={href}>
+  <span class="badge">{badge}</span>
+  <span><slot /></span>
+  <span class="arrow" aria-hidden="true">→</span>
+</a>
+
+<style>
+  .announcement {
+    display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: .6rem;
+    padding: .55rem 1rem; background: var(--typedhouse-night-alt); color: rgb(241 239 245 / .82);
+    font-size: .8125rem; font-weight: 500; text-decoration: none;
+  }
+  .announcement:hover { color: var(--typedhouse-on-night); text-decoration: none; }
+  .badge {
+    border-radius: 999px; padding: 1px .5rem; background: var(--typedhouse-badge); color: var(--typedhouse-on-badge);
+    font-size: .625rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  }
+  .arrow { transition: transform .15s; }
+  .announcement:hover .arrow { transform: translateX(2px); }
+</style>

@@ -1,0 +1,18 @@
+---
+import { withBase } from '../../lib/urls';
+interface Props { current?: boolean }
+const { current = false } = Astro.props;
+---
+<a class="logo" href={withBase('/')} aria-current={current ? 'page' : undefined}>
+  <svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" /><path d="M12 20h20M22 20v26M39 20v26M53 20v26M39 33h14" /></svg>
+  <span class="logo-text">TypedHouse</span>
+</a>
+
+<style>
+  .logo { display: inline-flex; align-items: center; gap: .6rem; color: var(--typedhouse-on-night); text-decoration: none; }
+  .logo:hover { color: var(--typedhouse-on-night); text-decoration: none; }
+  .logo-mark { width: 28px; height: 28px; flex: none; }
+  .logo-mark rect { fill: var(--typedhouse-primary); }
+  .logo-mark path { fill: none; stroke: #fff; stroke-width: 5; stroke-linecap: round; }
+  .logo-text { font-family: var(--typedhouse-font-display); font-weight: 700; font-size: 1.25rem; letter-spacing: -.01em; }
+</style>

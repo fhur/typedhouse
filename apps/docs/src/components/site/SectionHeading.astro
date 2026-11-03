@@ -1,0 +1,26 @@
+---
+/** Eyebrow + display heading + optional lead paragraph (default slot). */
+interface Props { id: string; title: string; eyebrow?: string; align?: 'start' | 'center' }
+const { id, title, eyebrow, align = 'start' } = Astro.props;
+const hasLead = Astro.slots.has('default');
+---
+<div class:list={['section-heading', align]}>
+  {eyebrow && <p class="eyebrow">{eyebrow}</p>}
+  <h2 id={id}>{title}</h2>
+  {hasLead && <p class="lead"><slot /></p>}
+</div>
+
+<style>
+  .section-heading.center { text-align: center; }
+  .center .lead, .center h2 { margin-inline: auto; }
+  .eyebrow {
+    margin: 0 0 .65rem; font-family: var(--typedhouse-font-mono); font-size: .75rem; font-weight: 500;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--typedhouse-icon);
+  }
+  h2 {
+    margin: 0; max-width: 24ch; font-family: var(--typedhouse-font-display); font-weight: 700;
+    font-size: clamp(1.875rem, 3.4vw, 2.5rem); line-height: 1.12; letter-spacing: -.02em; color: inherit;
+  }
+  .lead { margin: .9rem 0 0; max-width: 40rem; font-size: 1.0625rem; line-height: 1.65; color: var(--typedhouse-muted); }
+  :global(.on-night) .lead { color: var(--typedhouse-on-night-muted); }
+</style>

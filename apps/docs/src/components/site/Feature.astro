@@ -1,0 +1,20 @@
+---
+import Icon, { type IconName } from './Icon.astro';
+interface Props { icon: IconName; title: string }
+const { icon, title } = Astro.props;
+---
+<div class="feature">
+  <Icon name={icon} class="feature-icon" />
+  <div>
+    <h3>{title}</h3>
+    <p><slot /></p>
+  </div>
+</div>
+
+<style>
+  .feature { display: flex; gap: 1.125rem; }
+  .feature :global(.feature-icon) { flex: none; margin-top: 2px; color: var(--typedhouse-icon); }
+  h3 { margin: 0; font-family: var(--typedhouse-font-sans); font-size: 1rem; font-weight: 600; letter-spacing: 0; line-height: 1.4; }
+  p { margin: .4rem 0 0; font-size: .9rem; line-height: 1.6; color: var(--typedhouse-muted); }
+  p :global(code) { font-size: .82rem; background: var(--typedhouse-surface-muted); border-radius: 4px; padding: 1px 5px; }
+</style>
