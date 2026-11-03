@@ -74,3 +74,10 @@ A JavaScript `Date` is an instant, and it is sent as UTC text, then cast to the 
 | `DateTime64(p)`, p ≤ 3 | UTC up to milliseconds, `2026-11-01 12:34:56.789` | Truncated to the column's precision |
 
 Pass a `Date`, not a date string: a string is a type error for these columns.
+
+Float values round-trip exactly for everyday magnitudes. Two ClickHouse 24.8 behaviors apply at the edges:
+
+- Its float text parser is not correctly rounded beyond about 10^±22 or for subnormals. Such a value can be stored, and compared in a filter, 1 ULP away from what you sent; `5e-324` becomes `0`. Values between `1e-6` and `1e15` in magnitude, and ordinary decimals such as prices, are exact.
+- `MergeTree` tables store `-0` as `0`. TypedHouse inserts keep the sign of zero, and other engines such as `Memory` store it. Query parameters send `-0` as `0`, which compares equal anyway.
+
+A `Float32` reads back as the shortest decimal that identifies it, so `0.1` stays `0.1` rather than `0.10000000149011612`. `Math.fround()` of the value you read is exactly the stored float.
