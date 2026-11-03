@@ -1,7 +1,7 @@
-import { stat } from 'node:fs/promises';
+import { rm, stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { dirname, join } from 'node:path';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createModels, fauxProvider } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import { parseCHType } from '@typedhouse/core';
@@ -115,9 +115,13 @@ describe('F7, F8, F9: column names with dots, brackets and backslashes', () => {
 });
 
 describe('F18: without a data dir, saved queries never touch the real home', () => {
+  // F19: the process 'exit' hook that removes these does not run when vitest tears its workers down.
+  const created: string[] = [];
+  afterAll(async () => { await Promise.all(created.map(dir => rm(dir, { recursive: true, force: true }))); });
   it('defaults to a fresh temp directory', async () => {
     const a = defaultSavedStore();
     const b = defaultSavedStore();
+    created.push(dirname(a.path), dirname(b.path));
     expect(a.path.startsWith(tmpdir())).toBe(true);
     expect(a.path.startsWith(join(homedir(), '.typedhouse'))).toBe(false);
     expect(a.path).not.toBe(b.path);

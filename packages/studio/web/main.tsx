@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import type { inferRouterOutputs } from '@trpc/server';
 import superjson from 'superjson';
-import { clickhouse, formatDialect } from 'sql-formatter';
 import type { AppRouter } from '../server/server.js';
 import type { EditorView } from '@codemirror/view';
 import { Chart } from './chart.js';
@@ -48,8 +47,26 @@ function starter(meta: Meta | undefined): string {
   return `// Introspected tables and @typedhouse/core are in scope; no imports needed.\n// ${MOD}↵ runs · ${MOD}/ toggles the 100-row auto-limit\nconst query = from(${binding})\n\nexport default query\n`;
 }
 
-function formatSql(sql: string): string {
-  try { return formatDialect(sql, { dialect: clickhouse, tabWidth: 2, keywordCase: 'upper' }); } catch { return sql; }
+/**
+ * SQL formatting is display-only, so sql-formatter is loaded on first use of the SQL tab (F12): the raw SQL
+ * shows until the chunk arrives, and stays if it fails to load.
+ */
+type Formatter = (sql: string) => string;
+let formatter: Promise<Formatter> | undefined;
+function loadFormatter(): Promise<Formatter> {
+  formatter ??= import('sql-formatter').then(({ clickhouse, formatDialect }) => (sql: string) => {
+    try { return formatDialect(sql, { dialect: clickhouse, tabWidth: 2, keywordCase: 'upper' }); } catch { return sql; }
+  });
+  return formatter;
+}
+function useFormattedSql(sql: string): string {
+  const [formatted, setFormatted] = useState<{ sql: string; text: string }>();
+  useEffect(() => {
+    let live = true;
+    loadFormatter().then(format => { if (live) setFormatted({ sql, text: format(sql) }); }, () => { formatter = undefined; });
+    return () => { live = false; };
+  }, [sql]);
+  return formatted?.sql === sql ? formatted.text : sql;
 }
 
 function cellText(value: unknown): string {
@@ -118,9 +135,10 @@ function SqlText(props: { sql: string }) {
 
 function SqlView(props: { result: Success }) {
   const params = Object.entries(props.result.params);
+  const sql = useFormattedSql(props.result.sql);
   return (
     <div className="sql-view">
-      <pre className="mono sql"><SqlText sql={formatSql(props.result.sql)} /></pre>
+      <pre className="mono sql"><SqlText sql={sql} /></pre>
       <div className="params">
         <div className="eyebrow">Parameters</div>
         {params.length === 0 && <div className="muted small">None.</div>}
