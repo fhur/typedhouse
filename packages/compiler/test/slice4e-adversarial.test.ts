@@ -56,7 +56,9 @@ it('catalog sweep: builder type = resolver type wherever the call compiles, and 
   }
   expect(compiled).toBeGreaterThan(500);
   if (process.env.SLICE4E_SWEEP) writeFileSync(process.env.SLICE4E_SWEEP, rows.join('\n') + '\n');
-});
+// Sweeps the whole method catalog by design: ~14 s on a fast machine, over the default 30 s on
+// GitHub runners (CI timed out here from 6a21ae3 on).
+}, 120_000);
 
 it('ifNull rule: every fallback kind over LC(Nullable) receivers, incl. Enum8, Decimal, DateTime64(3,UTC), IPv4, UUID', () => {
   const x = from(table('x', {
