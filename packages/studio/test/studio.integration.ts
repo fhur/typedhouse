@@ -231,3 +231,33 @@ describe('F13: tables named like core functions', () => {
     }
   });
 });
+
+describe('editor language intelligence on the fixture (R12)', () => {
+  it('a real query has 0 type errors; after schema.refresh a new table is completed and type-checks', async () => {
+    const s = await startServer({ conn, port: 0, ui: 'none', packageRoot: '.' });
+    try {
+      const client = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: `${s.url}/trpc`, transformer: superjson })] });
+      const source = 'export default from(entity_ots_component)\n  .where(c => c.state.eq(\'active\'))\n  .groupBy(c => ({ category: c.category }))\n  .aggregate(g => ({ components: count(), parts: sum(g.countOfParts) }))\n  .orderBy(r => r.parts.desc())';
+      expect(await client.types.diagnostics.mutate({ source })).toEqual([]);
+      expect(conn.check(source)).toMatchObject({ ok: true });
+      expect(conn.check("const n: number = 'x';\nexport default from(entity_ots_component)")).toMatchObject({ ok: false, stage: 'types', message: expect.stringMatching(/^1 type error:\n1:7 /) });
+      const member = 'export default from(coverage).map(c => ({ id: c.';
+      const completed = await client.types.completions.mutate({ source: member, pos: member.length });
+      expect(completed.items.find(i => i.label === 'precise')).toMatchObject({ kind: 'column', detail: "DateTime64(9, 'UTC')" });
+
+      const writer = createDriver({ url, username: 'fixture', password: 'test-secret', database: 'fixture' });
+      await writer.command({ query: 'CREATE TABLE r12_new_table (id UInt32, label String) ENGINE = Memory' });
+      await writer.close();
+      const before = await client.types.completions.mutate({ source: 'r12', pos: 3 });
+      expect(before.items.map(i => i.label)).not.toContain('r12_new_table');
+      await client.schema.refresh.mutate();
+      const after = await client.types.completions.mutate({ source: 'r12', pos: 3 });
+      expect(after.items.find(i => i.label === 'r12_new_table')).toMatchObject({ kind: 'table' });
+      expect(await client.types.diagnostics.mutate({ source: 'export default from(r12_new_table).where(t => t.label.eq("x"))' })).toEqual([]);
+      const hovered = 'export default from(r12_new_table).map(t => ({ l: t.label }))';
+      expect(await client.types.hover.mutate({ source: hovered, pos: hovered.indexOf('label') + 1 })).toMatchObject({ text: '(column) label: String' });
+    } finally {
+      await s.close();
+    }
+  });
+});

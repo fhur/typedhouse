@@ -28,6 +28,8 @@ Brief: requirements R1–R11 in the session's `studio-brief.md` (it's the source
   - The `models-store.json` fallback stays for override ids missing from the pi-ai catalog.
   - A "Switch model…" action in the ⌘K palette (S6) changes the model for the running session only; it is not persisted.
 - **F4b is prompt-only (orchestrator):** there is no formatter. Real model output is already multi-line, so one line in the system prompt asks for one chained call per line.
+- **No success notice after a generation (user, S7):** the replaced editor content and the results speak for themselves. Only failures show a message, with "Load the last attempt".
+- **Type errors don't block runs (orchestrator, S9):** ⌘↵ still evaluates and compiles when the editor has type errors; they are shown inline and in the badge. A generated query must have zero type errors *and* compile before it is accepted.
 
 **Open risks.**
 - pi-ai 1.5.0's static `openai-codex` catalog has no `gpt-5.5`. S2 filled it in from `models-store.json`, but the real smoke (F5) showed that Codex rejects it for ChatGPT accounts: "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account." **Resolved** by the user's model decision above: the default is `openai-codex/gpt-5.6-sol`, which is in the static catalog and passed F5.
@@ -72,7 +74,10 @@ Brief: requirements R1–R11 in the session's `studio-brief.md` (it's the source
   - The ⌘K button is a placeholder (S6).
   - Root `pnpm build` (`pnpm -r build`) now builds studio too: a Vite build plus a tsup build.
 
-### Next Worker slice: S7 — visual fidelity and polish (selected 2026-11-03)
+### Next Worker slice: S9 — editor language intelligence (R12) (selected 2026-11-03)
+The scope and acceptance criteria are in the **S9** entry below, unchanged. Decision applied: type errors don't block ⌘↵, and a generated query must have zero type errors. Then S8.
+
+### Done slice: S7 — visual fidelity and polish (selected 2026-11-03, done 2026-11-03 in `c9b9444`)
 Mockups (read-only) are in the session scratchpad, `studio/project/`: `Main.dc.html`, `Chart.dc.html`, `Palette.dc.html`. Tokens and fonts come from `apps/docs/src/styles/tokens.css`; syntax colors from `apps/docs/src/styles/code-themes.mjs`. After this slice: S8.
 - **Fidelity: match the three mockups at 1440 px, plus the responsive rules under 1000 px and 760 px.**
   - Header:
@@ -421,8 +426,30 @@ Merged because S2 has no user-visible value on its own and both touch the same f
     - This makes F4a (the kbd layout in that notice) moot; drop it and its Playwright check.
     - Test: Playwright, a faux success leaves no `role="status"` notice in the left pane, and a faux failure still shows the error and the load button.
 - Depends on: S1, S3, S4, S6
-- Status: in progress (Worker slice S7 with the Tester; the success-notice removal is queued for the next Worker round)
+- Status: **done** (Tester OK after 2 rounds). Committed and pushed by the orchestrator as `c9b9444` on `studio`. It includes the success-notice removal.
 - Evidence:
+  - Gates: root `pnpm typecheck` passes. Root `pnpm test`: 125 files, 1634 passed, 1 skipped, 0 failed (2 runs). Studio `test`: 195. Studio `test:integration`: 40. Studio `build` passes.
+  - `~/.typedhouse` was unchanged across all suites.
+  - Round 1, found and fixed: tables named after hidden or blocked globals were unusable or broke the schema. The reserved set (`TAKEN` in `server/eval.ts`) now covers core exports, `db`, `query`, the shadowed and async-guarded globals and common globals, all handled by the `<name>_table[N]` rename.
+  - Round 2, on ClickHouse with tables `process`, `process_table`, `Promise`, `Object`, `Array`, `from` and `JSON`:
+    - The bindings are `process_table2`, `process_table`, `Promise_table`, `Object_table`, `Array_table`, `from_table` and `JSON_table`.
+    - The sidebar, palette, LLM schema and run all agree, and `db.*` keeps the original names.
+    - `Object`, `JSON` and `Math` still work in editor code.
+    - A unit sweep of 54 names passes (`test/s7.test.ts`).
+  - Browser:
+    - A successful generation shows no notice; the failure display and "Load the last attempt" work.
+    - Wrapping, the F11 tab rule, scroll reset, the palette Ask row and F14 across a reload all pass.
+    - 24 screenshots in light and dark at 1440, 900 and 700 px show no overflow and readable contrast.
+  - F15 is verified. The PM code read of `server/llm.ts` `selectModel` shows it requires `getAvailable(provider)` to contain the model, otherwise "No credentials for …".
+  - F18 is verified, with a different fix than scoped:
+    - `startServer`'s `dataDir` is still optional.
+    - When omitted, `createRouter` now uses `defaultSavedStore()`: a per-process temp dir (`typedhouse-studio-<pid>-<random>`), created lazily on the first save and removed on process exit. It never uses `~/.typedhouse`.
+    - Accepted: same safety, fewer call-site changes.
+    - The exit-hook cleanup has the same limitation under vitest workers as F19; directories only appear if a test saves without a `dataDir`.
+- Follow-ups:
+  - **F19 (Tester territory):** `test/s7.test.ts` leaves one `/tmp` dir per run, because its `process.on('exit')` cleanup does not run under vitest workers. Fix it in the test, with `afterAll` plus `rm`.
+  - **F20 (accepted):** tables named after non-reserved globals (`parseInt`, `URL`, `console`, `Reflect`) shadow those globals inside editor code. This is rare and visible in the sidebar binding name.
+  - Still open from earlier, not done in S7: F8 (object-form `repeat` escaping), F9 (backslash in column names), F10 (`[__proto__]` column in charts), F12 (bundle size, in S8). F16 and F17 are accepted.
 
 ### S9 — Editor language intelligence (R12)
 - Refs: R12 (added by the user 2026-11-03), R1/R2 (generation must type-check), R6.
@@ -458,7 +485,7 @@ Merged because S2 has no user-visible value on its own and both touch the same f
   - Warm the service at startup (one diagnostics call) so the first keystroke never pays the cold cost.
   - tRPC `types.diagnostics({ source })`, `types.completions({ source, pos })`, `types.hover({ source, pos })`. The full text is sent per call; it is small, so no incremental sync is needed.
   - Web: CodeMirror `linter` (debounced about 300 ms), `autocompletion` with an override source, and `hoverTooltip`, all calling those procedures. Map TS ranges to CodeMirror offsets one-to-one (same text).
-  - **Runs are not blocked by type errors** (PM proposal; the user may override). ⌘↵ still evaluates and compiles, as now. Type errors are shown inline and in the badge. Generation (below) requires zero type errors.
+  - **Runs are not blocked by type errors** (decided by the orchestrator 2026-11-03). ⌘↵ still evaluates and compiles, as now. Type errors are shown inline and in the badge. Generation (below) requires zero type errors.
 - Acceptance:
   - **Diagnostics.**
     - Type and syntax errors show as squiggles with the TS message on hover, inline in the editor.
@@ -507,8 +534,9 @@ Merged because S2 has no user-visible value on its own and both touch the same f
     - root `pnpm typecheck` and `pnpm test`;
     - studio `typecheck`, `test:integration` and `build`;
     - `node scripts/check-type-performance.mjs` unchanged, since S9 must not touch core types or the bench inputs.
-- Depends on: S3 (`check_query`), S7 (editor and badge layout). Runs after S7 and before S8.
-- Status: todo
+- Depends on: S3 (`check_query`), S7 (editor and badge layout; done in `c9b9444`). Runs after S7 and before S8.
+- Status: in progress (the next Worker slice, handed over 2026-11-03; the scope is this entry, unchanged)
+- Note for the Worker: build `/scope.d.ts` from the same `TAKEN`/`editorSchema` bindings that S7 introduced (`process_table2`, `from_table`, …), so the type checker and the runtime scope can never disagree.
 - Evidence:
 
 ### S8 — Gates and manual smoke

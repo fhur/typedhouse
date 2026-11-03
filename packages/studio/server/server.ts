@@ -48,6 +48,19 @@ const nameInput = (value: unknown) => {
   if (!v || typeof v.name !== 'string') throw new Error('Expected { name: string }');
   return { name: v.name };
 };
+const MAX_EDITOR_SOURCE = 64_000;
+const sourceInput = (value: unknown) => {
+  const v = value as { source?: unknown } | null;
+  if (!v || typeof v.source !== 'string' || v.source.length > MAX_EDITOR_SOURCE) throw new Error('Expected { source: string }');
+  return { source: v.source };
+};
+const positionInput = (value: unknown) => {
+  const v = value as { source?: unknown; pos?: unknown } | null;
+  if (!v || typeof v.source !== 'string' || v.source.length > MAX_EDITOR_SOURCE || typeof v.pos !== 'number' || !Number.isInteger(v.pos) || v.pos < 0 || v.pos > v.source.length) {
+    throw new Error('Expected { source: string, pos: integer within source }');
+  }
+  return { source: v.source, pos: v.pos };
+};
 const modelInput = (value: unknown) => {
   const v = value as { provider?: unknown; modelId?: unknown } | null;
   if (!v || typeof v.provider !== 'string' || typeof v.modelId !== 'string') throw new Error('Expected { provider, modelId }');
@@ -80,6 +93,13 @@ export function createRouter(conn: Connection, llm: Llm = unavailableLlm('not co
     meta: t.router({ get: t.procedure.query(meta) }),
     schema: t.router({ refresh: t.procedure.mutation(async () => { await conn.refresh(); return meta(); }) }),
     query: t.router({ run: t.procedure.input(runInput).mutation(({ input }) => conn.runQuery(input)) }),
+    // Editor language intelligence (R12). Mutations so the source travels in the body, not the URL.
+    types: t.router({
+      // `null`: superseded by a newer request for newer text (latest wins).
+      diagnostics: t.procedure.input(sourceInput).mutation(({ input }) => conn.types.check(input.source)),
+      completions: t.procedure.input(positionInput).mutation(async ({ input }) => (await conn.types.completions(input.source, input.pos)) ?? { from: input.pos, items: [] }),
+      hover: t.procedure.input(positionInput).mutation(({ input }) => conn.types.hover(input.source, input.pos)),
+    }),
     saved: t.router({
       list: t.procedure.query(() => saved.list()),
       save: t.procedure.input(savedInput).mutation(({ input }) => saved.save(input)),

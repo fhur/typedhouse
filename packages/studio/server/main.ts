@@ -56,6 +56,12 @@ await conn.refresh();
 const schemaError = conn.schemaError();
 if (schemaError) process.stderr.write(`Warning: could not introspect ${config.database} at ${config.url}: ${schemaError}\n`);
 else process.stdout.write(`Connected to ${conn.label}: ${conn.tables().length} tables\n`);
+// Warm the TypeScript service (lib + core + schema) so the first keystroke does not pay the cold start.
+{
+  const started = performance.now();
+  await conn.types.warm();
+  process.stdout.write(`Types: core from ${conn.types.core.mode} (${conn.types.core.path}), warm ${Math.round(performance.now() - started)} ms\n`);
+}
 
 // The LLM is optional: without credentials or a model the rest of the studio works and the header says why.
 const piDir = values['pi-dir'] ?? defaultPiDir();
@@ -67,7 +73,7 @@ let llm: Llm;
 if (setup.ok) {
   try {
     await mkdir(dataDir, { recursive: true, mode: 0o700 });
-    llm = await createLlm({ models: setup.models, model: setup.model, schema: conn.schemaSource, check: conn.check, storage: await openStorage(join(dataDir, 'pi.sqlite')) });
+    llm = await createLlm({ models: setup.models, model: setup.model, schema: conn.schemaSource, check: conn.checkAsync, storage: await openStorage(join(dataDir, 'pi.sqlite')) });
     process.stdout.write(`LLM: ${setup.model.provider}/${setup.model.modelId}${(values.model ?? env['TYPEDHOUSE_STUDIO_MODEL'])?.trim() ? '' : ' (default)'}, credentials from ${join(piDir, 'auth.json')}\n`);
   } catch (error) {
     llm = unavailableLlm(error instanceof Error ? error.message : String(error));

@@ -50,6 +50,33 @@ export function unavailableLlm(reason: string): Llm {
   };
 }
 
+/**
+ * The cheat sheet's example tables and snippets. Every snippet type-checks and compiles against these
+ * tables (test/cheatsheet.test.ts runs each through the same check as check_query).
+ */
+export const CHEAT_SHEET_TABLES: readonly (readonly [string, readonly (readonly [string, string])[]])[] = [
+  ['events', [['id', 'UInt64'], ['ts', 'DateTime64(3)'], ['country', 'LowCardinality(String)'], ['status', 'String'], ['amount', 'Float64'], ['price', 'Float64'], ['qty', 'UInt32'], ['user_id', 'String'], ['account_id', 'UInt64']]],
+  ['accounts', [['id', 'UInt64'], ['name', 'String']]],
+  ['orders_2023', [['amount', 'Float64']]],
+  ['orders_2024', [['amount', 'Float64']]],
+];
+export const CHEAT_SHEET: readonly { label: string; source: string; note?: string }[] = [
+  { label: 'Filter', source: "export default from(events).where(r => r.country.eq('DE').and(r.amount.gt(10)))" },
+  { label: 'Compare', source: "export default from(events).where(r => r.account_id.gt(10n).and(r.status.in(['paid', 'open'])).and(r.amount.between(1, 100)))",
+    note: 'eq ne gt ge lt le, in([...]), notIn([...]), between(a, b), isNull(), isNotNull(), ifNull(x); combine with and/or/not. UInt64/Int64 columns compare with bigint literals (10n).' },
+  { label: 'Project', source: 'export default from(events).map(r => ({ id: r.id, total: r.price.multiply(r.qty) }))', note: 'plus minus multiply divide' },
+  { label: 'Group, filter groups, order, limit', source: "export default from(events).groupBy(r => ({ country: r.country })).aggregate(g => ({ orders: count(), revenue: sum(g.amount), avgAmount: avg(g.amount), last: max(g.ts), users: uniq(g.user_id) })).where(r => r.orders.gt(10n)).orderBy(r => r.revenue.desc()).thenBy(r => r.country).limit(20)",
+    note: 'Keys come first in the output; .where(...) after .aggregate(...) filters groups (HAVING); ordering on outputs comes after map/aggregate. uniq() takes String columns; use count() or uniqExact() as the types allow.' },
+  { label: 'Join', source: 'export default join({ e: from(events), a: from(accounts) }).on(r => r.e.account_id.eq(r.a.id)).map(r => ({ id: r.e.id, name: r.a.name }))' },
+  { label: 'Left join (right side nullable)', source: 'export default leftJoin({ e: from(events) }, { a: from(accounts) }).on(r => r.e.account_id.eq(r.a.id)).map(r => ({ id: r.e.id, name: r.a.name }))' },
+  { label: 'Union with a label per table', source: "export default unionAll(from(orders_2023).map(o => ({ source: val('orders_2023'), amount: o.amount })), from(orders_2024).map(o => ({ source: val('orders_2024'), amount: o.amount }))).groupBy(r => ({ source: r.source })).aggregate(g => ({ rows: count(), total: sum(g.amount) }))" },
+];
+function cheatSheet(): string {
+  const tables = CHEAT_SHEET_TABLES.map(([name, columns]) => `${name}(${columns.map(([c, t]) => `${c} ${t}`).join(', ')})`).join(', ');
+  return [`(examples use these tables: ${tables})`, ...CHEAT_SHEET.map(e => `- ${e.label}: ${e.source.replace(/^export default /, '')}${e.note ? `\n  ${e.note}` : ''}`),
+    "- Columns whose names are not identifiers: r['odd-name'].", '- Every JS value becomes a typed parameter; never build SQL strings.'].join('\n');
+}
+
 const GUIDE = `You write TypedHouse queries: TypeScript that builds a ClickHouse query with the @typedhouse/core builder.
 
 Editor contract
@@ -58,26 +85,14 @@ Editor contract
 - Build the query synchronously: no async, await, Promise or timers.
 - Write one chained call per line (start each \`.where\`, \`.map\`, \`.groupBy\`, ... on its own line).
 - When combining several tables with unionAll, give every branch a literal label column such as \`source: val('<table>')\`, so the result says which table each row came from.
+- check_query type-checks the source like a TypeScript editor and compiles it; every type error (reported as line:col) must be fixed, not only runtime errors.
 - Always call the check_query tool with the complete source. If it reports an error, fix the source and call check_query again. Once it passes, stop; do not repeat the code in prose.
 
 Builder cheat sheet
-- Filter: from(t).where(r => r.country.eq('DE').and(r.amount.gt(10)))
-- Compare: eq ne gt ge lt le, in([...]), notIn, between(a, b), isNull(), isNotNull(), ifNull(x); combine with and/or/not. Integer UInt64/Int64 columns compare with bigint literals (10n).
-- Project: .map(r => ({ id: r.id, total: r.price.multiply(r.qty) }))  (plus minus multiply divide)
-- Group: .groupBy(r => ({ country: r.country })).aggregate(g => ({ orders: count(), revenue: sum(g.amount), avgAmount: avg(g.amount), last: max(g.ts), users: uniq(g.user_id) }))
-  Keys come first in the output; .where(...) after .aggregate(...) filters groups (HAVING).
-- Order and limit: .orderBy(r => r.revenue.desc()).thenBy(r => r.country).limit(20). Ordering must come after map/aggregate if it uses their outputs.
-- Join: join({ e: from(events), a: from(accounts) }).on(r => r.e.accountId.eq(r.a.id)).map(r => ({ id: r.e.id, name: r.a.name }))
-  leftJoin({ e: from(events) }, { a: from(accounts) }).on(...) keeps unmatched left rows (right side becomes nullable).
-- Union with a label per table: unionAll(
-    from(orders_2023).map(o => ({ source: val('orders_2023'), amount: o.amount })),
-    from(orders_2024).map(o => ({ source: val('orders_2024'), amount: o.amount })),
-  ).groupBy(r => ({ source: r.source })).aggregate(g => ({ rows: count(), total: sum(g.amount) }))
-- Columns whose names are not identifiers: r['odd-name'].
-- Every JS value becomes a typed parameter; never build SQL strings.
+${cheatSheet()}
 
 Example
-const query = from(orders)
+const query = from(events)
   .where(o => o.status.eq('paid'))
   .groupBy(o => ({ country: o.country }))
   .aggregate(g => ({ orders: count(), revenue: sum(g.amount) }))
@@ -126,7 +141,7 @@ const json = (value: unknown) => JSON.stringify(value, (_k, v: unknown) => (type
  * Queries and charts share one busy guard: one generation at a time.
  */
 export async function createLlm(options: {
-  models: MutableModels; model: ModelRef; schema: () => string; check: (source: string) => CheckResult;
+  models: MutableModels; model: ModelRef; schema: () => string; check: (source: string) => CheckResult | Promise<CheckResult>;
   maxTurns?: number; storage?: Storage; timeoutMs?: number; abortGraceMs?: number;
 }): Promise<Llm> {
   let model: ModelRef = { provider: options.model.provider, modelId: options.model.modelId };
@@ -140,7 +155,7 @@ export async function createLlm(options: {
     description: 'Compile the complete TypedHouse source. Returns the ClickHouse SQL and the row type, or the error to fix.',
     parameters: obj({ source: str({ description: 'The complete query.ts source' }) }),
     execute: async args => {
-      const result = options.check(args.source);
+      const result = await options.check(args.source);
       if (result.ok) return { output: text(`OK. Row type: ${result.rowType}\nSQL:\n${result.sql}`), control: { terminate: true } };
       return { output: text(`${result.stage} error: ${result.message}`), isError: true };
     },
@@ -227,7 +242,7 @@ export async function createLlm(options: {
         const source = typeof last?.value === 'string' ? last.value : '';
         if (last?.passed) {
           // Re-check against the current schema: what reaches the editor is what a run compiles.
-          const result = options.check(source);
+          const result = await options.check(source);
           if (result.ok) return { ok: true, source, sql: result.sql, rowType: result.rowType, attempts };
           return { ok: false, error: `${result.stage} error: ${result.message}`, source, attempts };
         }

@@ -6,7 +6,7 @@ import { renderSchema, type DatabaseSchema } from '@typedhouse/codegen';
 import type { CompiledQuery, OutputSchema } from '@typedhouse/core';
 
 /** Where a run failed. The UI shows the stage and message, never a stack. */
-export type Stage = 'parse' | 'evaluate' | 'compile' | 'clickhouse';
+export type Stage = 'parse' | 'types' | 'evaluate' | 'compile' | 'clickhouse';
 export class StudioError extends Error {
   constructor(readonly stage: Stage, message: string) { super(message); this.name = 'StudioError'; }
 }

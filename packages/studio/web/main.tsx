@@ -8,12 +8,18 @@ import type { AppRouter } from '../server/server.js';
 import type { EditorView } from '@codemirror/view';
 import { Chart } from './chart.js';
 import { chartSample, toChartData } from './chart-data.js';
-import { Editor } from './editor.js';
+import { Editor, type Language } from './editor.js';
 import { Palette, type PaletteItem, type PaletteStep } from './palette.js';
 import { chartHeading, viewAfterGeneration, type View } from './rules.js';
 import { isMac, matchShortcut, type Action } from './keymap.js';
 import './styles.css';
 
+/** The editor's TypeScript service (R12), on the server. */
+const language: Language = {
+  diagnostics: source => api.types.diagnostics.mutate({ source }),
+  completions: (source, pos) => api.types.completions.mutate({ source, pos }),
+  hover: (source, pos) => api.types.hover.mutate({ source, pos }),
+};
 const api = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: '/trpc', transformer: superjson })] });
 type Outputs = inferRouterOutputs<AppRouter>;
 type Meta = Outputs['meta']['get'];
@@ -154,6 +160,7 @@ function App() {
   const [saveError, setSaveError] = useState<string>();
   const saveInput = useRef<HTMLInputElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [typeErrors, setTypeErrors] = useState<number>();
   const paletteReturn = useRef<Element | null>(null);
   const latest = useRef({ source, autoLimit, running, generating, charting, result, paletteOpen, ask, chartSpec });
   latest.current = { source, autoLimit, running, generating, charting, result, paletteOpen, ask, chartSpec };
@@ -496,12 +503,15 @@ function App() {
                 <span className="mono editor-name">{loaded ? loaded.name : 'query.ts'}{modified && <span className="modified" title="Edited since loading" aria-label="modified"> ●</span>}</span>
                 {ok && <span className="mono row-type" title={ok.rowType}>→ <RowType text={ok.rowType} /></span>}
                 <div className="spacer" />
+                {typeErrors !== undefined && (typeErrors === 0
+                  ? <span className="typechecks" title="TypeScript: 0 errors"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12l5 5L20 7" /></svg>Typechecks</span>
+                  : <span className="type-errors">{typeErrors} type {typeErrors === 1 ? 'error' : 'errors'}</span>)}
                 {result && (result.ok
                   ? <span className="compiles"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12l5 5L20 7" /></svg>Compiles</span>
                   : <span className="fails">{result.error.stage} error</span>)}
               </div>
               <div className="editor-body">
-                {source !== null && <Editor value={source} onChange={onSourceChange} viewRef={editor} />}
+                {source !== null && <Editor value={source} onChange={onSourceChange} viewRef={editor} language={language} onDiagnostics={setTypeErrors} />}
               </div>
               <div className="editor-foot">
                 <button className="btn run-btn" type="button" onClick={() => void run()} disabled={running}>

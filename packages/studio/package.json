@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "tsx server/main.ts --dev",
-    "build": "vite build && tsup server/main.ts --format esm --out-dir dist --no-splitting --clean=false",
+    "build": "vite build && tsup server/main.ts server/types-worker.ts --format esm --out-dir dist --no-splitting --clean=false",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --root ../.. packages/studio/",
@@ -33,9 +33,11 @@
     "vite": "^8.3.5"
   },
   "devDependencies": {
+    "@codemirror/autocomplete": "^6.20.4",
     "@codemirror/commands": "^6.8.1",
     "@codemirror/lang-javascript": "^6.2.3",
     "@codemirror/language": "^6.11.0",
+    "@codemirror/lint": "^6.9.7",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.36.5",
     "@lezer/highlight": "^1.2.5",
