@@ -1,11 +1,43 @@
 {
   "name": "@typedhouse/codegen",
   "version": "0.1.0",
+  "description": "Generate TypeScript table types from a live ClickHouse schema, and check them for schema drift in CI.",
+  "keywords": [
+    "clickhouse",
+    "typescript",
+    "query-builder",
+    "sql",
+    "sql-builder",
+    "type-safe",
+    "typesafe",
+    "olap",
+    "analytics",
+    "typedhouse",
+    "codegen",
+    "code-generation",
+    "schema",
+    "introspection",
+    "cli",
+    "types"
+  ],
+  "homepage": "https://fhur.github.io/typedhouse/",
+  "bugs": {
+    "url": "https://github.com/fhur/typedhouse/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fhur/typedhouse.git",
+    "directory": "packages/codegen"
+  },
+  "license": "MIT",
+  "author": "Fernando Hurtado",
   "type": "module",
   "publishConfig": {
     "access": "public"
   },
-  "bin": { "typedhouse": "./dist/cli.js" },
+  "bin": {
+    "typedhouse": "./dist/cli.js"
+  },
   "files": [
     "dist"
   ],

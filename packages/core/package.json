@@ -1,6 +1,35 @@
 {
   "name": "@typedhouse/core",
   "version": "0.1.0",
+  "description": "Type-safe ClickHouse query builder for TypeScript: typed table descriptors, expressions and composable, reusable queries with inferred result types.",
+  "keywords": [
+    "clickhouse",
+    "typescript",
+    "query-builder",
+    "sql",
+    "sql-builder",
+    "type-safe",
+    "typesafe",
+    "olap",
+    "analytics",
+    "typedhouse",
+    "clickhouse-query-builder",
+    "query",
+    "joins",
+    "aggregation",
+    "inference"
+  ],
+  "homepage": "https://fhur.github.io/typedhouse/docs/query-builder/overview/",
+  "bugs": {
+    "url": "https://github.com/fhur/typedhouse/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fhur/typedhouse.git",
+    "directory": "packages/core"
+  },
+  "license": "MIT",
+  "author": "Fernando Hurtado",
   "type": "module",
   "publishConfig": {
     "access": "public"

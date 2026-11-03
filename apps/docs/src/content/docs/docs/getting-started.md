@@ -20,7 +20,7 @@ Callbacks such as `e => e.id` receive typed **expressions**, not database values
 
 ## Install
 
-You need Node.js 20+, pnpm, and TypeScript with `strict: true`. This documentation describes the **current workspace preview**, not a guarantee that every package is published yet.
+You need Node.js 20+, pnpm, and TypeScript with `strict: true`.
 
 TypedHouse was formerly typedhouse. Packages still use `@typedhouse/*` to keep existing imports and installations compatible; the `typedhouse` codegen command is unchanged.
 
@@ -30,7 +30,7 @@ If your release is available in your package registry:
 pnpm add @typedhouse/core @typedhouse/compiler
 ```
 
-For the source preview, clone the repository and build its workspace packages instead:
+To build from source, clone the repository and build its workspace packages instead:
 
 ```sh
 git clone https://github.com/fhur/typedhouse.git

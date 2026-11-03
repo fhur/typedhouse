@@ -3,6 +3,7 @@ import { createClient as createDriver } from '@clickhouse/client';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { col, table, from, join, count, uniqExact, avg, max, scalar, unionAll, val } from '@typedhouse/core';
 import { createClickHouseBackend, createClientFromBackend, QueryError } from '../src/index.js';
+import { outputSettings } from '../src/backend.js';
 import { collect, verify } from './backend-harness.js';
 let container: StartedTestContainer;
 let url: string;
@@ -98,4 +99,16 @@ it('supports early exit, concurrent repeat execution, server failures and caller
     await expect(client.run(missing)).rejects.toBeInstanceOf(QueryError);
     expect(await createClientFromBackend(backend).run(q)).toEqual(expected);
   }
+});
+it('requests exact Decimal values: quoted on the wire, unquoted ones lose precision in JSON.parse', async () => {
+  const query = "SELECT toDecimal128('1234567890123456789.0123456789', 10) AS big, toDecimal32('-12.34', 2) AS small";
+  const driver = createDriver({ url, username: 'fixture', password: 'fixture' });
+  try {
+    const result = await driver.query({ query, format: 'JSONEachRow', clickhouse_settings: outputSettings });
+    expect(await result.json()).toEqual([{ big: '1234567890123456789.0123456789', small: '-12.34' }]);
+  } finally { await driver.close(); }
+  // Negative control: the server default sends a bare number, which JSON.parse rounds.
+  const [raw] = (await sql(`${query} FORMAT JSONEachRow`)).trim().split('\n');
+  expect(raw).toBe('{"big":1234567890123456789.0123456789,"small":-12.34}');
+  expect(String((JSON.parse(raw!) as { big: number }).big)).not.toBe('1234567890123456789.0123456789');
 });

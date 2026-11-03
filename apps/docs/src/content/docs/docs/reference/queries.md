@@ -46,8 +46,8 @@ The [Query Builder section](/docs/query-builder/overview/) documents each implem
 - [in / notIn](/docs/query-builder/set-subqueries/)
 - [scalar](/docs/query-builder/scalar-subqueries/)
 
-## Explicit preview limits
+## Limits
 
-This is the implemented workspace preview, not complete ClickHouse coverage. Outer joins remain unsupported; union inputs require exact compatible descriptors; CTE hints do not guarantee cached or single evaluation.
+Union inputs require exact compatible descriptors. CTE hints do not guarantee cached or single evaluation.
 
 Related: [Simplifying Compiler](/docs/compiler/overview/), [parameter and compiler outputs](/docs/reference/parameters/), and [composition tutorial](/docs/tutorials/composition/).

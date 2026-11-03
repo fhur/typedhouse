@@ -25,7 +25,7 @@ for (const entry of await readdir(dist, { recursive: true })) {
   }
   if (entry.startsWith('docs/')) assert.ok(!html.includes('/Playground.'), `Editor assets on static docs: ${entry}`);
 }
-for (const route of ['docs/getting-started.md', 'docs/tutorials/composition.md', 'docs/tutorials/advanced-example.md', 'docs/reference/queries.md', 'blog/composition-without-hiding-sql.md', 'llms.txt', 'llms-full.txt', 'blog/rss.xml', 'pagefind/pagefind.js']) {
+for (const route of ['docs/getting-started.md', 'docs/tutorials/composition.md', 'docs/tutorials/advanced-example.md', 'docs/reference/queries.md', 'docs/reference/types.md', 'blog/composition-without-hiding-sql.md', 'llms.txt', 'llms-full.txt', 'blog/rss.xml', 'pagefind/pagefind.js']) {
   assert.ok(await exists(join(dist, route)), `Missing static output: ${route}`);
 }
 const home = await readFile(join(dist, 'index.html'), 'utf8');

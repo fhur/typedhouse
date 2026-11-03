@@ -24,6 +24,18 @@ export interface Backend {
   insert?(batch: EncodedInsert): Promise<void>;
 }
 
+/**
+ * JSON output settings sent with every query so values arrive exactly. Without
+ * them a DateTime is wall-clock time with no offset, NaN/Inf become null, and a
+ * Decimal is an unquoted number that JSON.parse rounds past ~17 digits.
+ */
+export const outputSettings = {
+  date_time_output_format: 'iso',
+  output_format_json_quote_64bit_integers: 1,
+  output_format_json_quote_denormals: 1,
+  output_format_json_quote_decimals: 1,
+} as const;
+
 /** Thin adapter over @clickhouse/client: options are passed through unchanged.
  * The driver owns HTTP, auth/TLS/compression, pooling, parsing, backpressure and
  * resource cancellation. This layer owns compilation, typed decoding and error
@@ -55,10 +67,7 @@ export function createClickHouseBackend(options: ClickHouseClientConfigOptions =
       if (type && unwrap(type).kind === 'Array') containers[`param_${name}`] = value;
       else params[name] = value;
     }
-    return driver.query({ query: compiled.sql, query_params: params, format: 'JSONEachRow', clickhouse_settings: {
-      ...containers,
-      date_time_output_format: 'iso', output_format_json_quote_64bit_integers: 1, output_format_json_quote_denormals: 1, output_format_json_quote_decimals: 1,
-    } });
+    return driver.query({ query: compiled.sql, query_params: params, format: 'JSONEachRow', clickhouse_settings: { ...containers, ...outputSettings } });
   }
   return {
     name: mode,

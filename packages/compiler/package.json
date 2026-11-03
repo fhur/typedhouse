@@ -1,6 +1,34 @@
 {
   "name": "@typedhouse/compiler",
   "version": "0.1.0",
+  "description": "Compile TypedHouse queries to flat, parameterized ClickHouse SQL, with filter push-down, column pruning and shared CTEs.",
+  "keywords": [
+    "clickhouse",
+    "typescript",
+    "query-builder",
+    "sql",
+    "sql-builder",
+    "type-safe",
+    "typesafe",
+    "olap",
+    "analytics",
+    "typedhouse",
+    "compiler",
+    "sql-generator",
+    "query-optimizer",
+    "parameterized-queries"
+  ],
+  "homepage": "https://fhur.github.io/typedhouse/docs/compiler/overview/",
+  "bugs": {
+    "url": "https://github.com/fhur/typedhouse/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fhur/typedhouse.git",
+    "directory": "packages/compiler"
+  },
+  "license": "MIT",
+  "author": "Fernando Hurtado",
   "type": "module",
   "publishConfig": {
     "access": "public"

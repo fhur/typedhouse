@@ -1,6 +1,35 @@
 {
   "name": "@typedhouse/client",
   "version": "0.1.0",
+  "description": "Run TypedHouse queries against ClickHouse from Node.js with typed, decoded rows, async-iterator streaming and structured errors.",
+  "keywords": [
+    "clickhouse",
+    "typescript",
+    "query-builder",
+    "sql",
+    "sql-builder",
+    "type-safe",
+    "typesafe",
+    "olap",
+    "analytics",
+    "typedhouse",
+    "clickhouse-client",
+    "database",
+    "driver",
+    "streaming",
+    "nodejs"
+  ],
+  "homepage": "https://fhur.github.io/typedhouse/docs/getting-started/",
+  "bugs": {
+    "url": "https://github.com/fhur/typedhouse/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fhur/typedhouse.git",
+    "directory": "packages/client"
+  },
+  "license": "MIT",
+  "author": "Fernando Hurtado",
   "type": "module",
   "publishConfig": {
     "access": "public"

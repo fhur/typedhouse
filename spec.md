@@ -557,7 +557,7 @@ Parsing details that bite: string literals inside `Enum8('a b' = 1)` and `DateTi
 | `UUID`, `IPv4`, `IPv6` | `string` (branded: `UUID & string`) | As is |
 | `Date`, `Date32`, `DateTime` | `Date` | Execution sets `date_time_output_format = 'iso'`, so a DateTime arrives as `2026-10-27T12:00:00Z` and decodes with `new Date(s)`; a Date arrives as `2026-10-27` and decodes the same way, as UTC midnight |
 | `DateTime64(p)` | `Date` when p <= 3, else `string` | ISO with fractional seconds, `new Date(s)`; precision above milliseconds cannot survive `Date`, and the generated comment says so |
-| `Decimal(p, s)` | `Decimal<p, s>` = `string & { __p: p; __s: s }` | Exact string on the wire (`output_format_json_quote_decimals = 1`); no arithmetic in TS, arithmetic stays in `Expr` |
+| `Decimal(p, s)` | `Decimal<p, s>` = `string & { __p: p; __s: s }` | String on the wire (`output_format_json_quote_decimals=1`; the server default sends a bare number that `JSON.parse` rounds); no arithmetic in TS, arithmetic stays in `Expr` |
 | `Enum8/16` | a union of the names as string literals | String on the wire |
 | `Nullable(T)` | `T` or `null` | JSON null |
 | `LowCardinality(T)` | `T` | Transparent |

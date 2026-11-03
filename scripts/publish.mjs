@@ -89,6 +89,10 @@ function inspectTarball(name, file) {
   const hooks = LIFECYCLE.filter(h => manifest.scripts?.[h]);
   if (hooks.length) throw new Error(`${name} manifest declares lifecycle scripts: ${hooks.join(', ')}`);
   if (manifest.publishConfig?.access !== 'public') throw new Error(`${name} manifest lacks publishConfig.access "public"`);
+  // The npm page and search ranking come from these: a release without them is a blank listing.
+  const files = new Set(listing.map(c => c.at(-1)));
+  for (const f of ['package/README.md', 'package/LICENSE']) if (!files.has(f)) throw new Error(`${name} tarball lacks ${f.slice(8)}`);
+  for (const k of ['description', 'keywords', 'license', 'repository', 'homepage']) if (!manifest[k]) throw new Error(`${name} manifest lacks "${k}"`);
   return { manifest, files: listing.map(c => c.at(-1)), unpacked };
 }
 function patch(v) { return Number(VERSION.exec(v)?.[1] ?? -1); }
