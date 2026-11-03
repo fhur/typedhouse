@@ -74,8 +74,14 @@ Brief: requirements R1–R11 in the session's `studio-brief.md` (it's the source
   - The ⌘K button is a placeholder (S6).
   - Root `pnpm build` (`pnpm -r build`) now builds studio too: a Vite build plus a tsup build.
 
-### Next Worker slice: S9 — editor language intelligence (R12) (selected 2026-11-03)
-The scope and acceptance criteria are in the **S9** entry below, unchanged. Decision applied: type errors don't block ⌘↵, and a generated query must have zero type errors. Then S8.
+### Next Worker slice: S8 — final gates, bundle, README (selected 2026-11-03; the final slice)
+This slice is kept small. Owners are marked; the full criteria are in the **S8** entry below.
+- **Worker:** F12 lazy-loads sql-formatter, then `packages/studio/README.md`.
+- **Tester:** F19 (fix the `/tmp` leak in its own `test/s7.test.ts`), then the final gates including `pnpm check:all`.
+- **Orchestrator:** the final real-model smoke.
+
+### Done slice: S9 — editor language intelligence (R12) (selected 2026-11-03, done 2026-11-03 in `3b1e6f8`)
+The scope and acceptance criteria are in the **S9** entry below. Decision applied: type errors don't block ⌘↵, and a generated query must have zero type errors.
 
 ### Done slice: S7 — visual fidelity and polish (selected 2026-11-03, done 2026-11-03 in `c9b9444`)
 Mockups (read-only) are in the session scratchpad, `studio/project/`: `Main.dc.html`, `Chart.dc.html`, `Palette.dc.html`. Tokens and fonts come from `apps/docs/src/styles/tokens.css`; syntax colors from `apps/docs/src/styles/code-themes.mjs`. After this slice: S8.
@@ -449,7 +455,7 @@ Merged because S2 has no user-visible value on its own and both touch the same f
 - Follow-ups:
   - **F19 (Tester territory):** `test/s7.test.ts` leaves one `/tmp` dir per run, because its `process.on('exit')` cleanup does not run under vitest workers. Fix it in the test, with `afterAll` plus `rm`.
   - **F20 (accepted):** tables named after non-reserved globals (`parseInt`, `URL`, `console`, `Reflect`) shadow those globals inside editor code. This is rare and visible in the sidebar binding name.
-  - Still open from earlier, not done in S7: F8 (object-form `repeat` escaping), F9 (backslash in column names), F10 (`[__proto__]` column in charts), F12 (bundle size, in S8). F16 and F17 are accepted.
+  - **Correction (orchestrator, 2026-11-03):** F8 (object-form `repeat` escaping) and F9 (backslash in column names) were **done** in S7 round 1 and verified with headless render tests. The PM confirmed the test `test/s7.test.ts` "escapes object-form repeat and raw backslash names". Still open: F10 (`[__proto__]` column in charts; accepted as a visible chart error) and F12 (bundle size, in S8). F16 and F17 are accepted.
 
 ### S9 — Editor language intelligence (R12)
 - Refs: R12 (added by the user 2026-11-03), R1/R2 (generation must type-check), R6.
@@ -535,28 +541,78 @@ Merged because S2 has no user-visible value on its own and both touch the same f
     - studio `typecheck`, `test:integration` and `build`;
     - `node scripts/check-type-performance.mjs` unchanged, since S9 must not touch core types or the bench inputs.
 - Depends on: S3 (`check_query`), S7 (editor and badge layout; done in `c9b9444`). Runs after S7 and before S8.
-- Status: in progress (the next Worker slice, handed over 2026-11-03; the scope is this entry, unchanged)
-- Note for the Worker: build `/scope.d.ts` from the same `TAKEN`/`editorSchema` bindings that S7 introduced (`process_table2`, `from_table`, …), so the type checker and the runtime scope can never disagree.
+- Status: **done** (Tester OK after 2 rounds). Committed and pushed by the orchestrator as `3b1e6f8` on `studio`. There is one open item: the latency target for heavy queries (F21, needs a user decision).
+- Note for the Worker (applied): build `/scope.d.ts` from the same `TAKEN`/`editorSchema` bindings that S7 introduced (`process_table2`, `from_table`, …), so the type checker and the runtime scope can never disagree.
 - Evidence:
+  - Gates (round 2):
+    - Root `pnpm typecheck` passes.
+    - Root `pnpm test`: 128 files, 1703 passed, 2 skipped (2 runs).
+    - Studio `test`: 264 passed, 1 skipped (F22).
+    - Studio `test:integration`: 41/41.
+    - Studio `build` produces `dist/main.js` (74 KB) and `dist/types-worker.js` (21 KB).
+    - `check-type-performance` is unchanged.
+  - Round 1, found and fixed:
+    - Inserting odd column names gave the invalid `c.["x"]`; completions now use TypeScript's replacement span.
+    - Completions appeared inside strings; they are now filtered there.
+    - "Typechecks" showed for code that doesn't run. A new `check()` adds a type-only runnable-query assertion plus the eval guard's diagnostics (imports, async, …).
+    - The GUIDE cheat sheet is now generated and tested (`test/cheatsheet.test.ts`: each example passes the same check as `check_query`).
+    - The LanguageService moved to a worker thread (`server/types-worker.ts`, `types-client.ts`).
+  - Round 2 checks:
+    - 11 legitimate shapes raise no false positives, and 4 contract cases each report an error.
+    - Worker burst of 200 requests: 198 superseded, the last one real. `check_query` requests are never dropped.
+    - Killing the worker rejects in-flight requests, and the worker restarts.
+    - Memory went from 836 to 951 MB over 500 edits. No squiggle flicker was observed.
+    - The built bin uses the worker bundle.
+  - **Run latency while typing** (the event loop is free): p50 13–16 ms, max 28 ms. Before the worker it was 0.8–2.6 s.
+  - **Editor latency** (Worker's p50/p95):
+    - Light queries: completions 76/109 ms, diagnostics 80/119 ms. Within the 150/300 ms targets.
+    - Heavy aggregate queries: completions 263/289 ms, diagnostics 265/282 ms; the Tester measured about 295 ms per heavy edit.
+    - **The heavy-query completions miss the 150 ms p95 target.** They stay under R12's 300 ms end-to-end ceiling only marginally. Cause: core's aggregate overload types, which are out of S9 scope (F21).
+  - PM code read:
+    - `server/types.ts` (340 lines) provides `check`, `checkExact`, completions and hover. tRPC exposes `types.diagnostics/completions/hover`.
+    - `clickhouse.ts` `checkAsync` runs the type check in the worker for `check_query`.
+    - The GUIDE says type errors (line:col) must be fixed.
+- Follow-ups:
+  - **F21 (needs a user decision; the orchestrator is raising it):** heavy-query type-check latency of about 265–295 ms comes from core's aggregate overloads. Options: accept it, or open core type-performance work, which lies outside the studio and is subject to the `test/types/bench` budget rules.
+  - **F22:** `export { q as default }` gives a false "No query found". It is rare; recorded as a skipped test in `test/types-tester.test.ts`.
+  - **F23:** columns named `ir`, `_rowType` or with a `__` prefix are hidden from completions (they collide with `Expr` internals).
+  - **F24:** no completions inside an element access string (`e['…`).
+  - **F19:** still open; see S8.
 
 ### S8 — Gates and manual smoke
 - Refs: all.
 - Acceptance:
-  - Green: `pnpm typecheck`, `pnpm test`, `pnpm build`, the studio integration test, and studio's own typecheck/build.
-  - A full `pnpm check:all` passes, so the studio package, `pnpm -r build` and the lockfile changes don't regress the existing gate. Record its duration.
-  - F12 bundle size: sql-formatter is lazy-loaded for the SQL tab (dynamic `import()`, like vega). Record the main `index-*.js` size before and after; target a clear reduction from 861 KB. Formatting falls back to raw SQL while the chunk loads.
-  - `packages/studio/README.md`, short and requested by the orchestrator, covering:
+  - **F12 bundle size (Worker).**
+    - sql-formatter loads via dynamic `import()` when the SQL tab is first shown, like vega. While it loads, or if it fails, the raw SQL is shown.
+    - Record the main `dist/web/assets/index-*.js` size before and after. The baseline at `3b1e6f8` is 878 KB (it grew from 861 KB through S7 and S9).
+    - Acceptance: sql-formatter is in its own chunk, and the main chunk shrinks by that chunk's size, give or take a few KB.
+    - Playwright: the SQL tab still shows formatted SQL.
+  - **`packages/studio/README.md` (Worker), short (about 1 screen), covering:**
     - what it is;
-    - the start command and the flags/env vars (connection, `--model`, `--pi-dir`, `--data-dir`, `--port`);
-    - pi credentials, the default model `openai-codex/gpt-5.6-sol`, and the "LLM unavailable" behaviour;
-    - the keyboard shortcuts, auto-limit, and where saved queries live;
-    - the evaluation trust model (in-process, not a sandbox, single local user).
-  - Decide whether the studio integration tests join `check:all` (currently not wired). Record the decision.
-  - Only when the orchestrator asks: one manual smoke with the real pi credential and a real ClickHouse, covering prompt → query → run → chart → save. Record model, latency and any auth refresh.
+    - the start commands: `pnpm --filter @typedhouse/studio dev` from the repo, and the `typedhouse-studio` bin after `pnpm build`;
+    - connection flags and env (`--url/--user/--password/--database`, `TYPEDHOUSE_*`), plus `--port`, `--data-dir` and `--pi-dir`;
+    - pi credentials (read from `~/.pi/agent/auth.json`, shared with `pi`, never copied);
+    - the default model `openai-codex/gpt-5.6-sol`, `--model`/`TYPEDHOUSE_STUDIO_MODEL`, ⌘K "Switch model…", and the "LLM unavailable" behaviour;
+    - the keyboard shortcuts table: ⌘↵ ⌘/ ⌘L ⌘G ⌘1–3 ⌘K ⌘S;
+    - auto-limit 100, and where saved queries live (`<data-dir>/saved.json`);
+    - limitations: single local user, queries run in-process (not a sandbox), readonly=2 connection, heavy-query type-check latency (F21).
+    - No other docs changes; the docs site is out of scope.
+  - **F19 (Tester):** `test/s7.test.ts` leaves no temp dir behind. Use `afterAll` + `rm`, not `process.on('exit')`. Evidence: the count of `/tmp` entries is the same before and after `pnpm --filter @typedhouse/studio test`.
+  - **Final gates (Tester), on the final tree:**
+    - root `pnpm typecheck` and `pnpm test`;
+    - studio `typecheck`, `test`, `test:integration` and `build`;
+    - **`pnpm check:all`**, with its duration recorded;
+    - `~/.typedhouse` and `~/.pi` unchanged across all of them.
+  - **Decision recorded here: studio integration tests stay out of `check:all` for now.** The studio is private and unpublished, and its suite needs Docker plus about 1 minute extra. It is run via `pnpm --filter @typedhouse/studio test:integration`. Revisit if the studio is ever published or CI-gated. The orchestrator may override.
+  - **Real-model smoke (orchestrator)** against the fixture ClickHouse with the real pi credential and `openai-codex/gpt-5.6-sol`. Do the following, and record the attempts, latency, and any auth refresh or `auth.json` change:
+    - Generate one query.
+    - Confirm that its type check reports "Typechecks", and that it runs.
+    - Generate one chart over its result.
+    - Save it.
+    - Reload the page and load it again.
   - Nothing committed under `apps/playground/`.
-  - The final gates and the real-model smoke cover S9: type-checked generation, plus completions and diagnostics in the browser.
 - Depends on: S1–S7, S9 (order: S7 → S9 → S8)
-- Status: todo
+- Status: in progress (the final slice; Worker: F12 + README; Tester: F19 + gates; orchestrator: smoke)
 - Evidence:
 
 ## Round-trip property: inserted rows read back and filter exactly (2026-11-03)
