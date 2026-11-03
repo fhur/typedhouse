@@ -148,6 +148,14 @@ The client compiles queries independently; compiler registration is not required
 
 Keep credentials on the server. Never paste them into the playground or include them in a browser bundle. Parameterization keeps values separate from SQL; your application must still enforce tenant and access rules.
 
+## Insert typed rows
+
+Build an insert with `const command = from(foo).insertMany(rows)`, then write it with `await client.execute(command)`. Row types come from the table descriptor; declared `DEFAULT` columns may be omitted, while `ALIAS` and `MATERIALIZED` columns cannot be supplied. Use `InsertRow<typeof foo>` to annotate reusable input arrays.
+
+Inserts are separate from SELECT queries: only direct `from(table)` exposes `insertMany`; `run` and `stream` remain read-only. Empty batches are no-ops. Supported values are validated before sending, and commands snapshot their inputs. Execution never retries automatically—a failed request may already have written data.
+
+See the [insert guide](https://fhur.github.io/typedhouse/docs/reference/inserts/) for a complete example, supported types, and the ClickHouse 24.8 performance caveat for batches with different omitted default columns. This API is implemented in the workspace; check availability in your installed release.
+
 ## Generate TypeScript types from your ClickHouse schema
 
 Use schema introspection instead of maintaining table descriptors by hand. From the source repository:

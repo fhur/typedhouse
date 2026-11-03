@@ -1,6 +1,7 @@
 export * from './ch-type.js';
 export * from './columns.js';
 export * from './table.js';
+export { InsertCommand, getInsertCommandData, type InsertRow, type InsertCommandData } from './insert.js';
 export * from './query.js';
 export * from './join.js';
 export * from './union.js';

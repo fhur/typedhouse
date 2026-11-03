@@ -161,6 +161,8 @@ try {
 
 **Never put credentials in the playground or a browser bundle.** The maintained integration target is ClickHouse 24.8. If a query fails on the server, inspect the SQL, parameters, and actual table schema rather than casting away types.
 
+For typed bulk writes, see [Inserts](/docs/reference/inserts/): build `from(table).insertMany(rows)` and use `client.execute(command)`. `run` and `stream` remain read-only.
+
 ## Refresh your schema
 
 Handwritten descriptors are useful for learning. For an application, generate them from your database so schema changes become visible to TypeScript:

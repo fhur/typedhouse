@@ -80,7 +80,7 @@ try {
   symlinkSync(join(root, 'packages/core'), join(directory, 'node_modules/@typedhouse/core'), 'dir');
   symlinkSync(join(root, 'node_modules/expect-type'), join(directory, 'node_modules/expect-type'), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
-  const files = ['packages/compiler/test/fixtures/corpus/supported-types.ts', 'test/types/bench/queries.ts', 'packages/compiler/test/fixtures/corpus/components-latest.ts', 'packages/compiler/test/fixtures/corpus/projection-enrichment.ts', 'packages/compiler/test/fixtures/corpus/known-functions.ts', 'packages/compiler/test/fixtures/corpus/sql-snippets.ts'];
+  const files = ['packages/compiler/test/fixtures/corpus/supported-types.ts', 'test/types/bench/queries.ts', 'packages/compiler/test/fixtures/corpus/components-latest.ts', 'packages/compiler/test/fixtures/corpus/projection-enrichment.ts', 'packages/compiler/test/fixtures/corpus/known-functions.ts', 'packages/compiler/test/fixtures/corpus/sql-snippets.ts', 'test/types/insert-corpus.ts'];
   const config = { compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true, incremental: false, skipLibCheck: false, types: [], declaration: true, rootDir: root, outDir: join(directory, 'emit'), paths: { '@typedhouse/core': [join(root, 'packages/core/dist/index.d.ts')] } }, files: files.map(f => join(root, f)) };
   const configPath = join(directory, 'tsconfig.json');
   writeFileSync(configPath, JSON.stringify(config));
@@ -136,6 +136,8 @@ try {
   sameOrRefresh(join(snapshots, 'sql-snippets-descriptors.json'), JSON.stringify(snippetOutput, null, 2) + '\n');
   sameOrRefresh(join(root, 'test/types/sql-snippets-corpus.ts'), `// Generated exact/not-any runtime correspondence.\nimport { expectTypeOf } from 'expect-type';\nimport type { Infer } from '@typedhouse/core';\nimport { snippetDistance } from '../../packages/compiler/test/fixtures/corpus/sql-snippets.js';\nimport type { SnippetDistance } from './snapshots/corpus/sql-snippets-row.js';\nexpectTypeOf<Infer<typeof snippetDistance>>().toEqualTypeOf<SnippetDistance>();\nexpectTypeOf<Infer<typeof snippetDistance>>().not.toBeAny();\n`);
   declarations.push([`sql-snippets-${actualVersion}.d.ts`, readFileSync(join(directory, 'emit', files[5].replace(/\.ts$/, '.d.ts')), 'utf8')]);
+  // Commands have no relational output: snapshot their actual public declarations separately.
+  declarations.push([`insert-${actualVersion}.d.ts`, readFileSync(join(directory, 'emit', files[6].replace(/\.ts$/, '.d.ts')), 'utf8')]);
   const coverage = JSON.parse(readFileSync(join(root, 'test/types/corpus-coverage.json'), 'utf8'));
   assert.equal(coverage.fullM3, false);
   assert.equal(new Set(coverage.entries.map(e => e.id)).size, coverage.entries.length, 'Duplicate coverage IDs');

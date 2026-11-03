@@ -1,8 +1,9 @@
 import { createClient as createDriver, type ClickHouseClientConfigOptions } from '@clickhouse/client';
-import { compile, emitNaive } from '@typedhouse/compiler';
+import { compile, emitNaive, quoteIdentifier } from '@typedhouse/compiler';
 import { unwrap, type CompiledQuery, type Rel } from '@typedhouse/core';
 import { rowDecoder } from './decode.js';
 import { QueryError } from './errors.js';
+import type { EncodedInsert } from './encode-insert.js';
 
 /** A reusable execution recipe, not a cursor. Treat compiled metadata as read-only.
  * Plans belong to the exact backend instance that compiled them; do not copy them
@@ -19,6 +20,8 @@ export interface Backend {
   readonly name: string;
   compile(rel: Rel): Plan;
   run(plan: Plan): AsyncIterable<unknown[]>;
+  /** Optional bulk write capability. The facade validates the complete batch first. */
+  insert?(batch: EncodedInsert): Promise<void>;
 }
 
 /** Thin adapter over @clickhouse/client: options are passed through unchanged.
@@ -89,6 +92,38 @@ export function createClickHouseBackend(options: ClickHouseClientConfigOptions =
           } finally { stream.destroy(); }
         } finally { result.close(); }
       } catch (cause) { throw new QueryError(compiled, cause); }
+    },
+    async insert(batch: EncodedInsert): Promise<void> {
+      if (batch.rows.length === 0) return;
+      const [first, ...rest] = batch.columns;
+      if (first === undefined) throw new Error('insert_requires_columns');
+      const firstKeys = Object.keys(batch.rows[0]!);
+      const mixedPresence = batch.rows.some(row => Object.keys(row).length !== firstKeys.length || firstKeys.some(key => !Object.hasOwn(row, key)));
+      await driver.insert({
+        table: quoteIdentifier(batch.table),
+        columns: [quoteIdentifier(first), ...rest.map(quoteIdentifier)],
+        values: [...batch.rows],
+        format: 'JSONEachRow',
+        clickhouse_settings: {
+          // ClickHouse 24.8 evaluates dependent DEFAULTs against other columns'
+          // defaults across a mixed-presence block, ignoring supplied values.
+          // Homogeneous key sets (including columns omitted by every row) are
+          // safe at normal block sizes. Only mixed presence needs one-row parser
+          // blocks to preserve per-row dependencies, still in one request.
+          ...(mixedPresence ? { max_insert_block_size: '1' } : {}),
+          input_format_defaults_for_omitted_fields: 1,
+          input_format_null_as_default: 0,
+          input_format_skip_unknown_fields: 0,
+          input_format_allow_errors_num: '0',
+          input_format_allow_errors_ratio: 0,
+          input_format_import_nested_json: 0,
+          input_format_json_named_tuples_as_objects: 1,
+          input_format_json_defaults_for_missing_elements_in_named_tuple: 0,
+          input_format_json_ignore_unknown_keys_in_named_tuple: 0,
+          date_time_input_format: 'best_effort',
+          async_insert: 0,
+        },
+      });
     },
     close: () => driver.close(),
   } satisfies Backend & { runBuffered(plan: Plan): Promise<unknown[]>; close(): Promise<void> };

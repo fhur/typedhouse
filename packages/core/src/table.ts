@@ -15,7 +15,7 @@ export interface TableMetadata {
    * Shadow-only: never selectable, never a row field; the compiler's alias guards treat them as physical columns. */
   readonly hiddenColumns?: readonly string[];
 }
-type SourceMetadata<M extends TableMetadata> = 'source' extends keyof M ? Pick<M, Extract<keyof M, 'source'>> : { readonly source?: never };
+type SourceMetadata<M extends TableMetadata> = ('source' extends keyof M ? Pick<M, Extract<keyof M, 'source'>> : { readonly source?: never }) & Pick<M, Extract<keyof M, 'columnMetadata' | 'hiddenColumns'>>;
 declare const rowType: unique symbol;
 export interface TableDef<R = Record<string, unknown>> extends TableMetadata {
   readonly name: string;

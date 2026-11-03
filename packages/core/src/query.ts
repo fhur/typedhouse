@@ -6,6 +6,7 @@ import { exprNode, flatOutput, relNode, type ExprNode, type FlatColumns, type Re
 import type { CHType } from './ch-type.js';
 import type { TableDef } from './table.js';
 import type { Infer, Row } from './types.js';
+import { InsertCommand, type InsertRow, type ExactInsertRow } from './insert.js';
 
 export interface Caps { readonly live: boolean }
 export interface CompiledQuery {
@@ -455,7 +456,13 @@ type SourceLive<T extends TableDef> = T extends { readonly source: object } ? tr
  * from(components).where(c => c.matched_part_ids.notEmpty()).map(c => c.entityId);
  * ```
  */
-export function from<T extends TableDef>(table: T): TableQuery<Infer<T>, { live: SourceLive<T> }, DescribedRow<Infer<T>, T['columns']>> {
+export class FromQuery<T extends TableDef> extends TableQuery<Infer<T>, { live: SourceLive<T> }, DescribedRow<Infer<T>, T['columns']>> {
+  insertMany<R extends readonly InsertRow<T>[]>(rows: R & readonly ExactInsertRow<R[number], InsertRow<T>>[]): InsertCommand {
+    if (this.ir.kind !== 'Scan' || this.ir.final !== undefined || this.ir.sample !== undefined) throw new Error('invalid_insert_source');
+    return InsertCommand.create(this.ir.table, rows as readonly Readonly<Record<string, unknown>>[]);
+  }
+}
+export function from<T extends TableDef>(table: T): FromQuery<T> {
   const output = flatOutput(Object.entries(table.columns));
-  return new TableQuery<Infer<T>, { live: SourceLive<T> }, DescribedRow<Infer<T>, T['columns']>>(relNode({ kind: 'Scan', table, columns: output.columns, output }), { live: table.source !== undefined } as { live: SourceLive<T> });
+  return new FromQuery<T>(relNode({ kind: 'Scan', table, columns: output.columns, output }), { live: table.source !== undefined } as { live: SourceLive<T> });
 }

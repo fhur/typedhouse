@@ -40,7 +40,9 @@ assert.deepEqual(parseCliDiagnostics('a.ts(4,1): error TS2769: No overload match
 const directory = mkdtempSync(join(tmpdir(), 'typedhouse-diagnostics-'));
 try {
   mkdirSync(join(directory, 'node_modules/@typedhouse'), { recursive: true });
-  symlinkSync(resolve('packages/core'), join(directory, 'node_modules/@typedhouse/core'), 'dir');
+  for (const name of ['core', 'client', 'compiler']) symlinkSync(resolve(`packages/${name}`), join(directory, `node_modules/@typedhouse/${name}`), 'dir');
+  mkdirSync(join(directory, 'node_modules/@types'), { recursive: true });
+  symlinkSync(resolve('node_modules/@types/node'), join(directory, 'node_modules/@types/node'), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
   const expected = [];
   const files = readdirSync('test/types/negative/expressions').filter(f => f.endsWith('.ts'));
@@ -55,9 +57,9 @@ try {
       if (m) expected.push({ file, line: index + 1, code: Number(m[1]), message: m[2] });
     });
   }
-  const config = { compilerOptions: { strict: true, exactOptionalPropertyTypes: true, noEmit: true, target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', types: [], skipLibCheck: false }, include: ['*.ts'] };
+  const config = { compilerOptions: { strict: true, exactOptionalPropertyTypes: true, noEmit: true, target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', types: ['node'], skipLibCheck: false }, include: ['*.ts'] };
   if (process.argv.includes('--source')) {
-    config.compilerOptions.paths = { '@typedhouse/core': [resolve('packages/core/src/index.ts')] };
+    config.compilerOptions.paths = Object.fromEntries(['core', 'client', 'compiler'].map(name => [`@typedhouse/${name}`, [resolve(`packages/${name}/src/index.ts`)]]));
   }
   console.log(`Checking ${process.argv.includes('--source') ? 'source' : 'built'} declarations.`);
   writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify(config));

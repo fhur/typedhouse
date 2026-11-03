@@ -1,6 +1,16 @@
 # TypedHouse client
 
-`createClient` delegates transport, JSON parsing, streaming, backpressure and cancellation to `@clickhouse/client`. `run` collects rows; `stream` yields rows without collecting the whole result. Both backend modes use the same representation adapter and execution settings.
+`createClient` delegates transport, JSON parsing, streaming, backpressure and cancellation to `@clickhouse/client`. `run` collects rows; `stream` yields rows without collecting the whole result. Both are read-only. `execute` accepts typed bulk insert commands. Both backend modes use the same representation adapter and execution settings.
+
+## Inserts
+
+Build a command with `from(table).insertMany(rows)` from `@typedhouse/core`, then `await client.execute(command)`. Use `InsertRow<typeof table>` for reusable typed rows. Only direct `from(table)` supports inserts; commands have no `toSQL()` and cannot be passed to `run` or `stream`.
+
+Declared `DEFAULT` columns may be omitted; nullable columns still require a value or `null`. Generated/hidden columns are excluded, and only the supported insert type subset is accepted. Inputs are snapshotted at construction and the entire batch is validated before sending. Empty batches are no-ops. Close an owned client in `finally`.
+
+The standard backend uses the driver's bulk insert API. Custom backends may omit the optional insert capability. Writes are not automatically retried: a failure can leave the outcome unknown, and retrying may duplicate rows. Mixed column-presence batches preserve dependent defaults on ClickHouse 24.8 using one-row parser blocks, with a substantial throughput cost.
+
+See the [insert reference](https://fhur.github.io/typedhouse/docs/reference/inserts/) for a complete server-side example, supported types, defaults, and error handling.
 
 ## Response policy
 

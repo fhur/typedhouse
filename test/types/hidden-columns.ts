@@ -9,7 +9,7 @@ const plain = table('xm', columns, meta);
 expectTypeOf<Infer<typeof hidden>>().toEqualTypeOf<{ id: number; v: string }>();
 expectTypeOf<Infer<typeof hidden>>().toEqualTypeOf<Infer<typeof plain>>();
 expectTypeOf<'hidden' extends keyof Infer<typeof hidden> ? true : false>().toEqualTypeOf<false>();
-expectTypeOf(hidden.hiddenColumns).toEqualTypeOf<readonly string[] | undefined>(); // metadata, not part of the row type
+expectTypeOf(hidden.hiddenColumns).toEqualTypeOf<readonly string[] & readonly ['hidden', 'mat']>(); // metadata, not part of the row type
 // An output alias may still be named like a hidden column: it is an ordinary output of the query.
 const grouped = from(hidden).groupBy(r => ({ id: r.id })).aggregate(() => ({ hidden: count() })).where(r => r.hidden.gt(1n));
 expectTypeOf<Infer<typeof grouped>>().toEqualTypeOf<{ id: number; hidden: bigint }>();

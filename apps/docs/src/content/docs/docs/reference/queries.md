@@ -9,6 +9,10 @@ The [Query Builder section](/docs/query-builder/overview/) documents each implem
 
 [from](/docs/query-builder/tables/) — describe existing tables and start typed queries.
 
+## insertMany
+
+[Inserts](/docs/reference/inserts/) — build a typed bulk write directly from `from(table)` and execute it with `client.execute`, separately from read queries.
+
 ## where
 
 [where](/docs/query-builder/filtering/) — construct typed predicates without JavaScript comparisons.

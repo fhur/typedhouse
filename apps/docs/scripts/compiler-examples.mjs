@@ -18,7 +18,7 @@ const cache = new URL(`../node_modules/.cache/typedhouse-${section}-examples/`, 
 await mkdir(cache, { recursive: true });
 const files = [];
 const names = section === 'readme' ? ['README.md'] : section === 'guides'
-  ? ['getting-started.md', 'tutorials/composition.md', 'tutorials/advanced-example.md']
+  ? ['getting-started.md', 'tutorials/composition.md', 'tutorials/advanced-example.md', 'reference/inserts.md']
   : (await readdir(directory)).sort();
 for (const name of names) {
   if (!name.endsWith('.md')) continue;
@@ -65,7 +65,12 @@ for (const name of names) {
     await writeFile(sourcePath, [firstExampleSource ?? '', ...typecheckOnly.map(match => match[1])].join('\n\n'));
     files.push(fileURLToPath(sourcePath));
   }
-  if (section === 'guides' || section === 'readme') assert.ok(exampleIndex, `${name}: must contain an executable checkpoint`);
+  if (section === 'guides' || section === 'readme') {
+    if (name === 'reference/inserts.md') {
+      assert.equal(exampleIndex, 0, `${name}: write examples must never execute during the build`);
+      assert.ok(typecheckOnly.length, `${name}: must contain a typechecked server example`);
+    } else assert.ok(exampleIndex, `${name}: must contain an executable checkpoint`);
+  }
   const trailing = markdown.slice(previousEnd);
   assert.ok(!/```ts\n/.test(trailing), `${name}: TypeScript example is missing output markers`);
   if (!exampleIndex) continue;
