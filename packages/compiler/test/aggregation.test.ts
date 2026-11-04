@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { avg, avgIf, argMax, argMaxIf, type CHType, from, table, col, count, sum, sumState, val, columnExpr, exprNode, relNode, flatOutput, Expr } from '@typedhouse/core';
+import { avg, avgIf, argMax, argMaxIf, type CHType, type Column, type Query, from, table, col, count, sum, sumState, val, columnExpr, exprNode, relNode, flatOutput, Expr } from '@typedhouse/core';
 import { emitNaive } from '../src/index.js';
 const t = table('t', { k: col.String, n: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
 it('validates mean operands, modes, metadata and result descriptors authoritatively with paths', () => {
@@ -74,6 +74,19 @@ it('validates both argMax operands, conditional predicates and authoritative met
   if (forged.kind !== 'Aggregate' || forged.aggs.n?.kind !== 'Agg') throw new Error('expected Aggregate');
   const { id: _r, ...r } = forged; const { id: _a, ...a } = forged.aggs.n;
   expect(() => emitNaive(relNode({ ...r, aggs: { n: exprNode({ ...a, args: [a.args[0]!, columnExpr(col.Nullable(col.UInt32), nullableVersion.ir.id, ['v'], 'v', 'grouped').ir] }) } }))).toThrow(/incompatible_operands/);
+});
+it('accepts date/time argMax versions and rejects wrapped or sub-millisecond ones, date values, and date avg input', () => {
+  const source = (version: Column) => from(table('t', { n: col.UInt32, version }, { engine: 'Memory', sortingKey: [], partitionKey: [] })) as unknown as Query<{ n: number; version: number }>;
+  for (const version of [col.Date, col.Date32, col.DateTime(), col.DateTime('UTC'), col.DateTime64(0), col.DateTime64(3, 'UTC')]) {
+    expect(emitNaive(source(version).aggregate(g => ({ latest: argMax(g.n, g.version) })).ir).sql).toContain('argMax(');
+    expect(emitNaive(source(version).aggregate(g => ({ latest: argMaxIf(g.n, g.version, g.n.gt(0)) })).ir).sql).toContain('argMaxIf(');
+  }
+  for (const version of [col.Nullable(col.Date), col.LowCardinality(col.Date), col.Nullable(col.DateTime64(3)), col.DateTime64(4), col.DateTime64(9, 'UTC'), col.Decimal64(2)]) {
+    expect(() => emitNaive(source(version).aggregate(g => ({ latest: argMax(g.n, g.version) })).ir)).toThrow(/incompatible_operands/);
+  }
+  // Only the version widened: date values and avg/quantile input share the numeric matcher and stay rejected.
+  expect(() => emitNaive(source(col.Date).aggregate(g => ({ latest: argMax(g.version, g.n) })).ir)).toThrow(/incompatible_operands/);
+  expect(() => emitNaive(source(col.Date).aggregate(g => ({ mean: avg(g.version) })).ir)).toThrow(/incompatible_operands/);
 });
 it('adversarial argMax rejects invalid constant payloads in every operand and nested foreign calls', () => {
   const q = from(t), other = from(t);

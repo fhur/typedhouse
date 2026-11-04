@@ -2,7 +2,7 @@ import type { CHType } from '../ch-type.js';
 import { col } from '../columns.js';
 import type { Constant, DescribedExpr, Expr } from '../expr.js';
 import type { AggregateState, Decimal, Grouped } from '../types.js';
-import type { AvgDescriptor, AvgInputDescriptor, ArgMaxNumericDescriptor, ArgMaxOperand, ArgMaxValueDescriptor, DescriptorValue, MaxDescriptor, ResolvedExpr, SumDescriptor, SumPrecision } from './descriptor-types.js';
+import type { AvgDescriptor, AvgInputDescriptor, ArgMaxOperand, ArgMaxValueDescriptor, ArgMaxVersionDescriptor, DescriptorValue, MaxDescriptor, ResolvedExpr, SumDescriptor, SumPrecision } from './descriptor-types.js';
 import { aggregateCall, type AggregateDefinition } from './define.js';
 import { anyType, isNullable, nullable, numeric, unwrap } from './matchers.js';
 
@@ -16,6 +16,8 @@ type DescriptorSum<D extends CHType, T> = CHType extends D ? SumResult<T> :
     N extends `UInt${number}` | `Int${number}` ? bigint | Extract<T, null> : SumResult<T> : SumResult<T>;
 type OperandSum<E extends AggregateOperand<Numeric | null>> = DescriptorSum<E['ir']['type'] & CHType, OperandValue<E>>;
 const argMaxVersion = Object.freeze({ match: (t: CHType) => t.kind === 'scalar' && /^(U?Int(8|16|32|64|128|256)|Float(32|64))$/.test(t.name) });
+// DateTime64 above millisecond precision decodes as a string, not a Date, so it stays outside the version surface.
+const argMaxTemporalVersion = (t: CHType): boolean => t.kind === 'DateTime' || t.kind === 'DateTime64' && [0, 1, 2, 3].includes(t.precision) || t.kind === 'scalar' && (t.name === 'Date' || t.name === 'Date32' || t.name === 'DateTime');
 const argMaxValue = Object.freeze({ match: (t: CHType): boolean => {
   const base = t.kind === 'Nullable' ? t.inner : t;
   return argMaxVersion.match(base) || (base.kind === 'scalar' && (base.name === 'String' || base.name === 'Bool'));
@@ -34,7 +36,7 @@ export const aggregateDefinitions: readonly AggregateDefinition[] = [
     return t.kind === 'scalar' && t.name.startsWith('UInt') ? col.UInt64.type : col.Int64.type;
   }, tsReturns: 'SumResult<T>', nullable: 'propagate', deterministic: true, origin: 'typed', linear: true },
   { name: 'max', args: [anyType], returns: (args: readonly CHType[]) => isNullable(args[0]!) ? nullable(unwrap(args[0]!)) : unwrap(args[0]!), tsReturns: 'T', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
-  { name: 'argMax', args: [argMaxValue, argMaxVersion], returns: 'arg0', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
+  { name: 'argMax', args: [argMaxValue, Object.freeze({ match: (t: CHType) => argMaxVersion.match(t) || argMaxTemporalVersion(t) })], returns: 'arg0', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
   { name: 'avg', args: [Object.freeze({ match: (t: CHType) => argMaxVersion.match(t.kind === 'Nullable' ? t.inner : t) })], returns: col.Float64, nullable: 'propagate', deterministic: true, origin: 'typed', linear: true },
   { name: 'quantile', params: [col.Float64], args: [Object.freeze({ match: (t: CHType) => argMaxVersion.match(t.kind === 'Nullable' ? t.inner : t) })], returns: col.Float64, nullable: 'propagate', deterministic: false, origin: 'typed', linear: false },
   { name: 'uniqExact', args: [exactString], returns: col.UInt64, nullable: 'never', deterministic: true, origin: 'typed', linear: false },
@@ -65,12 +67,12 @@ interface QuantileIf { <E extends AggregateOperand<number | bigint | null>, P ex
 interface Max { <E extends AggregateOperand<unknown>>(value: E): ResolvedExpr<OperandValue<E>, OperandName<E, 'max'>, 'agg', ResultDescriptor<E['ir']['type'], 'max'>> }
 interface MaxIf { <E extends AggregateOperand<unknown>, P extends AggregateOperand<boolean | null>>(value: E, predicate: P): ResolvedExpr<OperandValue<E>, OperandName<E, OperandName<P, 'max'>>, 'agg', ResultDescriptor<E['ir']['type'], 'max'>> }
 type ArgMaxValue = AggregateOperand<number | bigint | string | boolean | null>;
-type ArgMaxVersion = AggregateOperand<number | bigint>;
+type ArgMaxVersion = AggregateOperand<number | bigint | Date>;
 interface ArgMax {
-  <E extends ArgMaxValue, V extends ArgMaxVersion>(value: E & ArgMaxOperand<E['ir']['type'], ArgMaxValueDescriptor>, version: V & ArgMaxOperand<V['ir']['type'], ArgMaxNumericDescriptor>): ResolvedExpr<OperandValue<E>, OperandName<E, 'argMax'>, 'agg', E['ir']['type']>;
+  <E extends ArgMaxValue, V extends ArgMaxVersion>(value: E & ArgMaxOperand<E['ir']['type'], ArgMaxValueDescriptor>, version: V & ArgMaxOperand<V['ir']['type'], ArgMaxVersionDescriptor>): ResolvedExpr<OperandValue<E>, OperandName<E, 'argMax'>, 'agg', E['ir']['type']>;
 }
 interface ArgMaxIf {
-  <E extends ArgMaxValue, V extends ArgMaxVersion, P extends AggregateOperand<boolean | null>>(value: E & ArgMaxOperand<E['ir']['type'], ArgMaxValueDescriptor>, version: V & ArgMaxOperand<V['ir']['type'], ArgMaxNumericDescriptor>, predicate: P): ResolvedExpr<OperandValue<E>, OperandName<E, 'argMax'>, 'agg', E['ir']['type']>;
+  <E extends ArgMaxValue, V extends ArgMaxVersion, P extends AggregateOperand<boolean | null>>(value: E & ArgMaxOperand<E['ir']['type'], ArgMaxValueDescriptor>, version: V & ArgMaxOperand<V['ir']['type'], ArgMaxVersionDescriptor>, predicate: P): ResolvedExpr<OperandValue<E>, OperandName<E, 'argMax'>, 'agg', E['ir']['type']>;
 }
 type StateResult<E extends { readonly ir: { readonly type: CHType | null } }, F extends string> = CHType extends E['ir']['type'] ? Expr<AggregateState<F>, OperandName<E, F>, 'agg'> : DescribedExpr<AggregateState<F>, OperandName<E, F>, 'agg', { readonly kind: 'AggregateFunction'; readonly fn: F; readonly args: [E['ir']['type'] & CHType] }>;
 interface State<F extends string> { <E extends AggregateOperand<unknown>>(value: E): StateResult<E, F> }
@@ -191,7 +193,7 @@ export const maxState = derived[2]!.State as State<'max'>;
  * ```
  */
 export const maxMerge = derived[2]!.Merge as Merge<'max', unknown>;
-/** Select the value associated with the greatest non-null numeric version.
+/** Select the value associated with the greatest non-null numeric or date/time version.
  * NULL values are skipped; equal maximal versions have no stable tie breaker.
  * Values are limited to numeric, String, or Bool scalars, optionally nullable.
  * @example

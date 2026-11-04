@@ -1,13 +1,13 @@
 ---
 title: argMax
-description: Select the value associated with the greatest numeric version.
+description: Select the value associated with the greatest numeric or date version.
 sidebar:
   order: 53
 ---
 
-`argMax(value, version)` returns the value associated with the greatest version, preserving the value's type. The typed surface accepts integer, float, String, or Bool values (including nullable values) and a non-null integer or float version. Decimal, date, and tuple operands are outside this surface.
+`argMax(value, version)` returns the value associated with the greatest version, preserving the value's type. The typed surface accepts integer, float, String, or Bool values (including nullable values) and a non-null integer, float, `Date`, `Date32`, `DateTime` or `DateTime64` (precision 0–3) version, so `argMax(row.value, row.date)` picks the latest value. Date values, Decimal operands and tuple operands are outside this surface.
 
-NULL values are skipped. Equal maximal versions have no stable tie breaker: use a unique numeric version when deterministic selection matters. Binary `State`/`Merge` execution is not exposed.
+NULL values are skipped. Equal maximal versions have no stable tie breaker: use a unique version when deterministic selection matters. Binary `State`/`Merge` execution is not exposed.
 
 ## Example
 

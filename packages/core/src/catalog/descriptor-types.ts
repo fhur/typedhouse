@@ -31,6 +31,8 @@ export type MaxDescriptor<D> = WithNull<Unwrapped<D>, IsNullable<D>>;
 export type ArgMaxNumericDescriptor = { readonly kind: 'scalar'; readonly name: `${'UInt' | 'Int'}${8 | 16 | 32 | 64 | 128 | 256}` | 'Float32' | 'Float64' };
 export type AvgInputDescriptor = ArgMaxNumericDescriptor | { readonly kind: 'Nullable'; readonly inner: ArgMaxNumericDescriptor };
 export type AvgDescriptor<D> = CHType extends D ? CHType : WithNull<{ readonly kind: 'scalar'; readonly name: 'Float64' }, IsNullable<D>>;
+/** Date/time versions must decode as `Date`, which bounds DateTime64 to millisecond precision. */
+export type ArgMaxVersionDescriptor = ArgMaxNumericDescriptor | { readonly kind: 'scalar'; readonly name: 'Date' | 'Date32' | 'DateTime' } | { readonly kind: 'DateTime' } | { readonly kind: 'DateTime64'; readonly precision: 0 | 1 | 2 | 3 };
 export type ArgMaxScalarDescriptor = ArgMaxNumericDescriptor | { readonly kind: 'scalar'; readonly name: 'String' | 'Bool' };
 export type ArgMaxValueDescriptor = ArgMaxScalarDescriptor | { readonly kind: 'Nullable'; readonly inner: ArgMaxScalarDescriptor };
 export type ArgMaxOperand<D, Allowed> = CHType extends D ? unknown : D extends Allowed ? unknown : never;

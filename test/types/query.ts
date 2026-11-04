@@ -185,6 +185,9 @@ const nestedLatest = unionAll(latestMetrics, latestMetrics).cte().aggregate(g =>
 expectTypeOf<Infer<typeof nestedLatest>>().toEqualTypeOf<{ selected: bigint; label: string }>();
 expectTypeOf<Infer<typeof nestedLatest>>().not.toBeAny();
 expectTypeOf(nestedLatest.row.selected.ir.type.name).toEqualTypeOf<'UInt256'>();
+const readings = from(table('readings', { animalId: col.UInt32, value: col.Float64, label: col.Nullable(col.String), date: col.Date, date32: col.Date32, at: col.DateTime(), atUtc: col.DateTime('UTC'), precise: col.DateTime64(3), preciseUtc: col.DateTime64(0, 'UTC') }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const latestByDate = readings.groupBy(r => r.animalId).aggregate(g => ({ date: argMax(g.value, g.date), date32: argMax(g.value, g.date32), at: argMax(g.value, g.at), atUtc: argMax(g.value, g.atUtc), precise: argMax(g.value, g.precise), preciseUtc: argMax(g.value, g.preciseUtc), label: argMaxIf(g.label, g.date, g.value.gt(0)) }));
+expectTypeOf<Infer<typeof latestByDate>>().toEqualTypeOf<{ animalId: number; date: number; date32: number; at: number; atUtc: number; precise: number; preciseUtc: number; label: string | null }>();
 const nullableLatestScalar = metrics.map(() => scalar(metrics.aggregate(g => argMaxIf(g.lead, g.version, g.enabled))));
 expectTypeOf<Infer<typeof nullableLatestScalar>>().toEqualTypeOf<{ lead: number | null }>();
 expectTypeOf<Infer<typeof nullableLatestScalar>>().not.toBeAny();

@@ -680,6 +680,20 @@ it('selects latest tenant metrics with FINAL, NULL skipping, conditional exclusi
   expect(await client.run(scoped.limit(0).aggregate(g => ({ stock: argMax(g.stock_index, g.version), lead: argMax(g.lead_time_max_days, g.version) })))).toEqual([{ stock: 0, lead: null }]);
   expect(await client.run(scoped.limit(0).groupBy(r => r.entityId).aggregate(g => argMax(g.stock_index, g.version)))).toEqual([]);
 });
+it('picks the latest value by Date, Date32, DateTime and millisecond DateTime64 argMax versions through run and stream', async () => {
+  await sql('CREATE TABLE argmax_dates (id UInt32, value Float64, d Date, d32 Date32, dt DateTime(\'UTC\'), dt64 DateTime64(3, \'UTC\')) ENGINE=Memory');
+  // The greatest version is neither the first row inserted nor the greatest value, and Date32/DateTime64 cross 1970.
+  await sql("INSERT INTO argmax_dates VALUES (1,40,'2026-01-01','1950-01-01','2026-01-01 00:00:00','1969-12-31 23:59:59.998'),(1,38.5,'2026-01-03','1960-01-01','2026-01-01 00:00:02','1969-12-31 23:59:59.999'),(1,10,'2026-01-02','1955-01-01','2026-01-01 00:00:01','1969-12-31 23:59:59.997')");
+  const source = from(table('argmax_dates', { id: col.UInt32, value: col.Float64, d: col.Date, d32: col.Date32, dt: col.DateTime('UTC'), dt64: col.DateTime64(3, 'UTC') }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const latest = source.groupBy(r => r.id).aggregate(g => ({ d: argMax(g.value, g.d), d32: argMax(g.value, g.d32), dt: argMax(g.value, g.dt), dt64: argMax(g.value, g.dt64), conditional: argMaxIf(g.value, g.d, g.value.gt(39)) }));
+  const expected = [{ id: 1, d: 38.5, d32: 38.5, dt: 38.5, dt64: 38.5, conditional: 40 }];
+  expect(await client.run(latest)).toEqual(expected);
+  const rows = []; for await (const row of client.stream(latest)) rows.push(row);
+  expect(rows).toEqual(expected);
+  // The typed query and handwritten SQL agree.
+  const direct = (await sql("SELECT id,argMax(s.value,s.d) AS d,argMax(s.value,s.d32) AS d32,argMax(s.value,s.dt) AS dt,argMax(s.value,s.dt64) AS dt64,argMaxIf(s.value,s.d,s.value>39) AS conditional FROM argmax_dates AS s GROUP BY id FORMAT JSONEachRow")).trim();
+  expect(JSON.parse(direct)).toEqual(expected[0]);
+});
 it('matches pinned argMax widths, nullable empty defaults and Bool/String descriptors through run and stream', async () => {
   const source = from(db.entity_ots_component).limit(1);
   const descriptors: Column[] = [col.UInt8, col.UInt16, col.UInt32, col.UInt64, col.UInt128, col.UInt256, col.Int8, col.Int16, col.Int32, col.Int64, col.Int128, col.Int256, col.Float32, col.Float64, col.String, col.Bool];

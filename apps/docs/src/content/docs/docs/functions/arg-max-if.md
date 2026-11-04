@@ -7,7 +7,7 @@ sidebar:
 
 `argMaxIf(value, version, predicate)` selects the value associated with the greatest version among rows whose Bool predicate is true. False and NULL predicates exclude rows; NULL values are skipped.
 
-Values may be integers, floats, String, or Bool, including nullable variants. Versions must be non-null integers or floats. The value's type is preserved. Equal maximal versions have no stable tie breaker, so use a unique numeric version when deterministic selection matters. Decimal, date, and tuple operands and binary `State`/`Merge` execution are not exposed.
+Values may be integers, floats, String, or Bool, including nullable variants. Versions must be non-null integers, floats, `Date`, `Date32`, `DateTime` or `DateTime64` (precision 0–3). The value's type is preserved. Equal maximal versions have no stable tie breaker, so use a unique version when deterministic selection matters. Date values, Decimal operands, tuple operands and binary `State`/`Merge` execution are not exposed.
 
 ## Example
 
