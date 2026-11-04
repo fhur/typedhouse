@@ -29,6 +29,7 @@ export default defineConfig({
             { label: 'Getting started', slug: 'docs/getting-started' },
             { label: 'Simple example', slug: 'docs/tutorials/composition' },
             { label: 'Advanced example', slug: 'docs/tutorials/advanced-example' },
+            { label: 'Latest value and average', slug: 'docs/tutorials/latest-and-average' },
           ],
         },
         { label: 'Query Builder', items: [{ autogenerate: { directory: 'docs/query-builder' } }] },

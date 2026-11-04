@@ -1,3 +1,13 @@
+## argMax date versions and the "Latest value and average" guide (2026-11-04)
+
+**Done (uncommitted).** `argMax` and `argMaxIf` now accept a non-null `Date`, `Date32`, `DateTime` or `DateTime64` (precision 0–3) version, so "latest value by date" no longer needs a numeric workaround. New guide `tutorials/latest-and-average.md` joins dogs to per-animal temperature stats using `argMax(agg.value, agg.date)` and `avg`. It is registered in the Guides sidebar and in `compiler-examples.mjs`.
+
+**Scope kept narrow.** Only the version operand widened. Date *values* stay rejected, and `avg`/`quantile` keep their numeric matcher. `Nullable` and `LowCardinality` date versions stay rejected, as wrapped numeric versions already were. `DateTime64(4..9)` stays rejected because it decodes as `string`, not `Date`; the type and runtime checks share that bound.
+
+**Diagnostic wording.** The wider version union makes TypeScript 5.5.4 report `argMax(g.n, max(g.n))` as `not assignable to parameter of type 'ArgMaxVersion'`, the wording TypeScript 7 already used. The call is still rejected, so `z-arg-max.ts` now has one expectation for it.
+
+**Evidence.** `check:all` passes on TypeScript 5.5.4 and latest (1440 unit tests passed and 1 skipped, 372 compiler integration tests passed). Precise diagnostics pass on 5.5.4, 5.8.3 and latest. `docs:verify` passes. `check-type-performance.mjs --all` passes with the budget unchanged. A new native test covers all four date types through `run` and `stream`, including pre-1970 values, and compares with handwritten SQL. The guide's result table and its `avgIf`/`leftJoin` alternatives were run on ClickHouse 24.8. Negative controls in `aggregation.test.ts`: dropping the runtime widening, dropping the precision bound, and leaking `Date` into the shared numeric matcher each fail the new test.
+
 ## Round-trip property: inserted rows read back and filter exactly (2026-11-03)
 
 **Done (branch `fix-parameter-roundtrip`).** New property `packages/client/test/roundtrip.integration.ts` covers one column of every type the insert encoder can write. For fast-check rows it checks three things: insert, then read back by id equals the row, then `where(id).where(<column> = <value>)` returns exactly that row for each column (`isNull()` for nulls). It runs through both the optimizing and the naive emitter. Default seed 20261103, 100 runs; override with `TYPEDHOUSE_ROUNDTRIP_SEED` / `_RUNS`. A failure names the differing columns. Idea from the user: a value the types accept must survive insert, read and filter.

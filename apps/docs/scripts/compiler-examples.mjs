@@ -18,7 +18,7 @@ const cache = new URL(`../node_modules/.cache/typedhouse-${section}-examples/`, 
 await mkdir(cache, { recursive: true });
 const files = [];
 const names = section === 'readme' ? ['README.md'] : section === 'guides'
-  ? ['getting-started.md', 'tutorials/composition.md', 'tutorials/advanced-example.md', 'reference/inserts.md']
+  ? ['getting-started.md', 'tutorials/composition.md', 'tutorials/advanced-example.md', 'tutorials/latest-and-average.md', 'reference/inserts.md']
   : (await readdir(directory)).sort();
 for (const name of names) {
   if (!name.endsWith('.md')) continue;
