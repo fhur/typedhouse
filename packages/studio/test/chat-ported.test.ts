@@ -47,8 +47,8 @@ async function setup(options: { maxTurns?: number; timeoutMs?: number; abortGrac
   const send = (text: string, source = '', chatId: string | null = null, sample?: unknown[]) => llm.chat.send({ chatId, text, source, ...(sample ? { sample } : {}) });
   return { faux, llm, send };
 }
-const call = (...sources: unknown[]) => fauxAssistantMessage(sources.map(source => fauxToolCall('check_query', { source } as { source: string })), { stopReason: 'toolUse' });
-const chartCall = (spec: unknown) => fauxAssistantMessage([fauxToolCall('check_chart', { spec } as never)], { stopReason: 'toolUse' });
+const call = (...sources: unknown[]) => fauxAssistantMessage(sources.map(source => fauxToolCall('query_apply', { source } as { source: string })), { stopReason: 'toolUse' });
+const chartCall = (spec: unknown) => fauxAssistantMessage([fauxToolCall('chart_apply', { spec } as never)], { stopReason: 'toolUse' });
 
 /** Invariant: whatever comes back as ok passed the server-side check; a failure is never a passing result. */
 function assertSafe(result: ChatSendResult) {
@@ -177,7 +177,7 @@ describe('the check-and-fix loop in chat (from llm-tester.test.ts)', () => {
     ['empty object', {}],
   ])('malformed tool arguments (%s) do not pass and do not crash', async (_name, args) => {
     const { faux, send } = await setup({ maxTurns: 3 });
-    faux.setResponses([fauxAssistantMessage([fauxToolCall('check_query', args as { source: string })], { stopReason: 'toolUse' }), call(good1)]);
+    faux.setResponses([fauxAssistantMessage([fauxToolCall('query_apply', args as { source: string })], { stopReason: 'toolUse' }), call(good1)]);
     const result = await send('countries');
     assertSafe(result);
     expect(result).toMatchObject({ ok: true, turn: { source: good1 } });

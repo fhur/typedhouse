@@ -120,7 +120,7 @@ describe('text to query (faux model) against the fixture schema', () => {
       expect((await client.meta.get.query()).model).toEqual({ available: true, provider: model.provider, modelId: model.id });
       const wrong = 'export default from(entity_ots_component).groupBy(c => ({ state: c.state })).aggregate(g => ({ parts: sum(g.countOfPart) }))';
       const right = 'export default from(entity_ots_component).groupBy(c => ({ state: c.state })).aggregate(g => ({ components: count(), parts: sum(g.countOfParts) })).orderBy(r => r.state)';
-      const call = (source: string) => fauxAssistantMessage([fauxToolCall('check_query', { source })], { stopReason: 'toolUse' });
+      const call = (source: string) => fauxAssistantMessage([fauxToolCall('query_apply', { source })], { stopReason: 'toolUse' });
       let systemPrompt = '';
       faux.setResponses([(ctx: { systemPrompt?: string }) => { systemPrompt = JSON.stringify(ctx); return call(wrong); }, call(right)] as never);
       const generated = await client.chat.send.mutate({ chatId: null, text: 'parts per state', source: '' });
@@ -155,7 +155,7 @@ describe('prompt to chart (faux model) over a fixture result', () => {
       if (!ran.ok) throw new Error(JSON.stringify(ran.error));
       const columns = ran.columns.map(c => ({ name: c.name, type: c.type }));
       const sample = toChartData(ran.rows, ran.columns);
-      const call = (spec: unknown) => fauxAssistantMessage([fauxToolCall('check_chart', { spec } as never)], { stopReason: 'toolUse' });
+      const call = (spec: unknown) => fauxAssistantMessage([fauxToolCall('chart_apply', { spec } as never)], { stopReason: 'toolUse' });
       faux.setResponses([
         call({ mark: 'bar', encoding: { x: { field: 'status', type: 'nominal' }, y: { field: 'parts', type: 'quantitative' } } }),
         call({ mark: 'bar', encoding: { x: { field: 'state', type: 'nominal' }, y: { field: 'parts', type: 'quantitative' } } }),

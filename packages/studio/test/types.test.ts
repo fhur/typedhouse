@@ -129,7 +129,7 @@ describe('check_query requires 0 type errors (faux provider)', () => {
     llms.push(llm);
     return { faux, llm };
   };
-  const call = (source: string) => fauxAssistantMessage([fauxToolCall('check_query', { source })], { stopReason: 'toolUse' });
+  const call = (source: string) => fauxAssistantMessage([fauxToolCall('query_apply', { source })], { stopReason: 'toolUse' });
 
   it('a source that compiles at runtime but has a type error is refused; the fixed one passes on attempt 2', async () => {
     // Evaluates and compiles fine at runtime, but is not type-correct TypeScript.

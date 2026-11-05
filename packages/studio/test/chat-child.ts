@@ -15,7 +15,7 @@ const env = process.env;
 const log = (entry: unknown) => appendFileSync(env['CHILD_LOG']!, `${JSON.stringify(entry)}\n`);
 
 type Request = { systemPrompt?: string; messages: { role: string; content: unknown }[] };
-const toolCall = (source: string, summary?: string) => fauxAssistantMessage([fauxToolCall('check_query', { source, ...(summary ? { summary } : {}) })], { stopReason: 'toolUse' });
+const toolCall = (source: string, summary?: string) => fauxAssistantMessage([fauxToolCall('query_apply', { source, ...(summary ? { summary } : {}) })], { stopReason: 'toolUse' });
 function textOf(content: unknown): string {
   return typeof content === 'string' ? content : (content as { text?: string }[]).map(block => block.text ?? '').join('');
 }

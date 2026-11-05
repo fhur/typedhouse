@@ -50,8 +50,8 @@ afterAll(async () => {
 
 const q1 = 'export default from(entity_ots_component).orderBy(c => c.entityId).map(c => ({ id: c.entityId, parts: c.countOfParts }))';
 const q2 = `${q1}.limit(2)`;
-const query = (source: string) => fauxAssistantMessage([fauxToolCall('check_query', { source })], { stopReason: 'toolUse' });
-const chart = (args: Record<string, unknown>) => fauxAssistantMessage([fauxToolCall('check_chart', args as never)], { stopReason: 'toolUse' });
+const query = (source: string) => fauxAssistantMessage([fauxToolCall('query_apply', { source })], { stopReason: 'toolUse' });
+const chart = (args: Record<string, unknown>) => fauxAssistantMessage([fauxToolCall('chart_apply', args as never)], { stopReason: 'toolUse' });
 const bar = { mark: 'bar', encoding: { x: { field: 'id', type: 'nominal' }, y: { field: 'parts', type: 'quantitative' } } };
 
 describe('chart, edit and stop against ClickHouse 24.8', () => {

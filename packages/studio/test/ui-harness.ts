@@ -44,8 +44,8 @@ await conn.refresh();
 const good = 'export default from(entity_ots_component).orderBy(c => c.entityId).map(c => ({ id: c.entityId, parts: c.countOfParts }))';
 const bad = 'export default from(no_such_table)';
 const bar = { mark: 'bar', encoding: { x: { field: 'id', type: 'nominal' }, y: { field: 'parts', type: 'quantitative' } } };
-const call = (source: string, summary?: string) => fauxAssistantMessage([fauxToolCall('check_query', { source, ...(summary ? { summary } : {}) })], { stopReason: 'toolUse' });
-const chartCall = (spec: unknown, source?: string) => fauxAssistantMessage([fauxToolCall('check_chart', { spec, ...(source ? { source } : {}), summary: 'Charted parts by id.' } as never)], { stopReason: 'toolUse' });
+const call = (source: string, summary?: string) => fauxAssistantMessage([fauxToolCall('query_apply', { source, ...(summary ? { summary } : {}) })], { stopReason: 'toolUse' });
+const chartCall = (spec: unknown, source?: string) => fauxAssistantMessage([fauxToolCall('chart_apply', { spec, ...(source ? { source } : {}), summary: 'Charted parts by id.' } as never)], { stopReason: 'toolUse' });
 let calls = 0;
 
 type Message = { role: string; content: unknown };
@@ -65,6 +65,22 @@ async function respond(context: { messages: Message[] }, options?: { signal?: Ab
   const secondRound = context.messages.at(-1)?.role === 'toolResult';
   if (has('dumpschema') && env['HARNESS_DUMP']) writeFileSync(env['HARNESS_DUMP'], JSON.stringify(context));
 
+  if (has('transparent')) {
+    if (secondRound) {
+      if (has('multicall') && (context.messages.at(-1) as Message & { toolName?: string }).toolName === 'docs_search') {
+        await new Promise(resolve => setTimeout(resolve, 1_000));
+        return fauxAssistantMessage([fauxToolCall('query_apply', { source: `throw new Error("<img src=x onerror=alert(1)>"); ${good}`, summary: 'Inspecting input' })], { stopReason: 'toolUse' });
+      }
+      await new Promise(resolve => setTimeout(resolve, 4_000));
+      return fauxAssistantMessage([fauxText('Finished the public check.')]);
+    }
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+    if (has('multicall')) return fauxAssistantMessage([fauxToolCall('docs_search', { query: 'select' })], { stopReason: 'toolUse' });
+    return fauxAssistantMessage([
+      fauxText('Checking <b>public progress</b>.'),
+      fauxToolCall('query_apply', { source: `throw new Error("<img src=x onerror=alert(1)>"); ${good}`, summary: 'Inspecting input' }),
+    ], { stopReason: 'toolUse' });
+  }
   const say = /say:(.*)/.exec(prompt);
   if (say) return fauxAssistantMessage([fauxText(say[1]!)]);
   const src = /src:(.*)/.exec(prompt);

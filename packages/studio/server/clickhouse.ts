@@ -2,10 +2,19 @@ import { ClickHouseLogLevel, createClient as createDriver } from '@clickhouse/cl
 import { createClient } from '@typedhouse/client';
 import { introspect, type DatabaseSchema } from '@typedhouse/codegen';
 import { print } from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
 import { editorSchema, editorScope, messageOf, prepare, schemaScope, StudioError, type Column } from './eval.js';
 import type { CheckResult } from './llm.js';
 import { createTypeService, type CoreMode, type TypeDiagnostic, type TypeService } from './types.js';
 import { createTypeWorker } from './types-client.js';
+
+/** Agent limits are fail-closed: overflow raises an error, never silently returns aggregates over a partial scan. */
+export const AGENT_SETTINGS = {
+  readonly: '2', max_execution_time: 10, timeout_overflow_mode: 'throw',
+  max_memory_usage: '268435456', max_rows_to_read: '1000000', max_bytes_to_read: '67108864',
+  read_overflow_mode: 'throw', max_result_rows: '501', max_result_bytes: '2097152',
+  result_overflow_mode: 'throw', max_threads: 2,
+} as const;
 
 export interface ConnectionConfig { url: string; username: string; password: string; database: string }
 /** `binding` is the identifier the table has in the editor (see `editorSchema`: never a core export name). */
@@ -37,9 +46,10 @@ export function connect(config: ConnectionConfig, typeOptions: { core?: CoreMode
   const options = { url: config.url, username: config.username, password: config.password, database: config.database, clickhouse_settings: { readonly: '2' as const }, log: { level: ClickHouseLogLevel.OFF } };
   const driver = createDriver(options);
   const client = createClient(options);
+  const agentClient = createClient({ ...options, request_timeout: 15_000, clickhouse_settings: AGENT_SETTINGS });
   let schema: DatabaseSchema = { tables: [], functions: [] };
   let scope: Record<string, unknown> = editorScope({});
-  let schemaError: string | undefined;
+  let schemaError: string | undefined = 'Schema has not been loaded';
   let names = new Map<string, string>();
   let source = '';
   /** Editor language intelligence over the same schema and bindings (R12). */
@@ -113,15 +123,43 @@ export function connect(config: ConnectionConfig, typeOptions: { core?: CoreMode
     database: config.database,
     refresh,
     runQuery,
+    /** Trusted local evaluator, not a hostile-code sandbox. Typecheck before evaluating. */
+    async runAgentQuery(input: string) {
+      if (schemaError) throw new Error(`Schema unavailable: ${schemaError}`);
+      if (input.length > 64_000) throw new Error('Source exceeds 64000 characters');
+      const errors = (await types.checkExact(input)).filter(d => d.severity === 'error');
+      if (errors.length) throw new StudioError('types', errors.slice(0, 8).map(d => `${d.line}:${d.column} ${d.message}`).join('\n').slice(0, 4000));
+      const prepared = prepare(input, scope, { autoLimit: false });
+      // Streaming preserves the client decoder and Array parameter transport behavior.
+      const execute = prepared.execute.limit(501);
+      const compiled = compile(execute.ir);
+      const started = performance.now();
+      const rows: unknown[] = [];
+      let resultBytes = 0;
+      try {
+        for await (const row of agentClient.stream(execute)) {
+          const value = transportValue(row);
+          // Server byte accounting can compress constant columns; also bound decoded wire/display bytes.
+          resultBytes += Buffer.byteLength(JSON.stringify(value, (_key, v: unknown) => typeof v === 'bigint' ? String(v) : v));
+          if (resultBytes > 2_097_152) throw new Error('Agent result exceeds 2097152 byte budget');
+          rows.push(value);
+        }
+      } catch (error) {
+        throw new StudioError('clickhouse', messageOf((error as { cause?: unknown }).cause ?? error) || 'ClickHouse request failed or exceeded a resource budget');
+      }
+      return { sql: compiled.sql, columns: prepared.columns, rows: rows.slice(0, 500), truncated: rows.length > 500, elapsedMs: Math.round(performance.now() - started) };
+    },
     check,
     /** The introspected tables as TypeScript, minus the generated-file header: what the LLM is told is in scope. */
     schemaSource: () => source,
+    /** Introspection metadata for bounded agent schema views (do not mutate). */
+    schemaMetadata: () => schema,
     types,
     checkAsync,
     driver,
     tables: (): TableSummary[] => schema.tables.map(t => ({ name: t.name, binding: names.get(t.name) ?? t.name, engine: t.engine, columns: t.columns.map(c => ({ name: c.name, type: print(c.type) })) })),
     schemaError: () => schemaError,
-    async close() { await Promise.all([driver.close(), client.close(), types.close()]); },
+    async close() { await Promise.all([driver.close(), client.close(), agentClient.close(), types.close()]); },
   };
 }
 export type Connection = ReturnType<typeof connect>;

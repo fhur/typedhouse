@@ -183,7 +183,7 @@ describe('models.select edge cases', () => {
       const used: string[] = [];
       let release!: () => void;
       const gate = new Promise<void>(resolve => { release = resolve; });
-      const reply = (_c: unknown, _o: unknown, _s: unknown, model: { id: string }) => { used.push(model.id); return fauxAssistantMessage([fauxToolCall('check_query', { source: 'x' })], { stopReason: 'toolUse' }); };
+      const reply = (_c: unknown, _o: unknown, _s: unknown, model: { id: string }) => { used.push(model.id); return fauxAssistantMessage([fauxToolCall('query_apply', { source: 'x' })], { stopReason: 'toolUse' }); };
       faux.setResponses([(async (c: unknown, o: unknown, s: unknown, m: { id: string }) => { await gate; return reply(c, o, s, m); }) as never, reply as never]);
       const first = llm.chat.send({ chatId: null, text: 'x', source: '' });
       await new Promise(resolve => setTimeout(resolve, 50));

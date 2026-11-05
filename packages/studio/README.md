@@ -10,7 +10,7 @@ package is private: it is not published.
 ```sh
 # From the repo root. Dev mode needs no prior build.
 TYPEDHOUSE_URL=http://localhost:8123 TYPEDHOUSE_USER=default TYPEDHOUSE_PASSWORD= TYPEDHOUSE_DATABASE=default \
-  pnpm --filter @typedhouse/studio dev            # prints http://127.0.0.1:5480
+  pnpm studio                                  # prints http://127.0.0.1:5480
 
 # The built bin: run `pnpm build` once, then
 node packages/studio/dist/main.js --url http://localhost:8123 --database default   # bin name: typedhouse-studio
@@ -49,11 +49,17 @@ results are on the right. There is no separate prompt box or chart prompt any mo
   lines, attempts and time. "in editor" marks the newest version that matches the editor, so a hand edit
   marks none. A reply replaces the editor in one undoable step.
 - **Only checked source reaches the editor.** A query is accepted when it type-checks and compiles. The model
-  gets the errors back and fixes them, for up to 6 rounds in a message. If it can't, or a run takes over 180 s,
+  gets the errors back and fixes them, for up to 16 rounds in a message. If it can't, or a run takes over 180 s,
   the thread shows an error turn and the editor stays as it was. "Load last attempt" puts a failed attempt in
   the editor by hand, without running it; one over 64,000 characters says it's too long to load.
 - **A reply may be just text**, such as a question or an answer about the data. It's a normal turn: no version,
   and the editor and results stay.
+- **Agent activity is compact.** A single live line starts with “Working…” and then shows the latest
+  tool in plain language, such as “Searching docs…”. Later calls add a `+n tool calls` disclosure,
+  counting earlier calls. Expand the line to inspect the chronological assistant/tool log, then expand
+  individual tools for arguments and results. Details stay collapsed by default; errors, interruptions
+  and display truncation remain explicit. Activity stays with its user message when you reopen a chat;
+  edited-away branches stay hidden. Private model reasoning and system instructions are not shown.
 - **Charts live in the chat.** "Bar chart of revenue" gives a version with a chart and moves to the Chart tab,
   leaving the query alone unless the chart needs it changed. A query reply moves to the Table tab.
 - **Auto-run.** A reply that changes the query runs by itself. Studio can only run reads (`readonly=2`). A chart
@@ -71,6 +77,29 @@ results are on the right. There is no separate prompt box or chart prompt any mo
 - **Past chats** are in the sidebar and ⌘K. Reopening one restores its thread, editor text and chart, and doesn't
   run anything, so results stay empty until you run. A new chat keeps the editor and results as they are. A chat's
   title is its first message; there is no rename or delete.
+
+## Agent tools
+
+The agent can explore before proposing changes:
+
+| Tool | Purpose |
+|---|---|
+| `query_validate` | Type-check TypedHouse source and compile it to SQL. |
+| `query_run` | Run a read-only query with mandatory resource and output limits. |
+| `query_results_get` | Read another bounded page of a stored result, without rerunning the query. |
+| `query_apply` | Validate and propose a query for the editor. |
+| `chart_validate` | Validate a Vega-Lite chart against query result columns. |
+| `chart_apply` | Validate and propose a chart, optionally with a query change. |
+| `tables_list` | List or search tables in the connected database. |
+| `table_describe` | Inspect table structure and metadata. |
+| `columns_describe` | Inspect bounded samples and value statistics for selected columns. |
+| `docs_search` | Search local TypedHouse documentation and API references. |
+| `docs_read` | Read a bounded part of a documentation page. |
+
+Validation and exploration do not change the editor. Only successful `query_apply` and `chart_apply`
+produce version turns and end the agent's turn. Result snapshots expire and are conversation-scoped;
+a restart or conversation fork may require rerunning a query. Truncated results and sampled column
+statistics are explicitly identified rather than presented as complete database statistics.
 
 ## Keys
 
@@ -144,7 +173,9 @@ the editor unless Ctrl+M is on.
 
 **Sample rows.** Once a current result exists (the last successful run is of exactly the source being sent), up to 20
 of its rows go to the model with **every** chat message, as JSON. They stay in `pi.sqlite` as part of the transcript.
-Without a current result, no rows are sent. Schema, query source and your messages go to the model too.
+Without a current result, no editor sample rows are sent. The agent can also request bounded query-result
+pages and column statistics through its tools; these outputs go to the model and remain in the transcript.
+Schema, query source, documentation excerpts and your messages go to the model too.
 
 **Charts can't load or link to anything.** The server refuses specs with `url` or `href`, image marks, `usermeta`, raw
 Vega, inlined data and `url(` literals, and feeds that back to the model. Chart rendering uses a loader that refuses

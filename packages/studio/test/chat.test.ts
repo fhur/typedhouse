@@ -36,7 +36,7 @@ const v2 = "export default from(events)\n  .where(e => e.country.eq('DE'))";
 const v3 = "export default from(events)\n  .where(e => e.country.eq('FR'))";
 const bad = 'export default from(evnts)';
 const typeError = 'export default from(events).where(e => e.nope.eq(1))';
-const call = (source: string, summary?: string) => fauxAssistantMessage([fauxToolCall('check_query', { source, ...(summary ? { summary } : {}) })], { stopReason: 'toolUse' });
+const call = (source: string, summary?: string) => fauxAssistantMessage([fauxToolCall('query_apply', { source, ...(summary ? { summary } : {}) })], { stopReason: 'toolUse' });
 const text = (value: string) => fauxAssistantMessage([fauxText(value)]);
 
 type Request = { systemPrompt?: string; messages: { role: string; content: unknown }[]; model?: string };
@@ -267,7 +267,7 @@ describe('check-and-fix on the chat path', () => {
 
   it('two calls in one round, passing then failing: never a version of the failing source', async () => {
     const { api, script } = await setup();
-    script(fauxAssistantMessage([fauxToolCall('check_query', { source: v1 }), fauxToolCall('check_query', { source: bad })], { stopReason: 'toolUse' }), call(v2));
+    script(fauxAssistantMessage([fauxToolCall('query_apply', { source: v1 }), fauxToolCall('query_apply', { source: bad })], { stopReason: 'toolUse' }), call(v2));
     expect(await api.chat.send({ chatId: null, text: 'x', source: '' })).toMatchObject({ ok: true, turn: { source: v2, attempts: 3 } });
   });
 

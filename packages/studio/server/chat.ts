@@ -8,6 +8,7 @@ import { checkChartSpec, type ChartColumn } from './chart.js';
 import { MAX_SOURCE } from '../web/rules.js';
 import type { Stage } from './eval.js';
 import type { ModelRef } from './pi.js';
+import { explorationTools, type ExplorationCapabilities } from './tools.js';
 
 /** `columns` are the result columns a chart may name. */
 export type CheckResult = { ok: true; sql: string; rowType: string; columns?: ChartColumn[] } | { ok: false; stage: Stage; message: string };
@@ -92,14 +93,14 @@ function chatMessage(text: string, source: string, columns: readonly ChartColumn
 
 type RunArgs = { source?: unknown; spec?: unknown; summary?: unknown };
 type RunOutcome = { attempts: number; last?: { tool: string; args: RunArgs; passed: boolean; output: string } };
-/** What the run came to, across both chat tools: the last result decides. */
+/** Only apply attempts decide editor changes. Historical check_* calls are readable, never advertised. */
 function readRun(messages: readonly Message[]): RunOutcome {
   const calls = new Map<string, RunArgs>();
   const out: RunOutcome = { attempts: 0 };
   for (const message of messages) {
     if (message.role === 'assistant') {
       for (const block of message.content) if (block.type === 'toolCall') calls.set(block.id, block.arguments as RunArgs);
-    } else if (message.role === 'toolResult' && (message.toolName === 'check_query' || message.toolName === 'check_chart')) {
+    } else if (message.role === 'toolResult' && (['query_apply', 'chart_apply', 'check_query', 'check_chart'].includes(message.toolName))) {
       out.attempts++;
       out.last = { tool: message.toolName, args: calls.get(message.toolCallId) ?? {}, passed: !message.isError, output: message.content.map(c => (c.type === 'text' ? c.text : '')).join('\n') };
     }
@@ -125,7 +126,7 @@ const ChatIndexDoc = defineDoc<ChatIndex>({
   checkpointWhen: (_value, _ops, info) => info.deltasSinceBase >= 50,
 });
 
-/** The source sent with the newest user turn: what `check_chart` validates against. A tool has no transcript to read. */
+/** The source sent with the newest user turn: what `chart_validate` / `chart_apply` validate against. A tool has no transcript to read. */
 const SentDoc = defineDoc<{ source: string }>({
   kind: 'studio.sent',
   version: 1,
@@ -156,7 +157,14 @@ export type ChatTurn = UserTurn | VersionTurn | TextTurn | ErrorTurn | NoteTurn;
 
 export interface ChatSummary { id: string; title: string; conversationId: number; updatedAt: number }
 export interface ChatListItem extends ChatSummary { generating: boolean }
-export interface ChatDetail extends ChatSummary { generating: boolean; turns: ChatTurn[] }
+/** Public model activity only. IDs are durable entry/message/block coordinates, stable across forks. */
+export type ActivityStatus = 'running' | 'success' | 'error' | 'interrupted';
+export type ChatActivity = { id: string; afterUserId: number; status: ActivityStatus } & (
+  | { kind: 'text'; text: string; truncated: boolean }
+  | { kind: 'toolCall'; toolCallId: string; toolName: string; arguments: string; truncated: boolean }
+  | { kind: 'toolResult'; toolCallId: string; toolName: string; text: string; truncated: boolean; isError: boolean }
+);
+export interface ChatDetail extends ChatSummary { generating: boolean; turns: ChatTurn[]; activity: ChatActivity[] }
 /** `replaceFrom`: the first user turn to drop, for edit-and-resend and retry. `sample`: result rows, when there is a result. */
 export type ChatSendInput = { chatId: string | null; text: string; source: string; sample?: readonly unknown[]; replaceFrom?: number };
 /** `ok: true` is a version or a text reply; a failed generation is `ok: false` with its error turn. */
@@ -166,6 +174,7 @@ export type ChatSendResult =
   | { ok: false; chatId: string; error: string; stopped: true; turn: NoteTurn };
 
 export interface ChatService {
+  create(): Promise<ChatSummary>;
   list(): Promise<ChatListItem[]>;
   /** `null` for an unknown chat. */
   get(id: string): Promise<ChatDetail | null>;
@@ -178,6 +187,7 @@ export interface ChatService {
 
 export function unavailableChats(reason: string): ChatService {
   return {
+    create: async () => { throw new Error(`LLM unavailable: ${reason}`); },
     list: async () => [],
     get: async () => null,
     send: async input => ({ ok: false, chatId: input.chatId, error: `LLM unavailable: ${reason}` }),
@@ -188,16 +198,13 @@ export function unavailableChats(reason: string): ChatService {
 
 // ---- The extension ----
 
-/**
- * The chat's tools and prompt. `check_query` ends the run when it passes, so `summary` travels with the call:
- * there is no later assistant text to read one from. Stored agent choices are names: do not rename the extension or the tool.
- */
-export function chatExtension(options: { guide: string; schema: () => string; check: (source: string) => CheckResult | Promise<CheckResult> }) {
+/** Apply ends the run on success. Keep the extension name stable for stored conversations. */
+export function chatExtension(options: { guide: string; schema: () => string; check: (source: string) => CheckResult | Promise<CheckResult>; exploration?: ExplorationCapabilities }) {
   const tooLong = (source: string) => (source.length > MAX_SOURCE ? `The source has ${source.length} characters; the editor takes at most ${MAX_SOURCE}. Make it shorter.` : undefined);
   const refused = (message: string) => ({ output: [{ type: 'text' as const, text: message }], isError: true });
-  const checkQuery = defineTool({
-    name: 'check_query',
-    description: 'Compile the complete TypedHouse source. Returns the ClickHouse SQL and the row type, or the error to fix.',
+  const queryTool = (apply: boolean) => defineTool({
+    name: apply ? 'query_apply' : 'query_validate',
+    description: apply ? 'Validate and apply the complete query to the editor. Ends the turn on success; include a summary.' : 'Type-check and compile a complete query without running it or changing the editor. Returns SQL and row type or errors.',
     parameters: obj({
       source: str({ description: 'The complete query.ts source' }),
       summary: opt(str({ description: 'One line for the user saying what changed' })),
@@ -206,13 +213,13 @@ export function chatExtension(options: { guide: string; schema: () => string; ch
       const long = tooLong(args.source);
       if (long) return refused(long);
       const result = await options.check(args.source);
-      if (result.ok) return { output: [{ type: 'text' as const, text: `OK. Row type: ${result.rowType}\nSQL:\n${result.sql}` }], control: { terminate: true } };
+      if (result.ok) return { output: [{ type: 'text' as const, text: `OK. Row type: ${result.rowType}\nSQL:\n${result.sql}` }], ...(apply ? { control: { terminate: true as const } } : {}) };
       return refused(`${result.stage} error: ${result.message}`);
     },
   });
-  const checkChart = defineTool({
-    name: 'check_chart',
-    description: 'Validate a complete Vega-Lite spec (a JSON object) against the columns of the query. Pass source only when the chart needs a query change: it is checked first, and the spec against its columns. Returns OK or the error to fix.',
+  const chartTool = (apply: boolean) => defineTool({
+    name: apply ? 'chart_apply' : 'chart_validate',
+    description: `${apply ? 'Validate and apply a chart to the editor; ends the turn on success.' : 'Validate a chart without changing the editor.'} Pass a complete Vega-Lite spec without data. Optional source changes the query used for validation; otherwise uses the editor query.`,
     parameters: {
       type: 'object',
       properties: {
@@ -232,12 +239,12 @@ export function chatExtension(options: { guide: string; schema: () => string; ch
       if (!result.ok) return refused(`The query does not pass. ${result.stage} error: ${result.message}`);
       const chart = checkChartSpec(args.spec, result.columns ?? []);
       if (!chart.ok) return refused(chart.message);
-      return { output: [{ type: 'text' as const, text: 'OK. The chart renders over the result rows.' }], control: { terminate: true } };
+      return { output: [{ type: 'text' as const, text: 'OK. The chart renders over the result rows.' }], ...(apply ? { control: { terminate: true as const } } : {}) };
     },
   });
   return defineExtension({
     name: 'typedhouse-chat',
-    tools: [checkQuery, checkChart],
+    tools: [queryTool(false), queryTool(true), chartTool(false), chartTool(true), ...explorationTools(options.exploration)],
     sections: [
       section('guide', () => options.guide, { tag: false }),
       section('schema', () => `Tables in scope (generated from the database):\n\`\`\`ts\n${options.schema()}\`\`\``),
@@ -307,13 +314,86 @@ function toTurns(entries: readonly EntryRecord[]): ChatTurn[] {
     } else if (entry.kind === NOTE_KIND) {
       turns.push({ kind: 'note', id, text: (entry.data as { text: string }).text });
     } else if (entry.kind === REPLY_KIND) {
-      const { type, ...data } = entry.data as ReplyData;
+      const { type, activity: _activity, ...data } = entry.data as ReplyData & { activity?: ChatActivity[] };
       if (type === 'version') turns.push({ kind: 'version', id, n: ++versions, ...(data as Omit<VersionData, 'type'>) });
       else if (type === 'text') turns.push({ kind: 'text', id, ...(data as Omit<TextData, 'type'>) });
       else turns.push({ kind: 'error', id, ...(data as Omit<ErrorData, 'type'>) });
     }
   }
   return turns;
+}
+
+/** Bound each public payload independently; never serialize whole model messages (which contain reasoning). */
+export const MAX_ACTIVITY_TEXT = 16_000;
+function toActivity(entries: readonly EntryRecord[], generating: boolean): ChatActivity[] {
+  const activity: ChatActivity[] = [];
+  const savedActivity = (entry: EntryRecord): ChatActivity[] => entry.kind === NOTE_KIND || entry.kind === REPLY_KIND ? (entry.data as unknown as { activity?: ChatActivity[] }).activity ?? [] : [];
+  const frozenUsers = new Set(entries.flatMap(e => savedActivity(e).map(a => a.afterUserId)));
+  let afterUserId: number | undefined;
+  let finalText: string[] = [];
+  let finalPublicText = '';
+  let closed = false;
+  const calls = new Map<string, ChatActivity & { kind: 'toolCall' }>();
+  const finishedCalls = new Set<string>();
+  const abandonedCalls = new Set<string>();
+  const bounded = (text: string) => ({ text: cut(text, MAX_ACTIVITY_TEXT), truncated: text.length > MAX_ACTIVITY_TEXT });
+  for (const entry of entries) {
+    if (entry.kind === USER_KIND) { afterUserId = entry.id; finalText = []; finalPublicText = ''; closed = false; }
+    if (afterUserId === undefined) continue;
+    // A stuck run branches at the user entry for safe model history. Its public activity is retained separately.
+    if (savedActivity(entry).length) {
+      const saved = savedActivity(entry);
+      activity.push(...saved);
+      for (const item of saved) if (item.kind === 'toolCall') abandonedCalls.add(`${item.afterUserId}:${item.toolCallId}`);
+    }
+    if (entry.kind === REPLY_KIND) {
+      const reply = entry.data as ReplyData;
+      // The final assistant message is already rendered by TextTurn. Remove its blocks only, not earlier commentary.
+      if (reply.type === 'text') {
+        if (finalPublicText.trim() === reply.text.trim()) {
+          for (let i = activity.length - 1; i >= 0; i--) if (finalText.includes(activity[i]!.id)) activity.splice(i, 1);
+        }
+      }
+    }
+    if (entry.kind === NOTE_KIND || entry.kind === REPLY_KIND) closed = true;
+    if (closed || frozenUsers.has(afterUserId)) continue;
+    for (const [messageIndex, message] of (entry.model ?? []).entries()) {
+      const base = `${entry.id}:${messageIndex}`;
+      if (message.role === 'assistant') {
+        finalText = [];
+        finalPublicText = '';
+        for (const [blockIndex, block] of message.content.entries()) {
+          const id = `${base}:${blockIndex}`;
+          if (block.type === 'text') {
+            activity.push({ id, afterUserId, kind: 'text', status: 'success', ...bounded(block.text) });
+            finalText.push(id);
+            finalPublicText += block.text;
+          } else if (block.type === 'toolCall') {
+            const args = bounded(json(block.arguments));
+            const call: ChatActivity & { kind: 'toolCall' } = { id, afterUserId, kind: 'toolCall', toolCallId: block.id, toolName: block.name, arguments: args.text, truncated: args.truncated, status: 'interrupted' };
+            calls.set(`${afterUserId}:${block.id}`, call);
+            activity.push(call);
+          }
+        }
+      } else if (message.role === 'toolResult') {
+        // Fork repair may synthesize results later. The abandoned run's frozen public snapshot is authoritative.
+        const key = `${afterUserId}:${message.toolCallId}`;
+        if (abandonedCalls.has(key)) continue;
+        finishedCalls.add(key);
+        const call = calls.get(key);
+        if (!call) continue;
+        const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+        // pi-durable writes a synthetic error result when aborting a tool, including during restart recovery.
+        const aborted = message.isError && text === `<harness>\n[error] Tool ${message.toolName} was aborted\n</harness>`;
+        const status = aborted ? 'interrupted' : message.isError ? 'error' : 'success';
+        if (call && call.status !== 'error') call.status = status;
+        activity.push({ id: base, afterUserId, kind: 'toolResult', toolCallId: message.toolCallId, toolName: message.toolName, status, isError: message.isError, ...bounded(text) });
+      }
+    }
+  }
+  // Only unfinished calls in the current user turn can still be running.
+  if (generating) for (const [key, call] of calls) if (call.afterUserId === afterUserId && call.status === 'interrupted' && !finishedCalls.has(key)) call.status = 'running';
+  return activity;
 }
 
 const titleOf = (text: string) => cut(text.split('\n').map(line => line.trim()).find(Boolean) ?? 'Chat', 80);
@@ -391,7 +471,7 @@ export function createChats(harness: Harness, options: {
     const failed = (error: string, source: string | null, spec?: unknown): ErrorData => ({ type: 'error', error, source, ...(spec === undefined ? {} : { spec }), attempts, elapsedMs: elapsedMs() });
     if (last) {
       const argSource = typeof last.args.source === 'string' ? last.args.source : undefined;
-      const charting = last.tool === 'check_chart';
+      const charting = last.tool === 'chart_apply' || last.tool === 'check_chart';
       // The stored call is what counts: a value the tool coerced into a passing string was never a source.
       if (typeof last.args.source !== 'string' && (!charting || last.args.source !== undefined)) return failed('The model did not send the source as text.', null);
       if (!last.passed) return failed(`No valid ${charting ? 'chart' : 'query'} after ${attempts} attempts (${why}). Last error: ${last.output}`, argSource ?? null, charting ? last.args.spec : undefined);
@@ -448,6 +528,12 @@ export function createChats(harness: Harness, options: {
   }
 
   return {
+    async create() {
+      const conversation = await newConversation(options.model());
+      const record: ChatRecord = { id: randomUUID(), title: 'Chat', conversationId: conversation.id, updatedAt: Date.now() };
+      await harness.commit(async tx => { (await tx.doc(ChatIndexDoc)).chats.push(record); }, context);
+      return summarize(record);
+    },
     async list() {
       const generating = active?.chatId;
       return [...await records()].sort((a, b) => b.updatedAt - a.updatedAt).map(record => ({ ...summarize(record), generating: record.id === generating }));
@@ -458,7 +544,8 @@ export function createChats(harness: Harness, options: {
       const record = (await records()).find(c => c.id === id);
       const conversation = record && await conversationOf(record.conversationId);
       if (!record || !conversation) return null;
-      return { ...summarize(record), generating, turns: toTurns(await allEntries(conversation)) };
+      const entries = await allEntries(conversation);
+      return { ...summarize(record), generating, turns: toTurns(entries), activity: toActivity(entries, generating) };
     },
     send(input) {
       const fail = (error: string): ChatSendResult => ({ ok: false, chatId: input.chatId, error });
@@ -480,6 +567,7 @@ export function createChats(harness: Harness, options: {
             const found = record && await conversationOf(record.conversationId);
             if (!found) return fail(`Unknown chat ${input.chatId}.`);
             conversation = found;
+            retitle = !(await allEntries(found)).some(entry => entry.kind === USER_KIND);
             if (input.replaceFrom !== undefined) {
               const branched = await branch(found, input.replaceFrom, model);
               if (!branched) return fail(`Turn ${input.replaceFrom} is not a message of this chat.`);
@@ -511,6 +599,7 @@ export function createChats(harness: Harness, options: {
           }, context);
 
           let target = conversation;
+          let abandonedActivity: ChatActivity[] | undefined;
           let data: ReplyData | null;
           try {
             const submission = (await harness.submission(submissionId, context))!;
@@ -518,19 +607,30 @@ export function createChats(harness: Harness, options: {
             const entries = entry === undefined ? [] : await within(abortGrace, allEntries(conversation, entry)) ?? [];
             // The stuck run keeps the old conversation; the chat moves on, with the stopped message, to a fork of its own.
             // Whatever the run does later lands in the abandoned parent, which nothing reads.
-            if (stuck && entry !== undefined) target = await conversation.fork(entry, { ownership: { kind: 'ownerless' } }, context);
+            if (stuck && entry !== undefined) {
+              target = await conversation.fork(entry, { ownership: { kind: 'ownerless' } }, context);
+              const history = await allEntries(conversation);
+              const latestUser = history.filter(e => e.kind === USER_KIND).at(-1)?.id;
+              abandonedActivity = toActivity(history, false).filter(a => a.afterUserId === latestUser);
+            }
             data = await decide(run, input.source, entries.flatMap(e => e.model ?? []), answered, why, elapsedMs);
           } catch (error) {
             data = { type: 'error', error: error instanceof Error ? error.message : String(error), source: null, attempts: 0, elapsedMs: elapsedMs() };
           }
           // Stop wins, even over a check that passed at the same moment. From here a stop is too late.
           const stopped = run.stopped;
+          if (stopped && !abandonedActivity) {
+            const history = await allEntries(conversation);
+            const latestUser = history.filter(e => e.kind === USER_KIND).at(-1)?.id;
+            abandonedActivity = toActivity(history, false).filter(a => a.afterUserId === latestUser);
+          }
           run.recording = true;
           const write = stopped || data === null
             ? { kind: NOTE_KIND, data: { text: STOPPED } }
             : { kind: REPLY_KIND, data: data as unknown as JsonValue };
           await harness.commit(async tx => {
-            await target.submit(tx, { type: 'write', entry: write });
+            const entry = abandonedActivity?.length ? { ...write, data: { ...write.data as object, activity: abandonedActivity } as unknown as JsonValue } : write;
+            await target.submit(tx, { type: 'write', entry });
             const chat = (await tx.doc(ChatIndexDoc)).chats.find(c => c.id === chatId);
             if (chat) { chat.updatedAt = Date.now(); chat.conversationId = target.id; delete chat.running; }
           }, context);

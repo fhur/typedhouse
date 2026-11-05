@@ -5,8 +5,10 @@ import { createRegistry, Harness, MemoryStorage, type Storage } from '@earendil-
 import type { MutableModels } from '@earendil-works/pi-ai';
 import { chatExtension, createChats, endLeftoverRuns, unavailableChats, type ChatService, type CheckResult } from './chat.js';
 import type { ModelRef } from './pi.js';
+import type { ExplorationCapabilities } from './tools.js';
+export type { ExplorationCapabilities, ExplorationArgs } from './tools.js';
 
-/** The same compile path as a run, without ClickHouse: what `check_query` answers. */
+/** The same compile path as a run, without ClickHouse: what `query_validate` answers. */
 export type { CheckResult };
 export type ModelStatus = ({ available: true } & ModelRef) | { available: false; reason: string };
 
@@ -23,7 +25,7 @@ export interface Llm {
   close(): Promise<void>;
 }
 
-const MAX_TURNS = 6;
+const MAX_TURNS = 16;
 const TIMEOUT_MS = 180_000;
 /** After a timeout, how long to wait for the abort to settle before giving up on it (F1). */
 const ABORT_GRACE_MS = 5_000;
@@ -48,7 +50,7 @@ export function unavailableLlm(reason: string): Llm {
 
 /**
  * The cheat sheet's example tables and snippets. Every snippet type-checks and compiles against these
- * tables (test/cheatsheet.test.ts runs each through the same check as check_query).
+ * tables (test/cheatsheet.test.ts runs each through the same check as query_validate).
  */
 export const CHEAT_SHEET_TABLES: readonly (readonly [string, readonly (readonly [string, string])[]])[] = [
   ['events', [['id', 'UInt64'], ['ts', 'DateTime64(3)'], ['country', 'LowCardinality(String)'], ['status', 'String'], ['amount', 'Float64'], ['price', 'Float64'], ['qty', 'UInt32'], ['user_id', 'String'], ['account_id', 'UInt64']]],
@@ -81,11 +83,14 @@ Editor contract
 - Build the query synchronously: no async, await, Promise or timers.
 - Write one chained call per line (start each \`.where\`, \`.map\`, \`.groupBy\`, ... on its own line).
 - When combining several tables with unionAll, give every branch a literal label column such as \`source: val('<table>')\`, so the result says which table each row came from.
-- check_query type-checks the source like a TypeScript editor and compiles it; every type error (reported as line:col) must be fixed, not only runtime errors.
+- query_validate type-checks the source like a TypeScript editor and compiles it; every type error (reported as line:col) must be fixed, not only runtime errors.
 - This is a conversation about one query. Each user message ends with what the editor currently contains, which may include the user's own edits: build on that, not on your earlier source.
-- To change the query, call the check_query tool with the complete source and a one-line \`summary\` of what changed. If it reports an error, fix the source and call check_query again. Once it passes, stop; do not repeat the code in prose.
-- If the message needs no query change (a clarifying question, an answer about the data or the schema), reply in plain text without calling a tool.
-- To chart the result, call check_chart with a complete Vega-Lite spec as a JSON object and a one-line \`summary\`. The studio binds the rows: never set "data" (no values, no url) and never invent rows. Every "field" must be a result column of the query, or a name created earlier with "as" in a transform. Prefer simple marks, without "width", "height", "config" or colors. If the chart needs a query change, pass the complete new query as \`source\` in that same check_chart call instead of calling check_query. Unless the user asks for a query change, leave the query as it is.
+- Explore with tables_list, table_describe and columns_describe before guessing schema. Use docs_search then docs_read to learn supported builder APIs; do not invent methods.
+- Workflow: explore, query_validate, query_run when real data is needed, then query_apply (or chart_validate and chart_apply). Validation and execution never change the editor. query_results_get pages a query_run result in this conversation.
+- To change the query, call query_apply with complete source and a one-line \`summary\`. Fix any errors and retry. Only query_apply/chart_apply apply editor versions and end the turn. Do not repeat accepted code in prose.
+- Never invent data, counts or observations. Base data answers on actual tool results, and say when results are bounded or execution is unavailable.
+- If the message needs no query change (a clarifying question, an answer about the data or the schema), reply in plain text; use exploration tools when evidence is needed, but do not apply.
+- To chart the result, call chart_apply with a complete Vega-Lite spec as a JSON object and a one-line \`summary\`. The studio binds the rows: never set "data" (no values, no url) and never invent rows. Every "field" must be a result column of the query, or a name created earlier with "as" in a transform. Prefer simple marks, without "width", "height", "config" or colors. If the chart needs a query change, pass the complete new query as \`source\` in that same chart_apply call instead of calling query_apply. Unless the user asks for a query change, leave the query as it is.
 
 Builder cheat sheet
 ${cheatSheet()}
@@ -100,19 +105,20 @@ const query = from(events)
 export default query`;
 
 /**
- * The chat through pi-durable: one Harness over `storage`, and `check_query` and `check_chart` compiling through the same `prepare()`
+ * The chat through pi-durable: one Harness over `storage`, and `query_apply` and `chart_apply` compiling through the same `prepare()`
  * as a run. Conversations old installs made under other extensions stay in the file, unlisted: a stored extension name that isn't
  * installed is simply not selected, and any of their runs a kill left unfinished is ended at open.
  */
 export async function createLlm(options: {
   models: MutableModels; model: ModelRef; schema: () => string; check: (source: string) => CheckResult | Promise<CheckResult>;
   maxTurns?: number; storage?: Storage; timeoutMs?: number; abortGraceMs?: number;
+  exploration?: ExplorationCapabilities;
 }): Promise<Llm> {
   let model: ModelRef = { provider: options.model.provider, modelId: options.model.modelId };
   const maxTurns = options.maxTurns ?? MAX_TURNS;
   const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
   const registry = createRegistry();
-  const chatTools = chatExtension({ guide: CHAT_GUIDE, schema: options.schema, check: options.check });
+  const chatTools = chatExtension({ guide: CHAT_GUIDE, schema: options.schema, check: options.check, ...(options.exploration ? { exploration: options.exploration } : {}) });
   registry.install(chatTools);
   const harness = await Harness.open(options.storage ?? new MemoryStorage(), { models: options.models, registry, settings: { retry: { maxRetries: 2 } } }, context);
   const abortGraceMs = options.abortGraceMs ?? ABORT_GRACE_MS;

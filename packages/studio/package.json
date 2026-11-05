@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "tsx server/main.ts --dev",
-    "build": "vite build && tsup server/main.ts server/types-worker.ts --format esm --out-dir dist --no-splitting --clean=false",
+    "build": "vite build && tsx server/agent-docs.ts --bundle && tsup server/main.ts server/types-worker.ts --format esm --out-dir dist --no-splitting --clean=false",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --root ../.. packages/studio/",

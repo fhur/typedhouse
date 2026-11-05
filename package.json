@@ -16,6 +16,7 @@
     "test:compiler-integration": "vitest run --config vitest.compiler.config.ts",
     "generate:expr-surface": "tsup scripts/gen-expr-methods.ts --format esm --out-dir node_modules/.cache/typedhouse-expr && node node_modules/.cache/typedhouse-expr/gen-expr-methods.js",
     "verify:expr-surface": "pnpm generate:expr-surface --check && node scripts/verify-expr-surface.mjs && node scripts/check-type-diagnostics.mjs",
+    "studio": "pnpm --filter @typedhouse/studio dev",
     "docs:dev": "pnpm --filter @typedhouse/docs dev",
     "docs:build": "pnpm --filter @typedhouse/docs build",
     "docs:check": "pnpm --filter @typedhouse/docs check",

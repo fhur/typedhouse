@@ -17,7 +17,7 @@ const env = process.env;
 const log = (entry: unknown) => appendFileSync(env['CHILD_LOG']!, `${JSON.stringify(entry)}\n`);
 type Request = { messages: { role: string; content: unknown }[] };
 const textOf = (content: unknown) => (typeof content === 'string' ? content : (content as { text?: string }[]).map(block => block.text ?? '').join(''));
-const toolCall = (source: string) => fauxAssistantMessage([fauxToolCall('check_query', { source })], { stopReason: 'toolUse' });
+const toolCall = (source: string) => fauxAssistantMessage([fauxToolCall('query_apply', { source })], { stopReason: 'toolUse' });
 const hang = (options?: { signal?: AbortSignal }) => new Promise(resolve => options?.signal?.addEventListener('abort', () => resolve(fauxAssistantMessage('', { stopReason: 'aborted', errorMessage: 'Request was aborted' }))));
 
 function respond(ctx: Request, options?: { signal?: AbortSignal }) {

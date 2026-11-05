@@ -1,3 +1,39 @@
+## Studio working indicator
+
+- Removed the top-level disclosure arrow so only the live spinner remains; native keyboard/click expansion is preserved. Added a moving text sheen to live labels, disabled with a readable static fallback for reduced motion. Studio typecheck/build and both activity browser tests passed, including hidden marker and reduced-motion sheen checks.
+
+- Added a compact brand-colored rotating ring beside live activity labels (including Working and Stopping). It disappears when generation ends and remains static under `prefers-reduced-motion`.
+- Verified Studio typecheck/build and 2 activity browser tests, including animation, reduced-motion behavior and removal after stop.
+
+## Studio tool-call grouping
+
+- Each tool call is now one expandable item containing Inputs and Result, matched by user turn and tool-call ID (not tool name). Four calls with four results render as four items. Pending calls keep their identity when results arrive; errors and truncated outputs remain explicit.
+- Verified: Studio typecheck/build, 5 activity unit tests (including reversed result order and reused IDs across turns), and 2 activity browser tests passed.
+
+## Studio compact activity status
+
+- Replace the default per-event activity feed with a single compact status per user message: initial “Working…”, then the latest tool's human-readable label, with `+n tool calls` counting earlier calls.
+- Preserve the complete chronological public log behind an accessible disclosure; tool arguments/results remain individually collapsed. Completed activity remains inspectable without an endless working indicator. Activity and counts stay scoped to their own user turn.
+- Verified: root and Studio typechecks, build, 3 activity-summary unit tests and 2 browser activity tests passed. Browser coverage checks initial/live/latest labels, N−1 counts, pending-turn isolation, collapsed details, reopening, escaping and retained prior activity while editing a later turn. Empty completed activity creates no extra row. Visually checked existing `pi_tracer` conversation in the running dev app: tools now occupy one collapsed summary per turn.
+
+## Studio transparent agent conversation
+
+- Expose public assistant messages and tool call arguments/results in the chat log, including live progress, success/error/interrupted status and explicit display truncation. Do not expose private reasoning or system instructions; suppress duplicate final assistant text.
+- Keep activity separate from editor/version turns and anchor it to its user message. Use explicit new-chat creation before sending so the browser can follow a running conversation immediately, without guessing its identity from the sidebar.
+- Render expandable escaped-text tool details, preserve activity on reopen, and hide edited-away branches. Polling is observational and must not apply the same editor reply twice.
+- Verification: final Studio/root typechecks, build and diff check passed; 51 ClickHouse integration tests passed; 52 focused tool/restart tests passed; 8 final browser activity/chat-switch/stop/reload tests passed. Studio unit suite: 683 passed, 1 skipped, only the previously observed real model-cache `gpt-5.5` failure remains.
+- Browser sweep found and fixed polling-cleanup invalidation of newly opened chat reads and stale first-send sidebar titles. A broader 48-test browser selection hit the 240-second runner timeout; a focused rerun still showed four macOS shortcut-sensitive legacy tests (Control+A/Z/M assumptions). The shared editor select-all helper now uses ControlOrMeta; the whole browser suite is not claimed green.
+- Review additionally covered tool-call ID reuse after an interrupted run: frozen activity/result matching is scoped to its user turn, preventing a later reused call ID from losing its result.
+
+## Studio agent exploration tools
+
+- Added object-first tools: `query_validate`, `query_run`, `query_results_get`, `query_apply`, `chart_validate`, `chart_apply`, `tables_list`, `table_describe`, `columns_describe`, `docs_search`, `docs_read`.
+- Validation/exploration are nonterminal and do not produce editor versions. Apply remains validated and terminal; existing persisted legacy tool history stays readable. Default turn budget is 16.
+- Agent execution is read-only with mandatory server scan/time/memory/result budgets; bounded, expiring conversation-owned snapshots supply opaque-cursor result pages. Column statistics explicitly disclose bounded storage-order sampling. Local docs include function/API pages and are bundled for builds; schema/docs pages are bounded and cursor-paginated.
+- Root `pnpm studio` starts development mode. README documents tools, exploration data sent to the model, and trusted-local-code limitations.
+- Verification: root and Studio typechecks passed; Studio build passed; root unit suite: 2,118 passed, 2 skipped, one pre-existing `pi-tester.test.ts` failure caused by missing `gpt-5.5` in the local real model cache (also failed before implementation). Final ClickHouse integration suite: 51 passed; new tool/capability unit suites: 16 passed. Final Studio typecheck, build, and `git diff --check` passed. Browser suite/full Docker gate not rerun.
+- Read-only smoke against local `pi_tracer.tool_calls`: 11 columns described, 25 result rows paged as 20 + 5, one column profiled, `argMax` docs search returned 4 matches. No writes to the database.
+
 ## Studio (@typedhouse/studio) — done, R1–R13 (2026-11-04)
 
 Brief: requirements R1–R13 in the session's `studio-brief.md` (it's the source of truth; R12 was added 2026-11-03, R13 on 2026-11-04). Single user on localhost, so keep it simple: few files, few dependencies, no auth.

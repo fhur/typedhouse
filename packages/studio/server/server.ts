@@ -115,6 +115,7 @@ export function createRouter(conn: Connection, llm: Llm = unavailableLlm('not co
       select: t.procedure.input(modelInput).mutation(({ input }) => llm.selectModel(input)),
     }),
     chat: t.router({
+      create: t.procedure.mutation(() => llm.chat.create()),
       list: t.procedure.query(() => llm.chat.list()),
       get: t.procedure.input(chatIdInput).query(({ input }) => llm.chat.get(input.id)),
       send: t.procedure.input(chatSendInput).mutation(({ input }) => llm.chat.send(input)),

@@ -64,7 +64,7 @@ export const editorText = (page: Page) => page.evaluate(() => localStorage.getIt
 /** Replaces the editor text the way paste does, with no bracket closing in the way. */
 export async function setEditor(page: Page, text: string) {
   await page.click('.cm-content');
-  await page.keyboard.press('Control+a');
+  await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.insertText(text);
 }
 export async function sendMessage(page: Page, text: string) {

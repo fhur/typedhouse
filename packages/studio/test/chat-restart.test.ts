@@ -143,11 +143,15 @@ describe('restart: other ways to be cut off (SIGKILL)', () => {
     void api1.chat.send.mutate({ chatId: null, text: `PROMPT_ONE ${src('HANGCHECK')}`, source: '' }).catch(() => undefined);
     await first.until(() => first.log().some(entry => entry.type === 'check'), 'the check to start');
     const chatId = (await api1.chat.list.query())[0]!.id;
+    const liveActivity = (await api1.chat.get.query({ id: chatId }))!.activity;
+    expect(liveActivity).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'toolCall', status: 'running' })]));
     await first.kill('SIGKILL');
 
     const second = server(dataDir);
     const api2 = await second.api();
-    expect((await api2.chat.get.query({ id: chatId }))!.turns.map(t => t.kind)).toEqual(['user', 'note']);
+    const recovered = (await api2.chat.get.query({ id: chatId }))!;
+    expect(recovered.turns.map(t => t.kind)).toEqual(['user', 'note']);
+    expect(recovered.activity).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'toolCall', id: liveActivity[0]!.id, status: 'interrupted' })]));
     expect(second.log().filter(entry => entry.type !== 'open')).toHaveLength(0);
     expect(await api2.chat.send.mutate({ chatId, text: `PROMPT_TWO ${src('SOURCE_TWO')}`, source: '' })).toMatchObject({ ok: true, turn: { n: 1 } });
     const messages = second.requests()[0]!.request.messages as { role: string; content: unknown; toolCallId?: string }[];

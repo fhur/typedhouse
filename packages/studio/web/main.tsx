@@ -244,7 +244,7 @@ function App() {
   const threadEl = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
 
-  // The open chat. `chatId` null is a new chat, which exists on the server from its first send.
+  // The open chat. A new chat is created just before its first send, so it can be followed live.
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [chatId, setChatIdState] = useState<string | null>(() => store.get(CHAT_KEY));
   const [detail, setDetail] = useState<ChatDetail>();
@@ -382,11 +382,18 @@ function App() {
     try { setChats(await api.chat.list.query()); } catch { /* the thread reports a lost server */ }
   }, []);
 
-  /** Reads the open chat from the server. */
+  const detailRead = useRef(0);
+  const sentAfter = useRef(0);
+  /** Reads the open chat from the server; a newer read supersedes an older response. */
   const refreshDetail = useCallback(async (id: string | null): Promise<ChatDetail | null> => {
+    const read = ++detailRead.current;
     if (id === null) { setDetail(undefined); return null; }
     const found = await api.chat.get.query({ id });
+    if (read !== detailRead.current) return null;
     if (chatRef.current === id) setDetail(found ?? undefined);
+    if (found) setChats(current => current.map(chat => chat.id === found.id
+      ? { id: found.id, title: found.title, conversationId: found.conversationId, updatedAt: found.updatedAt, generating: found.generating }
+      : chat));
     return found;
   }, []);
 
@@ -418,7 +425,7 @@ function App() {
 
   /** A reply this page never saw arrive, because it reloaded while it was on its way. */
   const applyPending = useCallback((found: ChatDetail) => {
-    if (found.generating) return;
+    if (found.generating || sendingRef.current) return;
     const pending = parsePending(store.get(PENDING_KEY));
     if (pending?.chatId !== found.id) return;
     store.remove(PENDING_KEY);
@@ -456,22 +463,32 @@ function App() {
     return () => { live = false; };
   }, [applyPending, checkEdit, refreshDetail, setChatId]);
 
-  // A generation this page isn't waiting on, as after a reload: follow it until the reply is there.
-  const following = detail?.generating === true && sendingChat === undefined;
+  // Follow both our own send and a generation recovered after reload. Only the send
+  // callback applies our reply; polling is observational while that callback owns it.
+  const following = openGenerating && chatId !== null;
   useEffect(() => {
-    if (!following || !detail) return;
-    const id = detail.id;
+    if (!following || chatId === null) return;
+    const id = chatId;
+    let reading = false;
     const timer = setInterval(() => {
-      refreshDetail(id).then(found => { if (found && !found.generating) { applyPending(found); void refreshChats(); } }, () => undefined);
+      if (reading) return;
+      reading = true;
+      refreshDetail(id).then(found => {
+        if (found?.generating && stopWanted.current) {
+          stopWanted.current = false;
+          void api.chat.stop.mutate({ id }).catch(error => setChatError(`Could not stop: ${String(error)}`));
+        }
+        if (found && !found.generating) { applyPending(found); void refreshChats(); }
+      }, () => undefined).finally(() => { reading = false; });
     }, 500);
-    return () => clearInterval(timer);
-  }, [following, detail?.id, refreshDetail, applyPending, refreshChats]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { clearInterval(timer); };
+  }, [following, chatId, refreshDetail, applyPending, refreshChats]);
 
   // A generation ended, however it ended: the sidebar's marker goes with it.
   useEffect(() => { if (!openGenerating) void refreshChats(); }, [openGenerating, refreshChats]);
 
   // Another chat generating that this page isn't waiting on: watch for the end, so the line by the message box goes away.
-  const otherFollowing = sendingChat === undefined && chats.some(c => c.generating && c.id !== chatId);
+  const otherFollowing = (sendingChat !== undefined && sendingChat !== chatId) || chats.some(c => c.generating && c.id !== chatId);
   useEffect(() => {
     if (!otherFollowing) return;
     const timer = setInterval(() => void refreshChats(), 1_000);
@@ -492,6 +509,8 @@ function App() {
     const edit = current.editing;
     const replaceFrom = options.replaceFrom ?? edit?.turn;
     const keptTurns = replaceFrom === undefined ? current.detail?.turns ?? [] : (current.detail?.turns ?? []).filter(t => t.id < replaceFrom);
+    ++detailRead.current;
+    sentAfter.current = lastId(keptTurns);
     if (chat && current.detail) setDetail({ ...current.detail, turns: keptTurns });
     setEditing(undefined);
     if (edit && chat) saveEdit(chat, undefined);
@@ -503,33 +522,7 @@ function App() {
     setDraft('');
     store.set(PENDING_KEY, JSON.stringify({ chatId: chat, after: lastId(keptTurns), at: Date.now(), ...(replaceFrom === undefined ? {} : { replaced: replaceFrom }) }));
 
-    // Read now, not from the sidebar's list, which may not be there yet: this is how the new chat is recognised.
-    const before = new Set(chat === null ? (await api.chat.list.query().catch(() => [] as ChatSummary[])).map(c => c.id) : []);
-    // A new chat: the server names it, and a stop or a reload needs that before the reply is back.
     const known = { id: chat };
-    const adopt = async () => {
-      while (known.id === null && sendingRef.current) {
-        const listed = await api.chat.list.query().catch(() => [] as ChatSummary[]);
-        const made = listed.find(c => !before.has(c.id));
-        if (made && sendingRef.current) {
-          known.id = made.id;
-          setChats(listed);
-          // Named now, also if the page has left it: the sidebar's dot and the way to stop it need the name.
-          setSendingChat(made.id);
-          store.set(PENDING_KEY, JSON.stringify({ chatId: made.id, after: 0, at: Date.now() }));
-          // Still on this new chat: it is the open one now.
-          if (chatRef.current === null) {
-            setChatId(made.id);
-            store.set(editorKey(made.id), latest.current.source ?? '');
-            store.remove(draftKey(null));
-            if (stopWanted.current) void api.chat.stop.mutate({ id: made.id }).catch(() => undefined);
-          }
-          return;
-        }
-        await new Promise(resolve => setTimeout(resolve, 150));
-      }
-    };
-    void adopt();
 
     /** Nothing was recorded as far as this page knows: the words go back in the box of their chat, and a resend stays one. */
     const giveBack = () => {
@@ -546,18 +539,27 @@ function App() {
     };
 
     try {
-      const outcome = await api.chat.send.mutate({ chatId: chat, text: message, source: sent, ...(sample ? { sample } : {}), ...(replaceFrom === undefined ? {} : { replaceFrom }) });
+      if (known.id === null) {
+        const made = await api.chat.create.mutate();
+        known.id = made.id;
+        setSendingChat(made.id);
+        store.set(PENDING_KEY, JSON.stringify({ chatId: made.id, after: 0, at: Date.now() }));
+        if (chatRef.current === null) {
+          store.set(editorKey(made.id), latest.current.source ?? '');
+          store.set(draftKey(made.id), latest.current.draft);
+          store.remove(draftKey(null));
+          setChatId(made.id);
+        }
+        void refreshChats();
+      }
+      const outcome = await api.chat.send.mutate({ chatId: known.id, text: message, source: sent, ...(sample ? { sample } : {}), ...(replaceFrom === undefined ? {} : { replaceFrom }) });
       const id = outcome.chatId ?? known.id;
-      const unnamed = chat === null && known.id === null;
-      sendingRef.current = false;
       // Refused before anything was recorded: nothing happened, so the message goes back in the box.
       if (!outcome.ok && !outcome.turn) {
         setChatError(outcome.error);
         store.remove(PENDING_KEY);
         giveBack();
       } else if (id) {
-        // Answered before the list showed it, and still on this new chat.
-        if (unnamed && chatRef.current === null) setChatId(id);
         store.remove(PENDING_KEY);
         store.remove(draftKey(null));
         const reply = outcome.turn as ChatTurn | undefined;
@@ -586,7 +588,8 @@ function App() {
     const id = chatRef.current;
     if (id === null) { stopWanted.current = true; return; }
     try {
-      await api.chat.stop.mutate({ id });
+      const outcome = await api.chat.stop.mutate({ id });
+      if (!outcome.stopped && sendingRef.current) stopWanted.current = true;
       // A send of this page finishes by itself; following one, the next read shows the note.
       if (!sendingRef.current) await refreshDetail(id);
     } catch (error) { setChatError(`Could not stop: ${String(error)}`); }
@@ -724,6 +727,9 @@ function App() {
     const turns = detail?.turns ?? [];
     return editing ? turns.filter(t => t.id <= editing.turn) : turns;
   }, [detail, editing]);
+  const visibleActivity = useMemo(() => (detail?.activity ?? []).filter(item =>
+    visibleTurns.some(turn => turn.kind === 'user' && turn.id === item.afterUserId) &&
+    (editing === undefined || item.afterUserId < editing.turn)), [detail?.activity, visibleTurns, editing]);
   // A selected turn that went away: the last one takes over, if the thread has focus.
   useEffect(() => {
     if (selected === undefined || visibleTurns.some(t => t.id === selected)) return;
@@ -733,13 +739,21 @@ function App() {
 
   // The newest turn stays in view.
   const lastVisible = visibleTurns.at(-1);
-  const pendingShown = sendingChat === chatId && !(lastVisible?.kind === 'user' && lastVisible.text === pendingText) ? pendingText : undefined;
+  const pendingRecorded = visibleTurns.some(turn => turn.kind === 'user' && turn.id > sentAfter.current && turn.text === pendingText);
+  const pendingShown = sendingChat === chatId && !pendingRecorded ? pendingText : undefined;
   // Keyed on what is at the end, not on a count: a reply swaps pending + generating for user + reply.
-  const threadEnd = `${lastVisible?.id}:${pendingShown ?? ''}:${openGenerating}`;
+  const activityEnd = visibleActivity.map(item => `${item.id}:${item.status}:${item.kind === 'toolCall' ? item.arguments.length : item.text.length}`).join('|');
+  const threadEnd = `${lastVisible?.id}:${pendingShown ?? ''}:${openGenerating}:${activityEnd}`;
+  const threadAtBottom = useRef(true);
+  const trackThreadScroll = () => {
+    const el = threadEl.current;
+    if (el) threadAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
+  useEffect(() => { threadAtBottom.current = true; }, [chatId]);
   useEffect(() => {
     const el = threadEl.current;
     // Someone reading the thread with the keyboard keeps their place.
-    if (el && !el.contains(document.activeElement)) el.scrollTop = el.scrollHeight;
+    if (el && threadAtBottom.current && !el.contains(document.activeElement)) el.scrollTop = el.scrollHeight;
   }, [threadEnd]);
 
   useEffect(() => {
@@ -914,6 +928,8 @@ function App() {
       if (event.key === '?') { claim(); openHelp(); return; }
       if (event.key === 'Escape') { claim(); escapeToBox(); return; }
       if (event.shiftKey) return;
+      // Native disclosure keyboard behavior belongs to activity, not the selected turn.
+      if (event.target instanceof Element && event.target.closest('[data-activity]')) return;
       if (event.target instanceof Node && threadEl.current?.contains(event.target) && onThreadKey(event)) claim();
     };
     const release = (event: KeyboardEvent) => { keysDown.current.delete(event.key.toLowerCase()); };
@@ -1099,7 +1115,7 @@ function App() {
         <main className="panes" ref={panes}>
           <div className="pane-left" ref={leftPane} style={{ flex: `0 0 ${split}%` }}>
             <section aria-label="Chat" className="chat-card" style={{ flex: `0 0 ${chatSplit}%` }}>
-              <Thread ref={threadEl} turns={visibleTurns} pending={pendingShown} generating={openGenerating} stopping={stopping} selected={selected} inEditor={inEditor} isStarter={text => text === starterText.current} editingTurn={editing?.turn}
+              <Thread ref={threadEl} turns={visibleTurns} activity={visibleActivity} onScroll={trackThreadScroll} pending={pendingShown} generating={openGenerating} stopping={stopping} selected={selected} inEditor={inEditor} isStarter={text => text === starterText.current} editingTurn={editing?.turn}
                 onSelect={id => { setSelected(id); if (!threadEl.current?.contains(document.activeElement)) threadEl.current?.focus({ preventScroll: true }); }}
                 onFocusThread={() => setSelected(current => current ?? visibleTurns.at(-1)?.id)} onStop={() => void stop()} onLoadAttempt={loadAttempt} actionsFor={actionsFor} />
               {elsewhere && (

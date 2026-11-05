@@ -23,7 +23,7 @@ afterEach(async () => {
 
 // A source is good unless it says BAD; the SQL is derived, so a test can see which source it came from.
 const goodCheck = (source: string): CheckResult => (source.includes('BAD') ? { ok: false, stage: 'compile', message: `refused ${source}` } : { ok: true, sql: `SELECT /* ${source.length} */ 1`, rowType: '{ n: number }' });
-const call = (source: string, summary?: string) => fauxToolCall('check_query', { source, ...(summary === undefined ? {} : { summary }) });
+const call = (source: string, summary?: string) => fauxToolCall('query_apply', { source, ...(summary === undefined ? {} : { summary }) });
 const round = (...calls: ReturnType<typeof call>[]) => fauxAssistantMessage(calls, { stopReason: 'toolUse' });
 const say = (value: string) => fauxAssistantMessage([fauxText(value)]);
 
@@ -122,7 +122,7 @@ describe('conversation continuity, raw ctx.messages', () => {
     expect(system(seen[0]!)).toContain('declare const events');
     // "Own tools" means something: the extension has exactly the two chat tools, a chat is stored with that extension alone, and anything else is refused.
     const extension = chatExtension({ guide: '', schema: () => '', check: goodCheck });
-    expect(extension.tools!.map(tool => tool.name)).toEqual(['check_query', 'check_chart']);
+    expect(extension.tools!.map(tool => tool.name)).toEqual(['query_validate', 'query_apply', 'chart_validate', 'chart_apply', 'query_run', 'query_results_get', 'tables_list', 'table_describe', 'columns_describe', 'docs_search', 'docs_read']);
     const [chat] = await api.chat.list();
     const sent = await api.chat.send({ chatId: chat!.id, text: 'P2', source: '' });
     expect(sent).toMatchObject({ ok: true, turn: { kind: 'text', text: 'y', attempts: 0 } });
@@ -262,7 +262,7 @@ describe('only checked source becomes a version, from this run only', () => {
 
   it('reusing an earlier run\'s tool call id cannot pull in its source', async () => {
     const { api, script } = await setup();
-    script(round(fauxToolCall('check_query', { source: 'Q1' }, { id: 'same' })), round(fauxToolCall('check_query', { source: 'BAD' }, { id: 'same' })), say('done'));
+    script(round(fauxToolCall('query_apply', { source: 'Q1' }, { id: 'same' })), round(fauxToolCall('query_apply', { source: 'BAD' }, { id: 'same' })), say('done'));
     const { chatId } = await api.chat.send({ chatId: null, text: 'p', source: '' });
     expect(await api.chat.send({ chatId, text: 'p', source: 'Q1' })).toMatchObject({ ok: false, turn: { kind: 'error', source: 'BAD', attempts: 1 } });
     expect(versions((await api.chat.get({ id: chatId! }))!.turns)).toEqual([1]);
@@ -270,7 +270,7 @@ describe('only checked source becomes a version, from this run only', () => {
 
   it('a call with a wrong argument type is no attempt to accept', async () => {
     const { api, script } = await setup({ maxTurns: 2 });
-    script(round(fauxToolCall('check_query', { source: 123 } as never)), say('sorry'));
+    script(round(fauxToolCall('query_apply', { source: 123 } as never)), say('sorry'));
     const sent = await api.chat.send({ chatId: null, text: 'p', source: '' });
     expect(sent).toMatchObject({ ok: false, turn: { kind: 'error' } });
     expect(versions((await api.chat.get({ id: sent.chatId! }))!.turns)).toEqual([]);
@@ -278,7 +278,7 @@ describe('only checked source becomes a version, from this run only', () => {
 
   it('a call to a tool of another path or an unknown tool is no version', async () => {
     const { api, script } = await setup({ maxTurns: 3 });
-    script(round(fauxToolCall('check_chart', { spec: { mark: 'bar' } } as never)), round(fauxToolCall('nope', {})), say('done'));
+    script(round(fauxToolCall('chart_apply', { spec: { mark: 'bar' } } as never)), round(fauxToolCall('nope', {})), say('done'));
     const sent = await api.chat.send({ chatId: null, text: 'p', source: '' });
     expect(versions((await api.chat.get({ id: sent.chatId! }))!.turns)).toEqual([]);
   });

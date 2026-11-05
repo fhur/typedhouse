@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { connect } from './clickhouse.js';
+import { createAgentCapabilities } from './agent-results.js';
+import { createAgentDocs } from './agent-docs.js';
 import { createLlm, openStorage, unavailableLlm, type Llm } from './llm.js';
 import { defaultPiDir, setupModels } from './pi.js';
 import { startServer } from './server.js';
@@ -69,7 +71,21 @@ const setup = await setupModels({ piDir, override: values.model ?? env['TYPEDHOU
 let llm: Llm;
 if (setup.ok) {
   try {
-    llm = await createLlm({ models: setup.models, model: setup.model, schema: conn.schemaSource, check: conn.checkAsync, storage: await openStorage(dataDir) });
+    const exploration = createAgentCapabilities(conn);
+    const docs = createAgentDocs();
+    llm = await createLlm({
+      models: setup.models, model: setup.model, schema: conn.schemaSource,
+      check: conn.checkAsync, storage: await openStorage(dataDir),
+      exploration: {
+        query_run: (args, owner) => exploration.queryRun(args.source, String(owner)),
+        query_results_get: (args, owner) => exploration.queryResultsGet(args.resultId, args.cursor, String(owner)),
+        tables_list: args => exploration.tablesList(args.search, args.cursor),
+        table_describe: args => exploration.tableDescribe(args.table, args.cursor),
+        columns_describe: args => exploration.columnsDescribe(args.table, args.columns),
+        docs_search: args => docs.search(args.query, args.cursor),
+        docs_read: args => docs.read(args.id, args.cursor),
+      },
+    });
     process.stdout.write(`LLM: ${setup.model.provider}/${setup.model.modelId}${(values.model ?? env['TYPEDHOUSE_STUDIO_MODEL'])?.trim() ? '' : ' (default)'}, credentials from ${join(piDir, 'auth.json')}\n`);
   } catch (error) {
     llm = unavailableLlm(error instanceof Error ? error.message : String(error));

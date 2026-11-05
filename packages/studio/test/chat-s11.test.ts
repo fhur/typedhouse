@@ -25,8 +25,8 @@ afterEach(async () => {
 
 const columns = [{ name: 'country', type: 'String' }, { name: 'revenue', type: 'Float64' }];
 const goodCheck = (source: string): CheckResult => (source.includes('BAD') ? { ok: false, stage: 'compile', message: `refused ${source}` } : { ok: true, sql: `SELECT /* ${source} */ 1`, rowType: '{ country: string; revenue: number }', columns });
-const query = (source: string, summary?: string) => fauxAssistantMessage([fauxToolCall('check_query', { source, ...(summary ? { summary } : {}) })], { stopReason: 'toolUse' });
-const chart = (args: Record<string, unknown>) => fauxAssistantMessage([fauxToolCall('check_chart', args as never)], { stopReason: 'toolUse' });
+const query = (source: string, summary?: string) => fauxAssistantMessage([fauxToolCall('query_apply', { source, ...(summary ? { summary } : {}) })], { stopReason: 'toolUse' });
+const chart = (args: Record<string, unknown>) => fauxAssistantMessage([fauxToolCall('chart_apply', args as never)], { stopReason: 'toolUse' });
 const say = (text: string) => fauxAssistantMessage([fauxText(text)]);
 const spec = { mark: 'bar', encoding: { x: { field: 'country', type: 'nominal' }, y: { field: 'revenue', type: 'quantitative' } } };
 

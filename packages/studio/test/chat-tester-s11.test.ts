@@ -28,8 +28,8 @@ const goodCheck = (source: string): CheckResult => {
   if (source.includes('BAD')) return { ok: false, stage: 'compile', message: `refused ${source}` };
   return { ok: true, sql: `SELECT /* ${source.length} */ 1`, rowType: '{ n: number }', columns: source.includes('OTHER') ? [{ name: 'other', type: 'String' }] : columns };
 };
-const call = (source: string, summary?: string) => fauxToolCall('check_query', { source, ...(summary === undefined ? {} : { summary }) });
-const chartCall = (args: Record<string, unknown>) => fauxToolCall('check_chart', args as never);
+const call = (source: string, summary?: string) => fauxToolCall('query_apply', { source, ...(summary === undefined ? {} : { summary }) });
+const chartCall = (args: Record<string, unknown>) => fauxToolCall('chart_apply', args as never);
 const round = (...calls: ReturnType<typeof fauxToolCall>[]) => fauxAssistantMessage(calls, { stopReason: 'toolUse' });
 const say = (value: string) => fauxAssistantMessage([fauxText(value)]);
 const spec = { mark: 'bar', encoding: { x: { field: 'country', type: 'nominal' }, y: { field: 'revenue', type: 'quantitative' } } };

@@ -2,6 +2,30 @@
 @import '../../../apps/docs/src/styles/tokens.css';
 
 * { box-sizing: border-box; }
+.activity { margin: 6px 18px; padding: 8px 12px; border-left: 2px solid var(--typedhouse-border-strong); font-size: 12px; color: var(--typedhouse-muted); overflow-wrap: anywhere; }
+.activity-row { padding: 10px 12px 10px 48px; display: flex; align-items: baseline; gap: 10px; font-size: 13px; color: var(--typedhouse-muted); }
+.activity-log { flex: 1; min-width: 0; }
+.activity-log > summary { cursor: pointer; list-style: none; }
+.activity-log > summary::marker { content: ''; }
+.activity-log > summary::-webkit-details-marker { display: none; }
+.activity-spinner { display: inline-block; width: 13px; height: 13px; margin-right: 7px; vertical-align: -2px; border: 2px solid var(--typedhouse-border-strong); border-top-color: var(--typedhouse-link); border-right-color: var(--typedhouse-link); border-radius: 50%; animation: activity-spin 900ms linear infinite; }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .activity-label-live { background-image: linear-gradient(110deg, var(--typedhouse-muted) 40%, var(--typedhouse-text) 50%, var(--typedhouse-muted) 60%); background-size: 250% 100%; background-clip: text; -webkit-background-clip: text; color: transparent; animation: activity-glare 2.4s ease-in-out infinite; }
+}
+@keyframes activity-glare { from { background-position: 150% 0; } to { background-position: -150% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .activity-spinner { animation: none; }
+  .activity-label-live { animation: none; background: none; color: var(--typedhouse-muted); }
+}
+.activity-log > summary:focus-visible { outline: 2px solid var(--typedhouse-link); outline-offset: 3px; }
+.activity-text { white-space: pre-wrap; }
+.activity-tool summary { cursor: pointer; }
+.activity-tool summary:focus-visible { outline: 2px solid var(--typedhouse-link); outline-offset: 3px; }
+.activity-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; font-size: 11px; color: var(--typedhouse-text); }
+.activity-status { font-weight: 600; }
+.activity-tool[data-status="error"], .activity-tool[data-status="interrupted"] { border-left-style: dashed; }
+.activity-truncated { display: block; margin-top: 6px; font-style: italic; }
 html, body, #root { height: 100%; }
 body { margin: 0; -webkit-font-smoothing: antialiased; background: var(--typedhouse-bg); }
 .mono { font-family: var(--typedhouse-font-mono); }
