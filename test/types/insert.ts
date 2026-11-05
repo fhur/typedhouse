@@ -22,6 +22,7 @@ from(target).insertMany([{ id: 1n, value: null, alias: 'a' }]);
 from(target).insertMany([{ id: 1n, value: null, hidden: 'a' }]);
 // @ts-expect-error scan hints remove insertion
 from(target).final().insertMany(rows);
+// prettier-ignore
 // @ts-expect-error read operations remove insertion
 from(target).where(r => r.id.eq(1n)).insertMany(rows);
 declare const erased: TableDef;

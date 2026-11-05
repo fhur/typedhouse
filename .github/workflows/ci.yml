@@ -19,6 +19,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
       # Keep the build tool's legacy compiler dependency stable: TS 7 removed
       # its JS compiler API. All type assertions use each matrix CLI instead.
       - run: pnpm --package typescript@${{ matrix.typescript }} dlx tsc --noEmit
