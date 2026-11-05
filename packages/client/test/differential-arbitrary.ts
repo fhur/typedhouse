@@ -13,7 +13,8 @@ export type Tree =
   | { op: 'join'; tenant: string }
   | { op: 'filter'; input: Tree; minimum: number }
   | { op: 'project' | 'distinct'; input: Tree }
-  | { op: 'union'; left: Tree; right: Tree };
+  | { op: 'union'; left: Tree; right: Tree }
+  | { op: 'limitBy'; input: Tree; key: 'category' | 'tenant' | 'both'; n: number; offset: number };
 export type Recipe = { tree: Tree; end: 'bag' | 'limit' | 'rollup'; take: number; offset: number };
 const leaf: fc.Arbitrary<Tree> = fc.record({ op: fc.constantFrom('scan' as const, 'join' as const), tenant: fc.constantFrom('acme', 'other') });
 function trees(depth: number): fc.Arbitrary<Tree> {
@@ -22,7 +23,8 @@ function trees(depth: number): fc.Arbitrary<Tree> {
   return fc.oneof({ withCrossShrink: true }, leaf,
     fc.record({ op: fc.constant('filter' as const), input: child, minimum: fc.integer({ min: 0, max: 5 }) }),
     fc.record({ op: fc.constantFrom('project' as const, 'distinct' as const), input: child }),
-    fc.record({ op: fc.constant('union' as const), left: child, right: child }));
+    fc.record({ op: fc.constant('union' as const), left: child, right: child }),
+    fc.record({ op: fc.constant('limitBy' as const), input: child, key: fc.constantFrom('category' as const, 'tenant' as const, 'both' as const), n: fc.integer({ min: 0, max: 3 }), offset: fc.integer({ min: 0, max: 2 }) }));
 }
 // Three recipe edges maximum, including the optional terminal operator.
 export const recipeArbitrary: fc.Arbitrary<Recipe> = fc.record({ tree: trees(2), end: fc.constantFrom('bag', 'limit', 'rollup'), take: fc.integer({ min: 0, max: 8 }), offset: fc.integer({ min: 0, max: 3 }) });
@@ -37,6 +39,12 @@ export function buildTree(tree: Tree): ReturnType<typeof base> {
       .map(r => ({ tenant: r.tenant, id: r.renamed, category: r.category, ids: r.ids, at: r.at, amount: r.amount }));
     case 'distinct': return buildTree(tree.input).distinct();
     case 'union': return unionAll(buildTree(tree.left), buildTree(tree.right)).map(r => ({ ...r }));
+    // Fixture invariant below: (tenant,id) determines the complete row, so ties are identical and this order is total.
+    case 'limitBy': {
+      const taken = buildTree(tree.input).orderBy(r => r.tenant).thenBy(r => r.id)
+        .limitBy(r => tree.key === 'category' ? r.category : tree.key === 'tenant' ? r.tenant : [r.tenant, r.category]).take(tree.n);
+      return tree.offset ? taken.offset(tree.offset) : taken;
+    }
   }
 }
 function base(tenant: string) { return components.where(r => r.tenant.eq(tenant)); }

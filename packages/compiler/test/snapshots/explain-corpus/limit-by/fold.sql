@@ -1,0 +1,1 @@
+SELECT `tenantId`, `entityId`, `category`, `state`, `part_specifications`, `matched_part_ids`, `countOfParts`, `updatedAt` FROM `entity_ots_component` WHERE `tenantId` = {p0:String} ORDER BY `entityId` ASC LIMIT 2 OFFSET 1 BY `category` LIMIT 5

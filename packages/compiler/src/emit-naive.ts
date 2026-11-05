@@ -5,7 +5,7 @@ import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
 import { resolveRaw } from './resolve-raw.js';
 
 import { validateStructure } from './validate-structure.js';
-import { totalExpression, totalPredicate } from './rewrite-expressions.js';
+import { references, totalExpression, totalPredicate } from './rewrite-expressions.js';
 import { ValidationError } from './validation-error.js';
 export { ValidationError } from './validation-error.js';
 export function quoteIdentifier(name: string): string {
@@ -209,11 +209,13 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       default: return fail('unsupported_expression', e, path, e.kind);
     }
   }
+  const scanHints = (scan: Extract<Rel, { kind: 'Scan' }>) => `${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
   /** Clause-level AND has the same precedence as expression-level AND. Only
    * planned OR is non-atomic here; naive calls retain their permanent spelling. */
   function conjunction(predicates: readonly { expr: ExprNode; sql: string }[]): string {
     return predicates.map(({ expr, sql }) => plan && predicates.length > 1 && expr.kind === 'Call' && expr.fn.origin === 'typed' && expr.fn.name === 'or' ? `(${sql})` : sql).join(' AND ');
   }
+  const limitClause = (node: { readonly n: number; readonly offset?: number }) => `LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`;
   /** Physical occurrences retain source order and full child transport paths. */
   function joinSource(join: Extract<Rel, { kind: 'Join' }>, path: string, separator: string): string {
     if (join.joinKind !== 'inner' && join.joinKind !== 'cross') outerJoin = true;
@@ -237,6 +239,10 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       const on = i && join.joinKind !== 'cross' ? ` ON ${conditions[i]!.map((e, j) => expression(e, join, `${path}.on[${j}]`, undefined, false, 'row', '')).join(' AND ')}` : '';
       return `${i ? `${separator}${joinKeyword[join.joinKind]} ` : ''}${source} AS ${joinAlias(join, alias)}${hints}${on}`;
     }).join('');
+  }
+  /** Written once, after FROM and any ARRAY JOIN and before WHERE. Qualified, so that no SELECT alias can capture a column. */
+  function prewhereClause(node: Extract<Rel, { kind: 'Prewhere' }> | undefined, path: string): string {
+    return node ? ` PREWHERE ${expression(node.pred, node.input, `${path}.source.pred`, undefined, false, 'row', inputAlias)}` : '';
   }
   function renderBlock(rel: Rel, physicalOrder: readonly string[], path = 'root'): string {
     const block = plan!.blocks.get(rel)!;
@@ -270,11 +276,11 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       });
       const items = [...keys.map(([name, sql]) => sql === quoteIdentifier(name) ? sql : `${sql} AS ${quoteIdentifier(name)}`),
         ...Object.entries(aggregate.aggs).map(([name, e]) => `${expression(e, aggregate.input, `${path}.aggs.${name}`, undefined, false, 'aggregate', qualifier, binding)} AS ${quoteIdentifier(name)}`)];
-      const hints = block.source.kind === 'table' ? `${block.source.scan.final ? ' FINAL' : ''}${block.source.scan.sample === undefined ? '' : ` SAMPLE ${block.source.scan.sample}`}` : '';
+      const hints = block.source.kind === 'table' ? scanHints(block.source.scan) : '';
       const source = block.source.kind === 'table'
-        ? expansion
-          ? `${quoteIdentifier(block.source.scan.table.name)}${hints} ${expansion.left ? 'LEFT ' : ''}ARRAY JOIN ${expression(expansion.expr, expansion.input, `${path}.expr`, undefined, false, 'row', '')} AS ${quoteIdentifier(expansion.alias)}`
-          : `${quoteIdentifier(block.source.scan.table.name)} AS ${inputAlias}${hints}`
+        ? (expansion
+          ? `${quoteIdentifier(block.source.scan.table.name)}${block.source.prewhere ? ` AS ${inputAlias}` : ''}${hints} ${expansion.left ? 'LEFT ' : ''}ARRAY JOIN ${expression(expansion.expr, expansion.input, `${path}.expr`, undefined, false, 'row', '')} AS ${quoteIdentifier(expansion.alias)}`
+          : `${quoteIdentifier(block.source.scan.table.name)} AS ${inputAlias}${hints}`) + prewhereClause(block.source.prewhere, path)
         : block.source.kind === 'join' ? joinSource(block.source.rel, path, separator)
         : block.source.kind === 'cte' ? quoteIdentifier(plan!.ctes!.names.get(block.source.rel)!)
         : `(${emit(block.source.rel, `${path}.source`)}) AS ${inputAlias}`;
@@ -287,6 +293,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         const p = `${path}.clauses[${i}]`;
         if (node.kind === 'Filter') having.push({ expr: node.pred, sql: expression(node.pred, node.input, `${p}.pred`, undefined, false, 'row', '') });
         else if (node.kind === 'Sort') tails.push(` ORDER BY ${node.keys.map((k, j) => `${expression(k.expr, node.input, `${p}.keys[${j}]`, undefined, false, 'row', '')} ${k.dir.toUpperCase()}${k.nulls === undefined ? '' : ` NULLS ${k.nulls.toUpperCase()}`}`).join(', ')}`);
+        else if (node.kind === 'LimitBy') tails.push(` ${limitClause(node)} BY ${node.keys.map((k, j) => expression(k, node.input, `${p}.keys[${j}]`, undefined, false, 'row', '')).join(', ')}`);
         else tails.push(` LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
       }
       return `${select}${items.join(', ')}${separator}FROM ${source}${where.length ? `${separator}WHERE ${conjunction(where)}` : ''}${keys.length ? `${separator}GROUP BY ${keys.map(([, , group]) => group).join(', ')}` : ''}${having.length ? `${separator}HAVING ${conjunction(having)}` : ''}${tails.map(t => separator + t.slice(1)).join('')}`;
@@ -307,6 +314,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       for (const node of block.clauses) {
         if (node.kind === 'Filter') predicates.push(`(${bare(totalPredicate(node.pred), () => expression(node.pred, node.input, path, undefined, false, 'row', inputAlias, binding))})`);
         else if (node.kind === 'Sort') tails.push(`${separator}ORDER BY ${node.keys.map(k => `${bare(totalExpression(k.expr), () => expression(k.expr, node.input, path, undefined, false, 'row', inputAlias, binding))} ${k.dir.toUpperCase()}${k.nulls ? ` NULLS ${k.nulls.toUpperCase()}` : ''}`).join(', ')}`);
+        else if (node.kind === 'LimitBy') tails.push(`${separator}${limitClause(node)} BY ${node.keys.map(k => bare(totalExpression(k), () => expression(k, node.input, path, undefined, false, 'row', inputAlias, binding))).join(', ')}`);
         else tails.push(`${separator}LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
       }
       return `${select}${items.join(', ')}${separator}FROM ${source}${predicates.length ? `${separator}WHERE ${predicates.join(' AND ')}` : ''}${tails.join('')}`;
@@ -322,10 +330,11 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       // Bare select items must be columns the pruned scan provides (or the expansion alias).
       const physical = plan!.columns?.get(scan);
       if (physical && !block.project) for (const k of order) if (k !== block.arrayJoin?.alias && !physical.some(l => l.name === k)) return fail('missing_physical_column', rel, path, k);
-      from = `${quoteIdentifier(scan.table.name)}${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
+      from = `${quoteIdentifier(scan.table.name)}${block.source.prewhere ? ` AS ${inputAlias}` : ''}${scanHints(scan)}`;
       // FINAL/SAMPLE precede ARRAY JOIN; the user alias is a plain column of the block.
       const expansion = block.arrayJoin;
       if (expansion) from += ` ${expansion.left ? 'LEFT ' : ''}ARRAY JOIN ${expression(expansion.expr, expansion.input, `${path}.expr`, undefined, false, 'row', qualifier)} AS ${quoteIdentifier(expansion.alias)}`;
+      from += prewhereClause(block.source.prewhere, path);
     } else if (block.source.kind === 'cte') {
       if (!defined.has(block.source.rel)) return fail('cte_visibility', block.source.rel, path);
       from = quoteIdentifier(plan!.ctes!.names.get(block.source.rel)!);
@@ -340,6 +349,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       const p = `${path}.clauses[${i}]`;
       if (node.kind === 'Filter') predicates.push({ expr: node.pred, sql: expression(node.pred, node.input, `${p}.pred`, undefined, false, 'row', qualifier) });
       else if (node.kind === 'Sort') tails.push(` ORDER BY ${node.keys.map((key, j) => `${expression(key.expr, node.input, `${p}.keys[${j}].expr`, undefined, false, 'row', qualifier)} ${key.dir.toUpperCase()}${key.nulls === undefined ? '' : ` NULLS ${key.nulls.toUpperCase()}`}`).join(', ')}`);
+      else if (node.kind === 'LimitBy') tails.push(` ${limitClause(node)} BY ${node.keys.map((key, j) => expression(key, node.input, `${p}.keys[${j}]`, undefined, false, 'row', qualifier)).join(', ')}`);
       else tails.push(` LIMIT ${node.n}${node.offset === undefined ? '' : ` OFFSET ${node.offset}`}`);
     }
     const where = predicates.length ? ` WHERE ${conjunction(predicates)}` : '';
@@ -460,6 +470,17 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           const hints = `${rel.final ? ' FINAL' : ''}${rel.sample === undefined ? '' : ` SAMPLE ${rel.sample}`}`;
           return `SELECT ${list} FROM ${table}${hints}`;
         }
+        case 'Prewhere': {
+          if (rel.input?.kind !== 'Scan') return fail('invalid_prewhere_input', rel, `${path}.input`, 'expected a Scan');
+          const inputLeaves = outputLeaves(rel.input.output);
+          if (JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(inputLeaves.map(l => [l.path, print(l.type)]))) return fail('invalid_output', rel, path);
+          const type = rel.pred?.type && base(rel.pred.type);
+          if (!type || type.kind !== 'scalar' || type.name !== 'Bool') return fail('invalid_predicate', rel, path);
+          // Validates the Scan and its hints; the SQL is discarded because PREWHERE must read the table directly.
+          emit(rel.input, `${path}.input`);
+          const predicate = expression(rel.pred, rel.input, `${path}.pred`);
+          return `SELECT ${list} FROM ${quoteIdentifier(rel.input.table.name)} AS ${inputAlias}${scanHints(rel.input)} PREWHERE ${predicate}`;
+        }
         case 'ArrayJoin': {
           if (typeof rel.alias !== 'string' || rel.alias.includes('\0')) return fail('invalid_array_join_alias', rel, `${path}.alias`);
           if (typeof rel.left !== 'boolean') return fail('invalid_array_join', rel, `${path}.left`);
@@ -516,7 +537,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           if (plan?.blocks.has(rel)) return renderBlock(rel, physicalOrder);
           return `SELECT ${items.join(', ')} FROM (${source}) AS ${inputAlias}`;
         }
-        case 'Filter': case 'Limit': case 'Sort': case 'Distinct': case 'Materialize': {
+        case 'Filter': case 'LimitBy': case 'Limit': case 'Sort': case 'Distinct': case 'Materialize': {
           const inputLeaves = outputLeaves(rel.input.output);
           if (JSON.stringify(leaves.map(l => [l.path, print(l.type)])) !== JSON.stringify(inputLeaves.map(l => [l.path, print(l.type)]))) return fail('invalid_output', rel, path);
           const source = emit(rel.input, `${path}.input`);
@@ -551,7 +572,18 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
             return `SELECT ${list} FROM (${source}) AS ${inputAlias} WHERE ${predicate}`;
           }
           if (!Number.isSafeInteger(rel.n) || rel.n < 0 || (rel.offset !== undefined && (!Number.isSafeInteger(rel.offset) || rel.offset < 0))) return fail('invalid_limit', rel, path);
-          const limit = ` LIMIT ${rel.n}${rel.offset === undefined ? '' : ` OFFSET ${rel.offset}`}`;
+          const limit = ` ${limitClause(rel)}`;
+          if (rel.kind === 'LimitBy') {
+            if (rel.keys.length === 0) return fail('invalid_limit_by_key', rel, `${path}.keys`, 'expected at least one key');
+            // `LIMIT 1 BY 2` is positional, a constant Param makes one group, and a column-free Raw could print a bare number.
+            const keys = rel.keys.map((key, i) => {
+              const keyPath = `${path}.keys[${i}]`;
+              if (references(key).length === 0) return fail('invalid_limit_by_key', key, keyPath, 'a key must read a column of the row');
+              return expression(key, rel.input, keyPath, undefined, false, 'row', blockQualifier(rel));
+            }).join(', ');
+            if (plan) return renderClause(`${limit} BY ${keys}`);
+            return `SELECT ${order.map(k => `${inputAlias}.${quoteIdentifier(k)}`).join(', ')} FROM (${source}) AS ${inputAlias}${limit} BY ${keys}`;
+          }
           if (plan) return renderClause(limit);
           return `SELECT ${list} FROM (${source})${limit}`;
         }

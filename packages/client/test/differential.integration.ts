@@ -34,6 +34,7 @@ function nativeTree(t: Tree): string {
   const input = `(${nativeTree(t.input)})`;
   if (t.op === 'filter') return `SELECT * FROM ${input} WHERE amount>=${t.minimum}`;
   if (t.op === 'distinct') return `SELECT DISTINCT * FROM ${input}`;
+  if (t.op === 'limitBy') return `SELECT * FROM ${input} ORDER BY tenant,id LIMIT ${t.n} OFFSET ${t.offset} BY ${t.key === 'both' ? 'tenant,category' : t.key}`;
   return `SELECT tenant,id,category,ids,at,amount FROM ${input}`;
 }
 async function check(recipe: Recipe) {

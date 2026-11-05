@@ -14,7 +14,7 @@ expectTypeOf(raw.kind).toEqualTypeOf<'RawRel'>();
 expectTypeOf(raw.opaque).toEqualTypeOf<true>();
 expectTypeOf(raw.output).toEqualTypeOf<OutputSchema>();
 expectTypeOf(raw).not.toBeAny();
-expectTypeOf<Rel['kind']>().toEqualTypeOf<'Scan' | 'RawRel' | 'Filter' | 'Project' | 'Aggregate' | 'Join' | 'ArrayJoin' | 'Sort' | 'Limit' | 'Distinct' | 'Union' | 'Materialize'>();
+expectTypeOf<Rel['kind']>().toEqualTypeOf<'Scan' | 'RawRel' | 'Prewhere' | 'Filter' | 'Project' | 'Aggregate' | 'Join' | 'ArrayJoin' | 'Sort' | 'LimitBy' | 'Limit' | 'Distinct' | 'Union' | 'Materialize'>();
 expectTypeOf<ExprNode['kind']>().toEqualTypeOf<'ColumnRef' | 'Literal' | 'Param' | 'Call' | 'Agg' | 'Raw' | 'Case' | 'Cast' | 'Subquery'>();
 expectTypeOf(flatOutput([['42', col.String.type]]).shape).toEqualTypeOf<'flat'>();
 // @ts-expect-error Node ids are not arbitrary numbers.

@@ -1,0 +1,1 @@
+SELECT `__typedhouse_input`.`entityId` AS `tenantId`, `__typedhouse_input`.`state` AS `state` FROM (SELECT `entityId`, `state` FROM `entity_ots_component` AS `__typedhouse_input` PREWHERE `__typedhouse_input`.`tenantId` = {p0:String}) AS `__typedhouse_input`

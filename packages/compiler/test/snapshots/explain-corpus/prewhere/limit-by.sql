@@ -1,0 +1,1 @@
+SELECT `tenantId`, `entityId`, `category`, `state`, `part_specifications`, `matched_part_ids`, `countOfParts`, `updatedAt` FROM `entity_ots_component` AS `__typedhouse_input` PREWHERE `__typedhouse_input`.`tenantId` = {p0:String} ORDER BY `entityId` ASC LIMIT 1 BY `category`

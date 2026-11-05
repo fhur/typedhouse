@@ -22,7 +22,7 @@ function relNode(fields: Parameters<typeof constructRel>[0]): Rel {
   if ('on' in fields) edges.on = Object.freeze([...fields.on]);
   if ('exprs' in fields) edges.exprs = fields.exprs;
   if ('aggs' in fields) edges.aggs = fields.aggs;
-  if ('keys' in fields) edges.keys = fields.kind === 'Sort' ? Object.freeze(fields.keys.map(k => Object.freeze({ ...k }))) : fields.keys;
+  if ('keys' in fields) edges.keys = fields.kind === 'Sort' ? Object.freeze(fields.keys.map(k => Object.freeze({ ...k }))) : fields.kind === 'LimitBy' ? Object.freeze([...fields.keys]) : fields.keys;
   // No constructor registry dependency: manual graph edges are legal too.
   function same(a: unknown, b: unknown): boolean {
     if (a === b) return true;
@@ -39,7 +39,7 @@ const values = (r: Readonly<Record<string, ExprNode>>) => Object.getOwnPropertyN
 /** Direct relational and expression edges of one node; repeated slots are retained. */
 function edges(node: Rel): { readonly rels: readonly Rel[]; readonly exprs: readonly ExprNode[] } {
   const rels = 'input' in node ? [node.input] : node.kind === 'Join' ? node.inputs.map(([, r]) => r) : node.kind === 'Union' ? node.inputs : [];
-  const exprs = node.kind === 'Filter' ? [node.pred] : node.kind === 'Project' ? values(node.exprs) : node.kind === 'Aggregate' ? [...values(node.keys), ...values(node.aggs)] : node.kind === 'Join' ? node.on : node.kind === 'Sort' ? node.keys.map(k => k.expr) : node.kind === 'ArrayJoin' ? [node.expr] : node.kind === 'RawRel' ? node.args : [];
+  const exprs = node.kind === 'Filter' || node.kind === 'Prewhere' ? [node.pred] : node.kind === 'Project' ? values(node.exprs) : node.kind === 'Aggregate' ? [...values(node.keys), ...values(node.aggs)] : node.kind === 'Join' ? node.on : node.kind === 'Sort' ? node.keys.map(k => k.expr) : node.kind === 'LimitBy' ? node.keys : node.kind === 'ArrayJoin' ? [node.expr] : node.kind === 'RawRel' ? node.args : [];
   return { rels, exprs };
 }
 /** Parents per node by identity, counting every slot and every Subquery occurrence once per parent. */
@@ -108,10 +108,13 @@ function fallible(node: Rel, filters: boolean): boolean {
   let own = false;
   switch (node.kind) {
     case 'Filter': own = filters && !conjuncts(node.pred).every(totalPredicate); break;
+    // Counted in both modes: unlike a Filter it can never be pushed through, so it fences the rules above it.
+    case 'Prewhere': own = !conjuncts(node.pred).every(totalPredicate); break;
     case 'Project': own = !values(node.exprs).every(totalExpression); break;
     case 'ArrayJoin': own = !totalExpression(node.expr); break;
     case 'Aggregate': own = !values(node.keys).every(totalExpression) || !values(node.aggs).every(totalAggregate); break;
     case 'Sort': own = !node.keys.every(k => totalExpression(k.expr)); break;
+    case 'LimitBy': own = !node.keys.every(totalExpression); break;
     case 'Join': own = !node.on.every(totalPredicate); break;
     case 'RawRel': own = true; break;
   }
@@ -328,6 +331,8 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
         const record = (es: Readonly<Record<string, ExprNode>>) => mapRecord(es, expr);
         switch (node.kind) {
           case 'Filter': { const pred = expr(node.pred); if (input !== node.input || pred !== node.pred) result = relNode({ ...fields, kind: 'Filter', input, pred }); break; }
+          // Only the predicate's subqueries can change: no rule targets a Prewhere, and its Scan has no edges.
+          case 'Prewhere': { const pred = expr(node.pred); if (input !== node.input || pred !== node.pred) result = relNode({ kind: 'Prewhere', input: input as typeof node.input, pred, output: node.output }); break; }
           case 'Project': case 'Aggregate': {
             const es = node.kind === 'Project' ? record(node.exprs) : record(node.keys);
             const aggs = node.kind === 'Aggregate' ? record(node.aggs) : {};
@@ -338,6 +343,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
           }
           case 'ArrayJoin': { const e = expr(node.expr); if (input !== node.input || e !== node.expr) result = relNode({ kind: 'ArrayJoin', input, expr: e, columns: node.columns, output: node.output, alias: node.alias, left: node.left }); break; }
           case 'Sort': { const keys = node.keys.map(k => ({ ...k, expr: expr(k.expr) })); if (input !== node.input || keys.some((k, i) => k.expr !== node.keys[i]!.expr)) result = relNode({ kind: 'Sort', input, keys, output: node.output }); break; }
+          case 'LimitBy': { const keys = node.keys.map(expr); if (input !== node.input || keys.some((k, i) => k !== node.keys[i])) result = relNode({ kind: 'LimitBy', input, n: node.n, ...(node.offset === undefined ? {} : { offset: node.offset }), keys, output: node.output }); break; }
           case 'Limit': if (input !== node.input) result = relNode({ kind: 'Limit', input, n: node.n, ...(node.offset === undefined ? {} : { offset: node.offset }), output: node.output }); break;
           case 'Distinct': case 'Materialize': if (input !== node.input) result = relNode({ kind: node.kind, input, output: node.output }); break;
         }

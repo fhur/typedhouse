@@ -70,15 +70,16 @@ export function validateStructure(root: Rel): void {
           switch (object.kind) {
             case 'Scan': field('columns', record('type')); field('table', 'table'); break;
             case 'RawRel': field('parts', array('string')); field('args', array('expr')); field('provenance', 'provenance'); choice('opaque', [true]); break;
-            case 'Filter': field('input', 'rel'); field('pred', 'expr'); break;
+            case 'Filter': case 'Prewhere': field('input', 'rel'); field('pred', 'expr'); break;
             case 'Project': field('input', 'rel'); field('columns', record('type')); field('exprs', record('expr')); break;
             case 'Aggregate': field('input', 'rel'); field('columns', record('type')); field('keys', record('expr')); field('aggs', record('expr')); break;
             case 'Join': field('inputs', array(pair('rel'))); field('on', array('expr')); field('joinKind', 'string'); field('scope', 'number', true); break;
             case 'ArrayJoin': field('input', 'rel'); field('expr', 'expr'); field('columns', record('type')); break;
             case 'Sort': field('input', 'rel'); field('keys', array('sort')); break;
+            case 'LimitBy': field('input', 'rel'); field('keys', array('expr')); break;
             case 'Limit': case 'Distinct': case 'Materialize': field('input', 'rel'); break;
             case 'Union': field('inputs', array('rel')); break;
-            default: choice('kind', ['Scan', 'RawRel', 'Filter', 'Project', 'Aggregate', 'Join', 'ArrayJoin', 'Sort', 'Limit', 'Distinct', 'Union', 'Materialize']);
+            default: choice('kind', ['Scan', 'RawRel', 'Prewhere', 'Filter', 'Project', 'Aggregate', 'Join', 'ArrayJoin', 'Sort', 'LimitBy', 'Limit', 'Distinct', 'Union', 'Materialize']);
           }
           // Hints, alias/left, sort directions, limits and union mode already have
           // precise semantic checks. Leave those diagnostics at their old paths.

@@ -1,0 +1,1 @@
+SELECT `__typedhouse_input`.`__typedhouse_leaf_1` AS `entityId` FROM (SELECT `a`.`entityId` AS `__typedhouse_leaf_1` FROM (SELECT `entityId` FROM `entity_ots_component`) AS `a` INNER ALL JOIN (SELECT `entityId`, `state` FROM `entity_ots_component`) AS `b` ON `a`.`entityId` = `b`.`entityId` ORDER BY `a`.`entityId` ASC LIMIT 1 BY `b`.`state`) AS `__typedhouse_input`

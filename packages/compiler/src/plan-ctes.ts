@@ -15,11 +15,12 @@ export interface CtePlan {
 function expressions(rel: Rel): readonly ExprNode[] {
   const values = (r: Readonly<Record<string, ExprNode>>) => Object.getOwnPropertyNames(r).map(k => r[k]!);
   switch (rel.kind) {
-    case 'Filter': return [rel.pred];
+    case 'Filter': case 'Prewhere': return [rel.pred];
     case 'Project': return values(rel.exprs);
     case 'Aggregate': return [...values(rel.keys), ...values(rel.aggs)];
     case 'Join': return rel.on;
     case 'Sort': return rel.keys.map(k => k.expr);
+    case 'LimitBy': return rel.keys;
     case 'ArrayJoin': return [rel.expr];
     case 'RawRel': return rel.args;
     default: return [];
@@ -54,7 +55,11 @@ export function planCtes(root: Rel): CtePlan {
         case 'Case': for (const b of e.branches) { expression(b.when); expression(b.then); } expression(e.otherwise); break;
       }
     }
-    if ('input' in rel) edge(rel.input);
+    if (rel.kind === 'Prewhere') {
+      // PREWHERE must read the table itself (code 182 over a CTE): this edge never makes its Scan a shared CTE.
+      visit(rel.input);
+      extractable = safe.get(rel.input)! && extractable;
+    } else if ('input' in rel) edge(rel.input);
     else if (rel.kind === 'Join') for (const [, child] of rel.inputs) edge(child);
     else if (rel.kind === 'Union') for (const child of rel.inputs) edge(child);
     for (const e of expressions(rel)) expression(e);

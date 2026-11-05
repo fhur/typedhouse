@@ -1,0 +1,1 @@
+SELECT `__typedhouse_input`.`state` AS `state`, count() AS `n` FROM `entity_ots_component` AS `__typedhouse_input` PREWHERE `__typedhouse_input`.`tenantId` = {p0:String} GROUP BY `__typedhouse_input`.`state`

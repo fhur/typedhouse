@@ -47,6 +47,157 @@
 | Wrapper on non-nullable predicates too | 9 |
 
 **Pending at merge.** A full gate, since test files and `verify-query-package.mjs` changed after the earliest gate logs and the formatter track rewrites these files.
+## Track C: LIMIT BY and PREWHERE (2026-11-05, PM)
+
+**Status.** C1 to C9 and C11's gates are done, uncommitted. C10 has one docs wording gap (see C11 coverage review). A final gate at merge is pending. Open questions Q1 to Q4 are decided (see Decisions). Facts below were measured on `clickhouse/clickhouse-server:24.8` (24.8.14) with default settings unless stated.
+
+### Design note
+
+**LIMIT BY API (owner decision).** A builder: `q.limitBy(r => r.category).take(10).offset(20)`. `limitBy` is on `Query`, so it works after `where`, `map`, `aggregate`, joins, `union` and `orderBy`.
+- `limitBy(by)`: `by` is `row => Expr | readonly Expr[]` in row mode, with at least one key; an `Ordering` is rejected. It returns an intermediate that is not a `Query`: its only method is `take`, and it has no `ir` or `toSQL`, so it cannot be compiled or executed. Like `groupBy(...)`, it builds no node.
+- `take(n)`: builds the `LimitBy` node and returns a `Query` subclass that adds `offset`, modelled on `OrderedQuery`/`thenBy`. It is usable anywhere a `Query` is.
+- `offset(m)`: optional. It builds a new `LimitBy` with the same input, keys and `n`, and returns a plain `Query`, so a second `.offset` is a type error. Every other operator also returns a plain `Query`, so `.offset` is available only directly after `take`, and `.thenBy` is never available.
+- `n` and `offset` follow the `limit` rules (non-negative safe integers, `invalid_limit`), rendered inline.
+
+**LIMIT BY IR.** New node `LimitBy { input, n, offset?, keys: ExprNode[] }`, output same as input. Renders `LIMIT n [OFFSET m] BY k1, k2`.
+
+**LIMIT BY key rule.** Every key must read at least one column of the row (`invalid_limit_by_key`, checked in the builder and in compiler validation). Reason: `LIMIT 1 BY 2` is positional under the default `enable_positional_arguments = 1`, so a literal key means a different column in the naive and optimized select lists. A constant parameter is not positional but collapses all rows into one group, and a key-less `Raw` could print a bare number.
+
+**LIMIT BY clause order.** `ORDER BY`, then `LIMIT BY`, then `LIMIT` is the only legal text. `LIMIT 3 LIMIT 2 BY k`, `LIMIT 1 BY k ORDER BY v` and two `LIMIT BY` clauses are all syntax errors. So planner rank becomes Filter 1, Sort 2, LimitBy 3, Limit 4, and anything out of rank opens a derived table.
+
+**LIMIT BY interactions.**
+- `rewrite-rel`: no rule crosses it. Add it to `edges()`, to `visit()` (a missing case keeps the old input, which stays correct but loses every rewrite below it; corrected from "loses a pushed filter" by the Tester's C4 control), and to `fallible()` with `own = keys not total`, like `Sort`.
+- `prune-columns`: same as `Sort` (demand passes through, keys add demand). A key need not be selected.
+- `plan-ctes`: add keys to `expressions()`.
+- `plan-selects`: add to `SelectClause`, `rank` and `clausesRead`. Over an aggregate block a key must be a bare `ColumnRef`, as for `Sort`, otherwise it nests. `clausesRead` matters: `count() AS v ... LIMIT 1 BY v` raises code 10 under `prefer_column_name_to_alias = 1`.
+- Scan projections do not fold: over any `child.project` it opens a derived table, because `v % 2 AS k ... LIMIT 1 BY k` binds the alias while `i.k` binds the column.
+- Live capability: builder returns `{ live: false }`, matching `liveRelation`'s default.
+
+**LIMIT BY safety.** A row dropped by LIMIT BY is not seen by an outer fallible `WHERE` (probed), and the server does not push an outer non-key filter across it. An inner `ORDER BY` survives nesting: folded and naive shapes (including a Project, Filter or CTE in between, `max_threads = 1`, and redundant-sorting removal off) retained identical rows on 900k rows in 3 parts. Without a total order, which rows survive is unspecified, so differential tests must sort on a unique tie-breaker first, and the docs must say so.
+
+**PREWHERE API.** `from(t)[.final()][.sample(f)].prewhere(row => pred)` on `TableQuery` only, with the same predicate type as `where`. Returns a plain `Query`, so `.where(...).prewhere(...)`, `.prewhere(...).final()` and a second `.prewhere(...)` are type errors, and `insertMany` stays unavailable. Runtime guard `invalid_prewhere_source` for JavaScript callers. Explicit only: `Filter` is never promoted, `Prewhere` never demoted.
+
+**PREWHERE relations.** Directly over a physical `Scan`, nothing else. A subquery or CTE source raises code 182 `ILLEGAL_PREWHERE`. A join input uses `join({ a: from(t).prewhere(p), ... })` and renders as a derived table. The server also accepts PREWHERE on a join block, but the compiler never emits that.
+
+**PREWHERE IR.** New node `Prewhere { input: Scan, pred }`, output same as input; `invalid_prewhere_input` if the input is not a `Scan`. Chosen over a `Scan` field because `hint()` gives a scan a new id on every call, so a predicate field could not bind to its own node, and every expression walker would need a Scan arm.
+
+**PREWHERE rendering.** `FROM t AS i FINAL SAMPLE f [ARRAY JOIN ...] PREWHERE p WHERE q`; `WHERE` before `PREWHERE` is a syntax error. Parameters number in that textual order. Naive form is `SELECT list FROM t AS i FINAL SAMPLE f PREWHERE p`: the Prewhere and Scan share one naive SELECT because PREWHERE must read the table directly. Every enclosing naive node still nests.
+
+**PREWHERE interactions, each a way to drop or move it if missed.**
+- `plan-selects`: carry it on the source, `source: { kind: 'table', scan, prewhere? }`, not as a block field. The Aggregate arm builds a new block from `child.source`, so a block field would be silently dropped. All three block renderers must print it.
+- `plan-selects` alias guards: add `prewhere.pred` to the Project arm's `others`, because an unqualified alias captures PREWHERE (`v + 1000 AS v ... PREWHERE v < 20` returned 0 rows; a qualified `i.v` returned the right row). ArrayJoin arm: do not fold when the alias is a name the predicate reads (`ARRAY JOIN tags AS cat PREWHERE cat = 'x'` raises code 182).
+- `plan-ctes`: do not count the Prewhere-to-Scan edge. Otherwise `s.prewhere(a)` plus `s.where(b)` on one `from()` makes the Scan a CTE and the emitter writes PREWHERE over a CTE (code 182). A shared `Prewhere` node may itself be a CTE (verified valid). Add `pred` to `expressions()`.
+- `rewrite-rel`: no rule targets `Prewhere`, and a `Filter` above it stays above. Add to `edges()` and `visit()`. In `fallible()` count a non-total predicate in both modes, which fences `LeftToInner`, `PushFilterJoin` and `MergeFilter` above it (conservative).
+- `prune-columns`: same as `Filter`.
+- Live capability: `{ live: false }`.
+
+**PREWHERE safety under results-only.** The predicate's evaluation set does not change, since it stays directly on its scan in both emitters, and an explicit PREWHERE is never merged with WHERE by the server (`EXPLAIN` keeps a separate Filter step, nested and folded). Probed outcomes:
+- A guard in PREWHERE protects a fallible `WHERE`, select item, `GROUP BY` key, aggregate, `ARRAY JOIN` expression and a `WHERE` above a join; folded and nested forms agree wherever both were run.
+- A fallible PREWHERE fails over a total `WHERE` guard in both forms, because the guard cannot get below it.
+- Inside one PREWHERE, when both conjuncts read the same column, `s != 'bad' AND toUInt32(s) > 0` passed and the reversed order failed on every table shape tried, so the predicate must never be reordered or split.
+- A guard on a different column is not reliable, in either order: `id < 13 AND toUInt32(s) > 0` returned rows or failed with code 6 depending on parts and `index_granularity` (see C11 coverage review). With `enable_multiple_prewhere_read_steps = 0`, guard first passed on the 5 shapes tried. A guard in PREWHERE with the cast in `WHERE` passed on all of them.
+These are observations on 24.8, not a server guarantee; docs should say so.
+
+**PREWHERE with FINAL is not equivalent to WHERE.** PREWHERE runs before the merge. Rows `(1, v1, 'open')` and `(1, v2, 'closed')`: `FINAL WHERE status = 'open'` returns only id 2; `FINAL PREWHERE status = 'open'` also returns the stale `(1, v1, 'open')`. Predicates that read only sorting-key columns matched `WHERE` (equality, a key prefix, a function of a key, with and without `SAMPLE`). The server itself leaves `WHERE` above FINAL by default. Decision: allowed and documented, with no compile error (see Decisions). Both emitters print the same `FINAL PREWHERE`, so the paths agree on the stale row.
+
+**PREWHERE with SAMPLE.** Same count as `WHERE` under `SAMPLE 0.1`. `FINAL SAMPLE f PREWHERE` is valid.
+
+**PREWHERE predicate type.** Same as `Filter`: base type `Bool`, enforced by `invalid_predicate`. `Bool`, `Nullable(Bool)`, `Nullable(UInt8)` and `LowCardinality(Nullable(UInt8))` columns gave the same rows as `WHERE` (NULL drops the row). Non-boolean `Nullable(UInt32)` raises code 59 on the server; the type check stops it first. Aggregates raise code 184 and are stopped by row mode.
+
+**Engines.** Works: MergeTree family, Merge, Distributed, Buffer, MaterializedView (TO). Code 182: Memory, Log, View, `numbers()`. ALIAS and MATERIALIZED columns work in PREWHERE. Decision: no compiler check; the server's code 182 surfaces as `QueryError`, as `final()` and `sample()` already rely on.
+
+**Naive emitter.** Both nodes are handled in `emitNaive`, so `validateRel` applies all checks before rewriting and both paths reject the same IR.
+
+### Tasks
+
+Order: C1 to C5 land first. PREWHERE follows: C6, C7, C8 and C10 by the Worker, then C9 by the Tester.
+
+**C1. `LimitBy` in core.** Depends: none. Status: done.
+Node, `Query.limitBy`, the intermediate, the `take` result with `offset`, key rule, `{ live: false }`, JSDoc, type export, devtools label and edges.
+Accept: positive types for flat, nested join, aggregate and ordered inputs, one key and many keys, with and without `.offset`; the `take` result and the `offset` result are each assignable to `Query` and accepted by `run`. Negative types: `limitBy(...)` used as a query (`where`, `map`, `limit`, `orderBy`, `.ir`, `toSQL`, `compile`, `run`, as a join input), `.offset` directly after `limitBy` without `take`, `.offset` twice, `.take` twice, `.offset` after another operator (`.take(1).where(...).offset(1)`), `.thenBy` after `take` or `offset`, `Ordering` key, grouped-mode key, non-`Expr`. Runtime tests: empty keys, key with no column, bad `n` and `offset`, and `offset` replacing the node rather than nesting a second `LimitBy`.
+
+**C2. `LimitBy` in compiler passes and naive emitter.** Depends: C1. Status: done.
+`validate-structure`, `rewrite-rel` (`edges`, `visit`, `fallible`), `prune-columns`, `plan-ctes`, `emitNaive`.
+Accept: unit tests show that a Filter stays above it, a filter pushed below it is kept in the rebuilt node, a subquery in a key is counted and a shared one becomes a CTE, a non-total key fences as `Sort` does, and an unselected key is demanded from the input. Literal, constant-`Param` and key-less `Raw` keys are rejected by the compiler for hand-built IR. Naive SQL parses on 24.8.
+
+**C3. `LimitBy` in planner and planned emitter.** Depends: C2. Status: done.
+`SelectClause`, rank, `clausesRead`, the aggregate `safe` rule, and all three block renderers.
+Accept: SQL tests for scan, join and aggregate blocks that `Filter + Sort + LimitBy + Limit`, with offset, fold into one SELECT in that clause order. These nest: `limit` then `limitBy`, `limitBy` then `orderBy`, `limitBy` twice, `limitBy` then `where`, `limitBy` over a computed `map`, and `limitBy` then `distinct`. `distinct` then `limitBy` folds and keeps the full DISTINCT list. Alias collision over an aggregate with `prefer_column_name_to_alias = 1` does not raise code 10.
+
+**C4. `LimitBy` native and differential coverage.** Depends: C3. Owner: Tester. Status: done.
+Accept: integration tests compare `run` and `stream` with handwritten SQL and a JavaScript oracle, for multi-part data, offset, `LIMIT 0`, NULL keys (one group), float keys (float keys group by bit pattern; NaNs with the same bit pattern form one group, and signed zeros are separate), array keys, join keys, and over an aggregate. Differential arbitrary and `requiredOperators` include `LimitBy` under a total order, with naive and optimized rows equal. EXPLAIN corpus gains the `LimitBy` fence and step type. A fallible outer filter over retained-only good rows passes on both paths. Negative controls: removing `clausesRead`, the rank entry, or the `visit` case each fails a test.
+
+**C5. `LimitBy` docs and spec.** Depends: C3. Status: done.
+`query-builder/limits.md` with generated SQL, `compiler/select-blocks.md`, `spec.md` (IR table, operator text, the "Window functions, `LIMIT BY`" row, the "Two-stage calls" row gaining `limitBy(…).take(…)` with optional `.offset(…)`, and a note in "Decided, and still open" recording the builder shape, the key rule and that the owner chose the builder).
+Accept: docs use the builder form throughout and state unspecified row choice without a total order, NULL grouping (one group), float grouping (float keys group by bit pattern; NaNs with the same bit pattern form one group, and signed zeros are separate), and the key rule. Window functions keep their existing row. `pnpm docs:verify` passes. The stale NaN line in `query-builder/limits.md` is fixed.
+
+**C6. `Prewhere` in core.** Depends: C5. Status: done.
+Node, `TableQuery.prewhere`, `invalid_prewhere_source`, `{ live: false }`, JSDoc (including the FINAL warning), devtools label and edges.
+Accept: positive types after `from`, `final`, `sample`, and as a join input, with a non-key predicate after `final` accepted. Negative types: after `where`/`map`/`orderBy`, on a join or union, `.final()` after it, a second `.prewhere()`, `insertMany` after it, non-boolean and aggregate predicates.
+
+**C7. `Prewhere` in compiler passes and naive emitter.** Depends: C6. Status: done.
+`validate-structure`, `rewrite-rel` (`edges`, `visit`, `fallible`), `prune-columns`, `plan-ctes` (uncounted Scan edge), `emitNaive`, `invalid_prewhere_input`.
+Accept: unit tests show a Filter above is never merged into or moved below it; a Scan shared by `prewhere` and `where` never becomes a CTE under PREWHERE; a shared `Prewhere` becomes a CTE with its predicate inside; a column read only by the predicate is demanded by the scan; a non-total predicate fences the join rules; a non-`Scan` input is rejected; invalid scan hints are still rejected on the naive path; a non-key predicate under FINAL compiles on both paths.
+
+**C8. `Prewhere` in planner and planned emitter.** Depends: C7. Status: done.
+`source.prewhere`, the block arm, the Project `others` guard, the ArrayJoin alias fence, and all three renderers.
+Accept: SQL tests for `FINAL SAMPLE ... ARRAY JOIN ... PREWHERE ... WHERE` order and parameter numbering, and for folding through Project, Filter, Aggregate, Distinct, Sort, Limit and LimitBy with PREWHERE present in the SQL every time. As a join input it is a derived table. An alias equal to a predicate column, and an expansion alias equal to one, each keep a separate scope. A test walks every block shape and fails if PREWHERE is missing from the output.
+
+**C9. `Prewhere` native and differential coverage.** Depends: C8. Owner: Tester. Status: done.
+Accept: integration on 24.8 through `run` and `stream`, compared with handwritten SQL, naive and optimized. Cover the guard and fallible cases above, ALIAS columns, join sides (inner and left), a `SAMPLE BY` table created by the test, FINAL with a key predicate matching `WHERE`, and an unsupported engine surfacing `QueryError` with code 182 on both paths. Required stale-version test, with merges stopped: `final().prewhere()` on a non-key column returns the stale `(1, v1, 'open')`, `final().where()` does not, and naive and optimized rows are equal, pinning the behaviour. Differential arbitrary adds `Prewhere`. Results-only check for a fallible predicate. EXPLAIN shows `Prewhere info` on the read and a separate Filter step for `WHERE`, on both paths. Negative controls: a block-level field instead of `source.prewhere`, counting the CTE edge, and dropping the Project guard each fail a test.
+
+**C10. `Prewhere` docs and spec.** Depends: C8. Status: one wording gap open.
+`query-builder/scan-modifiers.md` with generated SQL, `compiler/select-blocks.md` ("does not emit PREWHERE" becomes explicit-only), `compiler/overview.md` line 47, `spec.md` (`Scan` hints, IR table, emission details, line 746 stays true for inference, a note in "Decided, and still open" recording that FINAL with a non-key predicate is allowed and that engines are not checked).
+Accept: `scan-modifiers.md` carries a prominent warning, with the reproduced example and its rows, that under `final()` a non-key predicate filters before merging and can return a stale row version, and that `where()` is the form that filters after merging. Docs also state that sorting-key predicates matched `WHERE`, the supported engines and code 182, the join-side form, and that guard behaviour is observed on 24.8 rather than guaranteed. `pnpm docs:verify` passes.
+
+**C11. Gates and evidence.** Depends: C4, C5, C9, C10. Status: gates passed; final gate at merge pending.
+Accept: `pnpm check:all` on TypeScript 5.5.4 and latest, precise diagnostics after `pnpm build`, `pnpm docs:verify`, `node scripts/check-type-performance.mjs --all` with no budget change unless approved, and this section updated with evidence. The EXPLAIN corpus entry `limit-by/subquery-key` is `run: false`: resolved, see the coverage review. PM then checks coverage against the actual diff.
+
+### Decisions
+
+- **Float keys in LIMIT BY (orchestrator, to be reported to the owner): match ClickHouse, do not normalise keys.** Corrected by a Tester native experiment on 24.8.14: `nan` (0x7FF8...) and `0/0` (0xFFF8...) form two groups, and `0.0` and `-0.0` form two groups. Naive and optimized agree. The PM's earlier probe used only same-pattern NaNs. This corrects a fact and does not weaken a requirement.
+- **Q1, `final().prewhere()` (owner): allowed and documented.** No compile error. C6 and C10 carry the warning; C9 pins the stale row and path agreement.
+- **Q2, engine checks (orchestrator, following the PM recommendation, to be reported to the owner): none in the compiler.** The server rejects with code 182.
+- **Q3, `test/types/ir.ts:17` (owner): approved.** The Tester may add `'LimitBy'` and `'Prewhere'` to that line, additively and nothing else. `requiredOperators`, `fenceNodes` and `stepTypes` also list node kinds; those are additive harness edits for the Tester.
+- **Q4, LIMIT BY API (owner): builder** `q.limitBy(by).take(n).offset(m)`, replacing `limitBy(n, by, offset?)`. Key rule, IR node and planner rank are unchanged.
+
+### C11 coverage review (PM, 2026-11-05)
+
+**Gates, as reported by the Tester.** `check:all` exit 0 on TypeScript 5.5.4 and latest; `docs:verify` exit 0; `check-type-performance.mjs --all` exit 0; type diagnostics 466 on each of 5.5.4, 5.8.3 and latest. The PM read the `check:all` logs: both show 1718 unit tests passed and 1 skipped, 8 codegen and 614 compiler/client native tests passed. The 5.5.4 run took 10m 34s and ended 12:29:37, so it began about when the last source edit landed (12:19:01). That ordering rests on timestamps; the logs do not name test files.
+
+**Post-gate edit: prose only, confirmed.** The only non-ignored file newer than the last gate is `scan-modifiers.md`. The Worker's recorded edit (12:41:54, matching the file's mtime) replaces one sentence in the "Failing expressions" bullet. No code, fence or generated block changed. `docs:verify` and `pnpm typecheck` then exited 0 (reported).
+
+**Gap: `scan-modifiers.md:216` is true for one table and too general as written.** "A guard on a different column did not protect in either order: `id < 13 AND toUInt32(s) > 0` failed on a row that `id < 13` excludes." Native check on 24.8.14, same 40 rows, `bad` only at ids 13, 26 and 39, `ORDER BY id`, 3 runs each:
+
+| Parts, `index_granularity` | Guard first | Guard last | Same-column guard first | Same-column guard last | Guard in PREWHERE, cast in WHERE |
+|---|---|---|---|---|---|
+| 4 parts, 4 (the test's table shape) | code 6 | code 6 | passes | code 6 | passes |
+| 4 parts, 8192 | passes | code 6 | passes | code 6 | passes |
+| 1 part, 4 | passes | passes | passes | code 6 | passes |
+
+The failure on the test's table is real, and it is on a row `id < 13` excludes. But guard first passed on the other shapes, and on 1 part with granularity 4 both orders passed, consistent with key analysis skipping the bad row's granule (not separately confirmed). Proposed wording: "A guard on a different column was not reliable, in either order: with the same rows, `id < 13 AND toUInt32(s) > 0` returned rows or failed with code 6 depending on how the rows were split into parts and on `index_granularity`, even though `id < 13` excludes every failing row. A guard in `prewhere` with the cast in `where` passed on every shape we tried." The docs prose should change; no test or code should.
+
+**Results-only, added check.** Because the outcome varies with the plan, the PM compared the optimized and naive SQL shapes (narrow list, list with `s`, nested, folded and nested `WHERE`) for all four guard orders across the table shapes. Outcome and row count matched in every comparison that ran. Table `a` has no `cat` column, so its nested and `WHERE` shapes errored for that reason and compared nothing.
+
+**Coverage against the diff.**
+- C1 to C3, C6 to C8: every interaction in the design note is in the source diff (`edges`, `visit`, `fallible`, `expressions`, the uncounted Scan edge, `source.prewhere`, the `others` guard, the ArrayJoin fence, `clausesRead`, rank, all three renderers, both emitters). `references` does not enter a `Subquery`, so builder and compiler agree on the key rule. Required negative types are present.
+- C4, C9: required cases are present by test title. The required controls are in the Tester's reports, all failing tests: C4 `clausesRead`, rank and `visit`; C9 `source.prewhere`, CTE edge and Project guard. The PM did not rerun them.
+- C5, C10: docs, the Decided rows and the two-stage row are present; the FINAL warning is a `:::caution` with the reproduced rows. The Window functions row is kept.
+- Existing tests: `test/types/ir.ts` changed only the approved line. Other harness edits add cases or thread an optional `prewhere` flag defaulting to false; no expectation was weakened. Adding that flag and the new operators changes what the seeded arbitraries generate.
+- Minor: the test title "NULL is one group, and NaN is one group" (`limit-by.integration.ts:100`) uses one bit pattern, so it is true but imprecise. The adversarial file covers the corrected fact.
+
+**C11 item resolved.** `limit-by/subquery-key` is `run: false` because of a harness read-set limit for IN outside `WHERE`: the set gets its own read in the main plan, and the clause counts main scans only. Sort keys and select items behave the same, and a test pins it.
+
+**Limits.**
+- `differential.integration.ts` has no `Prewhere` case because its Memory tables reject it; the fixture differential covers `Prewhere` only with a key predicate under FINAL.
+- Non-key FINAL is covered by the stale-row pin only.
+- The 10k nightly differential was not run.
+- Distributed, Buffer and Merge rest on the PM's one-table probe. Buffer had no unflushed rows in it.
+- The guard-reliability table is a small sample on 24.8.14.
+
+**Follow-up for the owner, out of scope.** Existing client bug: an error after rows have started streaming arrives as `decode_missing_column` and loses the server code. It also happens on `where` and `map`, so it is not specific to this track.
+
+Also for merge planning: the unmerged `studio` branch may switch over `Rel['kind']`; not checked here.
 
 ## Animal table in the "Latest value and average" guide (2026-11-05)
 

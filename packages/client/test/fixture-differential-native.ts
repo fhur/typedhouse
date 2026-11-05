@@ -26,6 +26,7 @@ function tree(t: Tree, s: Scope, depth = 0): string {
       case 'filter': return `SELECT ${fields} FROM (${input}) WHERE value>500`;
       case 'distinct': return `SELECT DISTINCT ${fields} FROM (${input})`;
       case 'in': return `SELECT ${fields} FROM (${input}) WHERE id IN (SELECT id FROM (${input}) WHERE value>500)`;
+      case 'limitBy': return `SELECT ${fields} FROM (${input}) ORDER BY ${totalOrder} LIMIT ${t.n} OFFSET ${t.offset} BY ${t.key}`;
     }
   }
   const [table, value, part] = metricNames[t.metric];
