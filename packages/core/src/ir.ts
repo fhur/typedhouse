@@ -52,6 +52,8 @@ interface FlatRel extends RelBase { readonly output: Extract<OutputSchema, { sha
 export type Scan = FlatRel & { readonly kind: 'Scan'; readonly table: TableDef; readonly final?: boolean; readonly sample?: number };
 export type RawRel = RelBase & { readonly kind: 'RawRel'; readonly opaque: true; readonly provenance: RawProvenance; readonly parts: readonly string[]; readonly args: readonly ExprNode[] };
 export type Filter = RelBase & { readonly kind: 'Filter'; readonly input: Rel; readonly pred: ExprNode };
+/** Explicit `PREWHERE pred`, directly over its physical scan. Never inferred, moved, split or dropped by the compiler. */
+export type Prewhere = RelBase & { readonly kind: 'Prewhere'; readonly input: Scan; readonly pred: ExprNode };
 export type Project = FlatRel & { readonly kind: 'Project'; readonly input: Rel; readonly exprs: Readonly<Record<string, ExprNode>> };
 export type Aggregate = FlatRel & { readonly kind: 'Aggregate'; readonly input: Rel; readonly keys: Readonly<Record<string, ExprNode>>; readonly aggs: Readonly<Record<string, ExprNode>> };
 export type Join = Node & { readonly kind: 'Join'; readonly output: Extract<OutputSchema, { shape: 'nested' }>; readonly joinKind: 'inner' | 'left' | 'right' | 'full' | 'cross'; readonly scope?: NodeId; readonly inputs: readonly (readonly [string, Rel])[]; readonly on: readonly ExprNode[] };
@@ -59,10 +61,12 @@ export type ArrayJoin = RelBase & { readonly columns: FlatColumns } & { readonly
 export interface SortKey { readonly expr: ExprNode; readonly dir: 'asc' | 'desc'; readonly nulls?: 'first' | 'last' }
 export type Sort = RelBase & { readonly kind: 'Sort'; readonly input: Rel; readonly keys: readonly SortKey[] };
 export type Limit = RelBase & { readonly kind: 'Limit'; readonly input: Rel; readonly n: number; readonly offset?: number };
+/** `LIMIT n [OFFSET m] BY k1, k2`: at most `n` rows per distinct key tuple, after skipping `offset` of each. */
+export type LimitBy = RelBase & { readonly kind: 'LimitBy'; readonly input: Rel; readonly n: number; readonly offset?: number; readonly keys: readonly ExprNode[] };
 export type Distinct = RelBase & { readonly kind: 'Distinct'; readonly input: Rel };
 export type Union = RelBase & { readonly kind: 'Union'; readonly inputs: readonly Rel[]; readonly all: boolean };
 export type Materialize = RelBase & { readonly kind: 'Materialize'; readonly input: Rel };
-export type Rel = Scan | RawRel | Filter | Project | Aggregate | Join | ArrayJoin | Sort | Limit | Distinct | Union | Materialize;
+export type Rel = Scan | RawRel | Prewhere | Filter | Project | Aggregate | Join | ArrayJoin | Sort | LimitBy | Limit | Distinct | Union | Materialize;
 type WithoutId<T> = T extends Node ? Omit<T, 'id'> : never;
 const graphNode = Symbol('typedhouse.graphNode');
 // The marker is inspectable, not an authority: only finalized constructors may

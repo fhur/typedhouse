@@ -1,0 +1,1 @@
+SELECT `__typedhouse_input`.`entityId`, `__typedhouse_input`.`more` FROM (SELECT `entityId` AS `entityId`, `countOfParts` + {p0:UInt64} AS `more` FROM `entity_ots_component`) AS `__typedhouse_input` LIMIT 1 BY `__typedhouse_input`.`more`

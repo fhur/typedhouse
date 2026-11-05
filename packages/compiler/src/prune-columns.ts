@@ -86,8 +86,9 @@ export function pruneColumns(root: Rel): ColumnDemand {
         case 'ArrayJoin':
           add(rel.input, paths.filter(p => !(p.length === 1 && p[0] === rel.alias)));
           expression(rel.expr, rel.input); break;
-        case 'Filter': add(rel.input, paths); expression(rel.pred, rel.input); break;
+        case 'Filter': case 'Prewhere': add(rel.input, paths); expression(rel.pred, rel.input); break;
         case 'Sort': add(rel.input, paths); for (const k of rel.keys) expression(k.expr, rel.input); break;
+        case 'LimitBy': add(rel.input, paths); for (const k of rel.keys) expression(k, rel.input); break;
         case 'Limit': add(rel.input, paths); break;
         case 'Distinct': case 'Materialize': full(rel); full(rel.input); break;
         case 'Union': full(rel); for (const input of rel.inputs) full(input); break;

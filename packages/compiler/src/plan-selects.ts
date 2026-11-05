@@ -4,9 +4,10 @@ import { directSelection, type ColumnDemand } from './prune-columns.js';
 import { fallibleComputation } from './rewrite-rel.js';
 import type { CtePlan } from './plan-ctes.js';
 
-export type SelectClause = Extract<Rel, { kind: 'Filter' | 'Sort' | 'Limit' }>;
+export type SelectClause = Extract<Rel, { kind: 'Filter' | 'Sort' | 'LimitBy' | 'Limit' }>;
 export interface SelectBlock {
-  readonly source: { readonly kind: 'table'; readonly scan: Extract<Rel, { kind: 'Scan' }> }
+  /** `prewhere` lives on the source, not the block: an aggregate rebuilds its block from `child.source`. */
+  readonly source: { readonly kind: 'table'; readonly scan: Extract<Rel, { kind: 'Scan' }>; readonly prewhere?: Extract<Rel, { kind: 'Prewhere' }> }
     | { readonly kind: 'derived'; readonly rel: Rel }
     | { readonly kind: 'cte'; readonly rel: Rel }
     | { readonly kind: 'join'; readonly rel: Extract<Rel, { kind: 'Join' }> };
@@ -26,7 +27,8 @@ export interface SqlPlan {
   readonly columns?: ColumnDemand;
   readonly ctes?: CtePlan;
 }
-const rank = { Filter: 1, Sort: 2, Limit: 3 } as const;
+/** The only legal text is ORDER BY, LIMIT BY, LIMIT: anything out of rank opens a derived table. */
+const rank = { Filter: 1, Sort: 2, LimitBy: 3, Limit: 4 } as const;
 function referencesName(e: import('@typedhouse/core').ExprNode, name: string): boolean {
   if (e.kind === 'ColumnRef') return e.path.length === 1 && e.path[0] === name;
   if (e.kind === 'Call' || e.kind === 'Agg') return e.args.some(a => referencesName(a, name));
@@ -89,15 +91,15 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
   const all = [...nodes];
   const parents = new Map<Rel, Set<Rel>>();
   for (const node of all) for (const input of relInputs(node)) parents.set(input, (parents.get(input) ?? new Set()).add(node));
-  // Slice 4c: HAVING and ORDER BY name the aggregate's outputs unqualified. Any Filter or Sort reachable from the
-  // Aggregate through Filter/Sort/Limit/Distinct parents may fold into its block, so each counts (conservatively).
+  // Slice 4c: HAVING, ORDER BY and LIMIT BY name the aggregate's outputs unqualified. Any Filter, Sort or LimitBy reachable
+  // from the Aggregate through Filter/Sort/LimitBy/Limit/Distinct parents may fold into its block, so each counts (conservatively).
   function clausesRead(rel: Rel, name: string): boolean {
     const seen = new Set<Rel>(), queue = [rel];
     for (let cur = queue.pop(); cur; cur = queue.pop()) for (const parent of parents.get(cur) ?? []) {
       if (seen.has(parent)) continue;
       seen.add(parent);
-      if (parent.kind === 'Filter' ? readsName(parent.pred, name) : parent.kind === 'Sort' && parent.keys.some(k => readsName(k.expr, name))) return true;
-      if (parent.kind === 'Filter' || parent.kind === 'Sort' || parent.kind === 'Limit' || parent.kind === 'Distinct') queue.push(parent);
+      if (parent.kind === 'Filter' || parent.kind === 'Prewhere' ? readsName(parent.pred, name) : parent.kind === 'Sort' ? parent.keys.some(k => readsName(k.expr, name)) : parent.kind === 'LimitBy' && parent.keys.some(k => readsName(k, name))) return true;
+      if (parent.kind === 'Filter' || parent.kind === 'Prewhere' || parent.kind === 'Sort' || parent.kind === 'LimitBy' || parent.kind === 'Limit' || parent.kind === 'Distinct') queue.push(parent);
     }
     return false;
   }
@@ -127,6 +129,9 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
     let block: SelectBlock;
     if (rel.kind === 'Scan') {
       block = { source: Object.freeze({ kind: 'table', scan: rel }), clauses: Object.freeze([]) };
+    } else if (rel.kind === 'Prewhere') {
+      // Directly over its Scan, never over a CTE reference, even when the same Scan is also a CTE elsewhere.
+      block = { source: Object.freeze({ kind: 'table', scan: rel.input, prewhere: rel }), clauses: Object.freeze([]) };
     } else if (rel.kind === 'Join' && rel.on.every(
       // Every kind: a WHERE, select list or GROUP BY folded into a join block is evaluated over the
       // joined (null-extended) rows, exactly like the nested Filter/Project/Aggregate above the Join.
@@ -166,7 +171,7 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       const names = new Set([...outputLeaves(child.source.scan.output).map(l => l.name), ...hiddenNames(child.source.scan)]);
       const entries = Object.entries(rel.exprs);
       const identity = (name: string, e: ExprNode) => e.kind === 'ColumnRef' && e.path.length === 1 && e.path[0] === name;
-      const others = [...child.clauses.map(n => n.kind === 'Filter' ? n.pred : undefined), child.arrayJoin?.expr].filter((e): e is ExprNode => !!e);
+      const others = [child.source.prewhere?.pred, ...child.clauses.map(n => n.kind === 'Filter' ? n.pred : undefined), child.arrayJoin?.expr].filter((e): e is ExprNode => !!e);
       if (entries.some(([name, e]) => !identity(name, e) && (name === child.arrayJoin?.alias || names.has(name)
         && [...others, ...entries.filter(([other]) => other !== name).map(([, expr]) => expr)].some(expr => referencesName(expr, name))))) return undefined;
       block = { ...child, project: rel };
@@ -186,7 +191,9 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
       // reference and a derived table are not folded; they keep the nested emission.
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
       if (!child || child.source.kind !== 'table' || child.arrayJoin || child.aggregate || child.project || child.distinct
-        || !child.clauses.every(n => n.kind === 'Filter' && (rel.left ? deterministicExpression(n.pred) : safePredicate(n.pred)))) return undefined;
+        || !child.clauses.every(n => n.kind === 'Filter' && (rel.left ? deterministicExpression(n.pred) : safePredicate(n.pred)))
+        // `ARRAY JOIN tags AS cat PREWHERE cat = 'x'` raises code 182: the alias keeps its own scope above the scan.
+        || child.source.prewhere && referencesName(child.source.prewhere.pred, rel.alias)) return undefined;
       block = { ...child, arrayJoin: rel };
     } else if (rel.kind === 'Aggregate') {
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
@@ -213,15 +220,17 @@ export function planSelects(root: Rel, nodes: Iterable<Rel>, columns?: ColumnDem
         && !(child.source.kind === 'join' && joinShadow(rel, child.source.rel, child.clauses));
       block = { source: fold ? child.source : Object.freeze({ kind: ctes?.names.has(rel.input) ? 'cte' : 'derived', rel: rel.input }),
         aggregate: rel, where: fold ? child.clauses : Object.freeze([]), clauses: Object.freeze([]), ...(fold && child.arrayJoin ? { arrayJoin: child.arrayJoin } : {}) };
-    } else if (rel.kind === 'Filter' || rel.kind === 'Sort' || rel.kind === 'Limit') {
+    } else if (rel.kind === 'Filter' || rel.kind === 'Sort' || rel.kind === 'LimitBy' || rel.kind === 'Limit') {
       const child = ctes?.names.has(rel.input) ? undefined : plan(rel.input);
       const last = child?.clauses.at(-1);
-      const safe = !child?.aggregate || (rel.kind === 'Filter' ? safePredicate(rel.pred) : rel.kind === 'Sort' ? rel.keys.every(k => k.expr.kind === 'ColumnRef') : true);
+      const safe = !child?.aggregate || (rel.kind === 'Filter' ? safePredicate(rel.pred) : rel.kind === 'Sort' ? rel.keys.every(k => k.expr.kind === 'ColumnRef') : rel.kind === 'LimitBy' ? rel.keys.every(k => k.kind === 'ColumnRef') : true);
       // A shared WHERE may reorder evaluation (including PREWHERE). Match MergeFilter:
       // keep either non-total predicate in its original scope, in both directions.
       // Also retain the boundary over fallible computations below the earlier filters (upstream slice 4d).
       const isolated = rel.kind !== 'Filter' || !child?.clauses.some(n => n.kind === 'Filter')
         || totalPredicate(rel.pred) && child.clauses.every(n => n.kind !== 'Filter' || totalPredicate(n.pred)) && !fallibleBelowFilters(child);
+      // LIMIT BY never folds over a projection (`limitProject` is LIMIT only): `v % 2 AS k ... LIMIT 1 BY k` binds the
+      // alias where the nested form binds the column.
       // LIMIT needs no alias substitution. A child.project exists only after the
       // scan Project arm's full physical-name (including hiddenColumns) guard passed.
       // Only total scan projections and preceding WHEREs may share the cap; retain

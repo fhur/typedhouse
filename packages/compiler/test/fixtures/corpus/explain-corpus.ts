@@ -10,7 +10,7 @@ import { snippetDistance } from './sql-snippets.js';
 import { components, db, forTenant } from './low-stock.js';
 
 /** `Filter`: a filter outside the total fragment keeps its own SELECT over earlier filters (slice 3b), and so does a total one over it. */
-export type FenceKind = 'Aggregate' | 'Sort' | 'Limit' | 'Distinct' | 'Union' | 'Join' | 'ArrayJoin' | 'CTE' | 'Subquery' | 'RawRel' | 'Materialize' | 'Filter';
+export type FenceKind = 'Prewhere' | 'Aggregate' | 'Sort' | 'LimitBy' | 'Limit' | 'Distinct' | 'Union' | 'Join' | 'ArrayJoin' | 'CTE' | 'Subquery' | 'RawRel' | 'Materialize' | 'Filter';
 export type CorpusRule = 'MergeFilter' | 'MergeProject' | 'PushFilterProject' | 'LeftToInner' | 'PushFilterJoin' | 'PushFilterArrayJoin' | 'PushFilterUnion' | 'PushFilterAggKey' | 'PruneColumns';
 export interface CorpusEntry {
   readonly id: string;
@@ -22,6 +22,34 @@ export interface CorpusEntry {
   readonly rule?: CorpusRule;
 }
 const fresh = () => from(db.entity_ots_component);
+const prewhereEntries: readonly CorpusEntry[] = [
+  // PREWHERE is part of its scan block: every clause folds, and it opens a boundary only for an alias equal to a column it reads.
+  { id: 'prewhere/bare', query: components.prewhere(forTenant('acme')), fences: [] },
+  { id: 'prewhere/where-sort-limit', query: components.prewhere(forTenant('acme')).where(c => c.state.eq('active')).orderBy(c => c.entityId).limit(5), fences: [] },
+  { id: 'prewhere/aggregate', query: components.prewhere(forTenant('acme')).groupBy(c => ({ state: c.state })).aggregate(() => ({ n: count() })), fences: [] },
+  { id: 'prewhere/unselected-column', query: components.prewhere(forTenant('acme')).map(c => ({ entityId: c.entityId })), fences: [] },
+  { id: 'prewhere/alias-shadow', query: components.prewhere(forTenant('acme')).map(c => ({ tenantId: c.entityId, state: c.state })), fences: ['Prewhere'] },
+  { id: 'prewhere/array-join', query: components.prewhere(forTenant('acme')).arrayJoin(c => c.matched_part_ids, 'partId'), fences: [] },
+  { id: 'prewhere/limit-by', query: components.prewhere(forTenant('acme')).orderBy(c => c.entityId).limitBy(c => c.category).take(1), fences: [] },
+  { id: 'prewhere/join-side', query: join({ a: from(db.entity_ots_component).prewhere(forTenant('acme')), b: fresh() }).on(r => r.a.entityId.eq(r.b.entityId)).map(r => ({ entityId: r.a.entityId })), fences: ['Join'] },
+  { id: 'prewhere/final', query: from(db.metric_group_ots_component_indices).final().prewhere(forTenant('acme')), fences: [] },
+];
+const limitByEntries: readonly CorpusEntry[] = [
+  // LIMIT BY: every clause folds into one SELECT in the only legal order, and anything out of rank is a LimitBy fence.
+  { id: 'limit-by/fold', query: components.where(forTenant('acme')).orderBy(c => c.entityId).limitBy(c => c.category).take(2).offset(1).limit(5), fences: [] },
+  { id: 'limit-by/unselected-key', query: components.orderBy(c => c.entityId).limitBy(c => c.category).take(1).map(c => ({ entityId: c.entityId })), fences: ['LimitBy'] },
+  { id: 'limit-by/filter-above', query: components.limitBy(c => c.category).take(1).where(c => c.countOfParts.gt(1n)), fences: ['LimitBy'] },
+  { id: 'limit-by/twice', query: components.limitBy(c => c.category).take(2).limitBy(c => c.state).take(1), fences: ['LimitBy'] },
+  { id: 'limit-by/over-limit', query: components.limit(5).limitBy(c => c.category).take(1), fences: ['LimitBy'] },
+  { id: 'limit-by/over-computed-map', query: components.map(c => ({ entityId: c.entityId, more: c.countOfParts.plus(1n) })).limitBy(c => c.more).take(1), fences: ['LimitBy'] },
+  { id: 'limit-by/aggregate', query: components.groupBy(c => ({ tenantId: c.tenantId, state: c.state })).aggregate(() => ({ n: count() })).orderBy(r => r.n).limitBy(r => r.tenantId).take(1), fences: [] },
+  { id: 'limit-by/under-aggregate', query: components.limitBy(c => c.category).take(1).aggregate(() => ({ n: count() })), fences: ['Aggregate'] },
+  { id: 'limit-by/join', query: join({ a: components, b: fresh() }).on(r => r.a.entityId.eq(r.b.entityId)).orderBy(r => r.a.entityId).limitBy(r => r.b.state).take(1).map(r => ({ entityId: r.a.entityId })), fences: ['LimitBy', 'Join'] },
+  // run: false: on 24.8 an IN set outside WHERE is a CreatingSet with its own read in the main plan (a Sort key and a select item behave the same; a WHERE does not),
+  // and the read-set clause counts main scans only. prewhere-adversarial.integration.ts pins that comparison, and limit-by-adversarial runs this shape.
+  { id: 'limit-by/subquery-key', run: false, query: components.limitBy(c => c.entityId.in(fresh().map(x => x.entityId))).take(1), fences: ['Subquery'] },
+  { id: 'limit-by/union-input', query: unionAll(fresh(), fresh()).limitBy(c => c.category).take(1), fences: ['Union'] },
+];
 export const entries: readonly CorpusEntry[] = [
   { id: 'filtering/tenant-active', query: s.filterTenantActive, fences: [] },
   { id: 'filtering/category', query: s.filterCategory, fences: [] },
@@ -77,6 +105,8 @@ export const entries: readonly CorpusEntry[] = [
   { id: 'hints/sample', query: s.sampleOnly, run: false, fences: [] },
   { id: 'hints/materialize', query: s.explicitCte, fences: ['CTE'] },
   { id: 'escape/sql-snippet', query: snippetDistance, fences: [] },
+  ...limitByEntries,
+  ...prewhereEntries,
   // One minimal query per rewrite rule over the fixture tables.
   { id: 'rule/merge-filter', rule: 'MergeFilter', query: components.where(forTenant('acme')).where(c => c.countOfParts.gt(1n)), fences: [] },
   { id: 'rule/merge-project', rule: 'MergeProject', query: components.map(c => ({ entityId: c.entityId, parts: c.countOfParts })).map(r => ({ id: r.entityId, parts: r.parts })), fences: [] },

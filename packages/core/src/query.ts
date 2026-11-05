@@ -138,6 +138,23 @@ export class GroupedQuery<R, K, C extends Caps = Caps, Nested extends boolean = 
   }
 }
 type SortResult = Expr<unknown, string, 'row'> | Ordering<'row'>;
+/** One row-level key or several. A sort key (`asc()`, `desc()`) is not a LIMIT BY key. */
+type LimitByKeys = Expr<unknown, string, 'row'> | readonly Expr<unknown, string, 'row'>[];
+/** Whether an expression reads a column of its own row. A Subquery opens another scope, so it does not count. */
+function readsRow(e: ExprNode): boolean {
+  switch (e.kind) {
+    case 'ColumnRef': return true;
+    case 'Call': case 'Raw': return e.args.some(readsRow);
+    case 'Agg': return [...e.args, ...e.params].some(readsRow);
+    case 'Cast': return readsRow(e.expr);
+    case 'Case': return e.branches.some(b => readsRow(b.when) || readsRow(b.then)) || readsRow(e.otherwise);
+    default: return false;
+  }
+}
+function limitCount(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error('invalid_limit: expected a non-negative safe integer');
+  return value;
+}
 export type ExpressionCaps<C extends Caps> = { readonly live: C['live'] extends false ? false : boolean };
 /** Capabilities are recomputed through relation edges, never trusted from a Subquery flag. */
 function liveRelation(rel: Rel, active: Set<Rel>): boolean {
@@ -343,6 +360,27 @@ export class Query<R, C extends Caps = Caps, Proxy = Row<R>, Nested extends bool
   limit(n: number, offset?: number): Query<R, C, this['row'], Nested> {
     return new Query(relNode({ kind: 'Limit', input: this.ir, n, ...(offset === undefined ? {} : { offset }), output: this.ir.output }), this.caps);
   }
+  /** Start a per-key limit; finish it with `take()`, optionally followed by `offset()`.
+   * Return one key or an array of keys; each must read a column of the row, and a key need
+   * not be selected. NULL is one group. Float keys group by bit pattern: NaNs with the same bit
+   * pattern form one group, and `0.0` and `-0.0` are separate groups. Sort first, with a tie
+   * breaker: without a total order, which rows of a group survive is unspecified.
+   * @example
+   * ```ts
+   * from(components).orderBy(c => c.updatedAt.desc()).limitBy(c => c.entityId).take(3);
+   * ```
+   */
+  limitBy(by: (row: this['row']) => LimitByKeys): LimitByBuilder<R, this['row'], Nested> {
+    const value: unknown = by(this.row);
+    const keys: readonly unknown[] = Array.isArray(value) ? value : [value];
+    if (!keys.length) throw new Error('invalid_limit_by_key: expected at least one key');
+    for (const key of keys) {
+      if (!(key instanceof Expr) || key.mode !== 'row') throw new Error('invalid_limit_by_key: expected a row expression');
+      // `LIMIT 1 BY 2` is positional on the server, and a constant puts every row in one group.
+      if (!readsRow(key.ir)) throw new Error('invalid_limit_by_key: a key must read a column of the row');
+    }
+    return new LimitByBuilder(this.ir, (keys as readonly Expr<unknown, string, 'row'>[]).map(key => key.ir));
+  }
   /** Request an ordinary common table expression without changing the row shape.
    * This is not an execution cache or a materialized result: ClickHouse may inline
    * and evaluate each use independently.
@@ -419,8 +457,42 @@ export class OrderedQuery<R, C extends Caps = Caps, Proxy = Row<R>, Nested exten
     return this.sort(this.ir.input, f, this.ir.keys);
   }
 }
-/** A direct table scan with `final()` and `sample()` hints.
- * Apply scan hints before filtering, projecting, or other query operations.
+/** A per-key limit awaiting `take()`. It is not a query: it has no other method, and it builds nothing yet. */
+export class LimitByBuilder<R, Proxy = Row<R>, Nested extends boolean = false> {
+  readonly #input: Rel;
+  readonly #keys: readonly ExprNode[];
+  constructor(input: Rel, keys: readonly ExprNode[]) {
+    this.#input = input;
+    this.#keys = Object.freeze([...keys]);
+    Object.freeze(this);
+  }
+  /** Keep at most `n` rows per distinct key tuple. `n` is a non-negative safe integer.
+   * @example
+   * ```ts
+   * from(events).limitBy(e => e.category).take(10);
+   * ```
+   */
+  take(n: number): LimitByQuery<R, { readonly live: false }, Proxy, Nested> {
+    return new LimitByQuery(relNode({ kind: 'LimitBy', input: this.#input, n: limitCount(n), keys: this.#keys, output: this.#input.output }), { live: false });
+  }
+}
+/** A query whose last step is `limitBy(...).take(n)`; `offset()` is available directly after `take()`.
+ * Every other operation returns an ordinary query, so it cannot add an offset later.
+ */
+export class LimitByQuery<R, C extends Caps = Caps, Proxy = Row<R>, Nested extends boolean = false> extends Query<R, C, Proxy, Nested> {
+  /** Skip the first `m` rows of each key group before taking. `m` is a non-negative safe integer.
+   * @example
+   * ```ts
+   * from(events).limitBy(e => e.category).take(10).offset(20);
+   * ```
+   */
+  offset(m: number): Query<R, C, this['row'], Nested> {
+    if (this.ir.kind !== 'LimitBy') throw new Error('invalid_limit_by');
+    return new Query(relNode({ kind: 'LimitBy', input: this.ir.input, n: this.ir.n, offset: limitCount(m), keys: this.ir.keys, output: this.ir.output }), this.caps);
+  }
+}
+/** A direct table scan with `final()` and `sample()` hints and an explicit `prewhere()`.
+ * Apply them before filtering, projecting, or other query operations.
  */
 export class TableQuery<R, C extends Caps = Caps, Proxy = Row<R>> extends Query<R, C, Proxy> {
   /** Apply ClickHouse FINAL to this scan, using the table engine's merge semantics.
@@ -441,6 +513,23 @@ export class TableQuery<R, C extends Caps = Caps, Proxy = Row<R>> extends Query<
    * ```
    */
   sample(fraction: number): TableQuery<R, C, this['row']> { return this.hint({ sample: fraction }); }
+  /** Filter this scan with an explicit ClickHouse PREWHERE, which reads the predicate's columns first.
+   * Same predicate type as `where()`. Call it after `final()` and `sample()`, before anything else.
+   * The compiler never infers, moves, splits or drops it. Engine support is checked by the server.
+   *
+   * With `final()` it filters before merging, so a predicate on a non-key column can return a stale
+   * row version that `where()`, which filters after merging, would not. Prefer sorting-key columns there.
+   * @example
+   * ```ts
+   * from(components).prewhere(c => c.tenantId.eq('acme')).where(c => c.matched_part_ids.notEmpty());
+   * ```
+   */
+  prewhere(predicate: (row: this['row']) => Expr<boolean | null, string, 'row'>): Query<R, { readonly live: false }, this['row']> {
+    if (this.ir.kind !== 'Scan') throw new Error('invalid_prewhere_source');
+    const pred = predicate(this.row);
+    if (!(pred instanceof Expr) || pred.mode !== 'row') throw new Error('invalid_predicate');
+    return new Query(relNode({ kind: 'Prewhere', input: this.ir, pred: pred.ir, output: this.ir.output }), { live: false });
+  }
   private hint(hint: { final?: boolean; sample?: number }): TableQuery<R, C, this['row']> {
     if (this.ir.kind !== 'Scan') throw new Error('invalid_scan_hint');
     const { id: _id, ...fields } = this.ir;

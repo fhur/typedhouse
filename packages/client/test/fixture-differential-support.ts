@@ -9,6 +9,7 @@ export function coverage(r: Recipe): string[] {
     else if (t.op !== 'metric') { if (t.op === 'in') result.push('identity:in'); walk(t.input); }
     else {
       result.push(`metric:${t.metric}`, t.latest ? 'identity:latest' : 'history:between', 'final');
+      if (t.prewhere) result.push('prewhere');
       if (t.cross) result.push('source:component', 'source:part', 'join:cross-family', `cross:${t.metric}`, 'arrayJoin');
       else if (t.attached) result.push('join:entity', t.metric === 'availability' || t.metric === 'componentIndices' ? 'source:component' : 'source:part');
     }
@@ -31,10 +32,10 @@ export const actualTables = [
   'metric_group_ots_component_market_availability', 'metric_group_ots_component_indices',
   'metric_group_off_the_shelf_part_indices', 'metric_group_off_the_shelf_part_market_price',
 ];
-export const requiredOperators = ['Scan', 'Filter', 'Project', 'Aggregate', 'Join', 'ArrayJoin', 'Sort', 'Limit', 'Distinct', 'Union', 'Materialize'];
+export const requiredOperators = ['Scan', 'Prewhere', 'Filter', 'Project', 'Aggregate', 'Join', 'ArrayJoin', 'Sort', 'LimitBy', 'Limit', 'Distinct', 'Union', 'Materialize'];
 export const requiredCoverage = [
   'end:bag', 'end:limit', 'end:rollup', 'end:share', 'tenant:acme', 'tenant:other',
-  'op:filter', 'op:project', 'op:distinct', 'op:in', 'op:cte', 'op:union',
+  'op:filter', 'op:project', 'op:distinct', 'op:in', 'op:cte', 'op:union', 'op:limitBy', 'prewhere',
   'metric:availability', 'metric:componentIndices', 'metric:partIndices', 'metric:price',
   'identity:latest', 'history:between', 'identity:union', 'identity:in', 'union:independent',
   'source:component', 'source:part', 'join:entity', 'join:cross-family', 'arrayJoin', 'final',

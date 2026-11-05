@@ -6,17 +6,19 @@ export const seed = 20261201;
 export type Metric = 'availability' | 'componentIndices' | 'partIndices' | 'price';
 export interface Scope { tenant: string; start: number; week: number }
 export type Tree =
-  | { op: 'metric'; metric: Metric; latest: boolean; attached: boolean; cross: boolean }
+  | { op: 'metric'; metric: Metric; latest: boolean; attached: boolean; cross: boolean; prewhere?: boolean }
   | { op: 'filter' | 'project' | 'distinct' | 'in' | 'cte'; input: Tree }
-  | { op: 'union'; left: Tree; right: Tree; repeat: boolean };
+  | { op: 'union'; left: Tree; right: Tree; repeat: boolean }
+  | { op: 'limitBy'; input: Tree; key: 'id' | 'tenant' | 'version'; n: number; offset: number };
 export interface Recipe { scope: Scope; tree: Tree; end: 'bag' | 'limit' | 'rollup' | 'share' }
-const leaf: fc.Arbitrary<Tree> = fc.record({ op: fc.constant('metric'), metric: fc.constantFrom('availability', 'componentIndices', 'partIndices', 'price'), latest: fc.boolean(), attached: fc.boolean(), cross: fc.boolean() });
+const leaf: fc.Arbitrary<Tree> = fc.record({ op: fc.constant('metric'), metric: fc.constantFrom('availability', 'componentIndices', 'partIndices', 'price'), latest: fc.boolean(), attached: fc.boolean(), cross: fc.boolean(), prewhere: fc.boolean() });
 function trees(depth: number): fc.Arbitrary<Tree> {
   if (!depth) return leaf;
   const input = trees(depth - 1);
   return fc.oneof({ withCrossShrink: true }, leaf,
     fc.record({ op: fc.constantFrom('filter', 'project', 'distinct', 'in', 'cte'), input }),
-    fc.record({ op: fc.constant('union'), left: input, right: input, repeat: fc.boolean() }));
+    fc.record({ op: fc.constant('union'), left: input, right: input, repeat: fc.boolean() }),
+    fc.record({ op: fc.constant('limitBy'), input, key: fc.constantFrom('id', 'tenant', 'version'), n: fc.integer({ min: 0, max: 3 }), offset: fc.integer({ min: 0, max: 2 }) }));
 }
 // Full seed stays loaded. Each leaf reads four explicit entities and two weeks;
 // depth 3 allows eight leaves, at most 4*4*2*8=256 metric rows before joins.
@@ -31,16 +33,17 @@ export function dates(scope: Scope) {
 export function ids(scope: Scope, part: boolean) { return Array.from({ length: 4 }, (_, i) => `${part ? 'part' : 'cmp'}_${scope.start + i}`); }
 export function componentSource(s: Scope) { return from(db.entity_ots_component).where(forTenant(s.tenant)).where(r => r.entityId.in(ids(s, false))); }
 export function partSource(s: Scope) { return from(db.entity_off_the_shelf_part).where(forTenant(s.tenant)).where(r => r.entityId.in(ids(s, true))); }
-export function availability(s: Scope) { return from(db.metric_group_ots_component_market_availability).final().where(forTenant(s.tenant)).where(r => r.entityId.in(ids(s, false))).where(r => r.effectiveAt.between(dates(s)[0]!, dates(s)[1]!)); }
-export function componentIndices(s: Scope) { return from(db.metric_group_ots_component_indices).final().where(forTenant(s.tenant)).where(r => r.entityId.in(ids(s, false))).where(r => r.effectiveAt.between(dates(s)[0]!, dates(s)[1]!)); }
-export function partIndices(s: Scope) { return from(db.metric_group_off_the_shelf_part_indices).final().where(forTenant(s.tenant)).where(r => r.entityId.in(ids(s, true))).where(r => r.effectiveAt.between(dates(s)[0]!, dates(s)[1]!)); }
-export function price(s: Scope) { return from(db.metric_group_off_the_shelf_part_market_price).final().where(forTenant(s.tenant)).where(r => r.entityId.in(ids(s, true))).where(r => r.effectiveAt.between(dates(s)[0]!, dates(s)[1]!)); }
-export function metricSource(m: Metric, s: Scope, newest: boolean) {
+export function availability(s: Scope, prewhere = false) { return (prewhere ? from(db.metric_group_ots_component_market_availability).final().prewhere(forTenant(s.tenant)) : from(db.metric_group_ots_component_market_availability).final().where(forTenant(s.tenant))).where(r => r.entityId.in(ids(s, false))).where(r => r.effectiveAt.between(dates(s)[0]!, dates(s)[1]!)); }
+export function componentIndices(s: Scope, prewhere = false) { return (prewhere ? from(db.metric_group_ots_component_indices).final().prewhere(forTenant(s.tenant)) : from(db.metric_group_ots_component_indices).final().where(forTenant(s.tenant))).where(r => r.entityId.in(ids(s, false))).where(r => r.effectiveAt.between(dates(s)[0]!, dates(s)[1]!)); }
+export function partIndices(s: Scope, prewhere = false) { return (prewhere ? from(db.metric_group_off_the_shelf_part_indices).final().prewhere(forTenant(s.tenant)) : from(db.metric_group_off_the_shelf_part_indices).final().where(forTenant(s.tenant))).where(r => r.entityId.in(ids(s, true))).where(r => r.effectiveAt.between(dates(s)[0]!, dates(s)[1]!)); }
+export function price(s: Scope, prewhere = false) { return (prewhere ? from(db.metric_group_off_the_shelf_part_market_price).final().prewhere(forTenant(s.tenant)) : from(db.metric_group_off_the_shelf_part_market_price).final().where(forTenant(s.tenant))).where(r => r.entityId.in(ids(s, true))).where(r => r.effectiveAt.between(dates(s)[0]!, dates(s)[1]!)); }
+// tenantId prefixes the sorting key, so PREWHERE under FINAL matches WHERE, which the native oracle keeps writing.
+export function metricSource(m: Metric, s: Scope, newest: boolean, prewhere = false) {
   switch (m) {
-    case 'availability': { const q = availability(s); return (newest ? latest(q) : q).map(r => ({ tenant: r.tenantId, id: r.entityId, at: r.effectiveAt, version: r.version, value: r.market_stock_total })); }
-    case 'componentIndices': { const q = componentIndices(s); return (newest ? latest(q) : q).map(r => ({ tenant: r.tenantId, id: r.entityId, at: r.effectiveAt, version: r.version, value: r.stock_index })); }
-    case 'partIndices': { const q = partIndices(s); return (newest ? latest(q) : q).map(r => ({ tenant: r.tenantId, id: r.entityId, at: r.effectiveAt, version: r.version, value: r.stock_index })); }
-    case 'price': { const q = price(s); return (newest ? latest(q) : q).map(r => ({ tenant: r.tenantId, id: r.entityId, at: r.effectiveAt, version: r.version, value: r.market_unit_price_1k_p50 })); }
+    case 'availability': { const q = availability(s, prewhere); return (newest ? latest(q) : q).map(r => ({ tenant: r.tenantId, id: r.entityId, at: r.effectiveAt, version: r.version, value: r.market_stock_total })); }
+    case 'componentIndices': { const q = componentIndices(s, prewhere); return (newest ? latest(q) : q).map(r => ({ tenant: r.tenantId, id: r.entityId, at: r.effectiveAt, version: r.version, value: r.stock_index })); }
+    case 'partIndices': { const q = partIndices(s, prewhere); return (newest ? latest(q) : q).map(r => ({ tenant: r.tenantId, id: r.entityId, at: r.effectiveAt, version: r.version, value: r.stock_index })); }
+    case 'price': { const q = price(s, prewhere); return (newest ? latest(q) : q).map(r => ({ tenant: r.tenantId, id: r.entityId, at: r.effectiveAt, version: r.version, value: r.market_unit_price_1k_p50 })); }
   }
 }
 export function buildTree(t: Tree, s: Scope): ReturnType<typeof metricSource> {
@@ -53,9 +56,14 @@ export function buildTree(t: Tree, s: Scope): ReturnType<typeof metricSource> {
       case 'distinct': return q.distinct();
       case 'cte': return q.cte();
       case 'in': return q.where(r => r.id.in(q.where(x => x.value.gt(500)).map(x => ({ id: x.id }))));
+      // Sorted on every output field: copies are identical, so which copy survives cannot show.
+      case 'limitBy': {
+        const taken = q.orderBy(x => x.tenant).thenBy(x => x.id).thenBy(x => x.at).thenBy(x => x.version).thenBy(x => x.value).limitBy(x => x[t.key]).take(t.n);
+        return t.offset ? taken.offset(t.offset) : taken;
+      }
     }
   }
-  const q = metricSource(t.metric, s, t.latest);
+  const q = metricSource(t.metric, s, t.latest, t.prewhere);
   const part = t.metric === 'partIndices' || t.metric === 'price';
   if (t.cross) {
     const c = componentSource(s).arrayJoin(r => r.matched_part_ids, 'partId');

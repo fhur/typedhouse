@@ -8,7 +8,7 @@ import { rewriteRel } from '../src/rewrite-rel.js';
 import type { FenceKind } from './fixtures/corpus/explain-corpus.js';
 
 /** IR kinds that justify a SELECT boundary; `CTE` and `Subquery` are emission roles. */
-const fenceNodes = new Set<string>(['Aggregate', 'Sort', 'Limit', 'Distinct', 'Union', 'Join', 'ArrayJoin', 'RawRel', 'Materialize']);
+const fenceNodes = new Set<string>(['Prewhere', 'Aggregate', 'Sort', 'LimitBy', 'Limit', 'Distinct', 'Union', 'Join', 'ArrayJoin', 'RawRel', 'Materialize']);
 export type Role = 'root' | 'cte' | 'cte-ref' | 'subquery' | 'union-branch' | 'union-input' | 'join-input' | 'derived';
 export interface EmittedSelect { readonly rel: Rel; readonly role: Role; readonly consumer?: Rel; readonly fence: FenceKind | 'unfenced' | 'root' }
 export interface Structure {
@@ -29,11 +29,12 @@ export interface Structure {
 function expressions(rel: Rel): readonly ExprNode[] {
   const values = (r: Readonly<Record<string, ExprNode>>) => Object.getOwnPropertyNames(r).map(k => r[k]!);
   switch (rel.kind) {
-    case 'Filter': return [rel.pred];
+    case 'Filter': case 'Prewhere': return [rel.pred];
     case 'Project': return values(rel.exprs);
     case 'Aggregate': return [...values(rel.keys), ...values(rel.aggs)];
     case 'Join': return rel.on;
     case 'Sort': return rel.keys.map(k => k.expr);
+    case 'LimitBy': return rel.keys;
     case 'ArrayJoin': return [rel.expr];
     case 'RawRel': return rel.args;
     default: return [];
@@ -159,7 +160,7 @@ export function structure(root: Rel): Structure {
 export const stepTypes = Object.freeze({
   base: Object.freeze(['Expression', 'Filter', 'ReadFromMergeTree', 'ReadFromMemoryStorage', 'ReadFromStorage']),
   byFence: Object.freeze<Record<FenceKind, readonly string[]>>({
-    Aggregate: ['Aggregating', 'MergingAggregated'], Sort: ['Sorting'], Limit: ['Limit', 'Offset'], Distinct: ['Distinct'], Union: ['Union'],
+    Aggregate: ['Aggregating', 'MergingAggregated'], Prewhere: [], Sort: ['Sorting'], LimitBy: ['LimitBy'], Limit: ['Limit', 'Offset'], Distinct: ['Distinct'], Union: ['Union'],
     Filter: [], Join: ['Join'], ArrayJoin: ['ArrayJoin'], Subquery: ['CreatingSets', 'CreatingSet'], CTE: [], RawRel: [], Materialize: [],
   }),
 });

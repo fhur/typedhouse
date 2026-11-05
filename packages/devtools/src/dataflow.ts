@@ -51,10 +51,12 @@ function label(rel: Rel): string {
     case 'Scan': return `Scan ${rel.table.name}${rel.final ? ' FINAL' : ''}${rel.sample === undefined ? '' : ` SAMPLE ${rel.sample}`}`;
     case 'RawRel': return rel.provenance.label ? `RawRel ${rel.provenance.label}` : 'RawRel';
     case 'Filter': return `Filter ${formatExpression(rel.pred)}`;
+    case 'Prewhere': return `Prewhere ${formatExpression(rel.pred)}`;
     case 'Sort': return `Sort ${rel.keys.map(key => `${formatExpression(key.expr)} ${key.dir.toUpperCase()}${key.nulls ? ` NULLS ${key.nulls.toUpperCase()}` : ''}`).join(', ')}`;
     case 'Join': return `${rel.joinKind} Join`;
     case 'Union': return rel.all ? 'Union ALL' : 'Union DISTINCT';
     case 'ArrayJoin': return `${rel.left ? 'Left ' : ''}ArrayJoin ${rel.alias}`;
+    case 'LimitBy': return `LimitBy ${rel.n}${rel.offset === undefined ? '' : ` OFFSET ${rel.offset}`} BY ${rel.keys.map(formatExpression).join(', ')}`;
     case 'Limit': return `Limit ${rel.n}${rel.offset === undefined ? '' : ` OFFSET ${rel.offset}`}`;
     default: return rel.kind;
   }
@@ -136,7 +138,7 @@ export function toDataflowGraph(root: Rel): DataflowGraph {
     switch (rel.kind) {
       case 'Scan': case 'Limit': case 'Distinct': case 'Materialize': break;
       case 'RawRel': rel.args.forEach((e, i) => expression(e, ['args', i])); break;
-      case 'Filter': expression(rel.pred, ['pred']); break;
+      case 'Filter': case 'Prewhere': expression(rel.pred, ['pred']); break;
       case 'Project':
         for (const name of rel.output.order) expression(rel.exprs[name]!, ['exprs', name]);
         break;
@@ -152,6 +154,7 @@ export function toDataflowGraph(root: Rel): DataflowGraph {
         break;
       case 'ArrayJoin': expression(rel.expr, ['expr']); break;
       case 'Sort': rel.keys.forEach((key, i) => expression(key.expr, ['keys', i, 'expr'])); break;
+      case 'LimitBy': rel.keys.forEach((key, i) => expression(key, ['keys', i])); break;
       case 'Union': rel.inputs.forEach((input, i) => connect(input, ['inputs', i])); break;
       default: { const unreachable: never = rel; throw new Error(`unknown_relation: ${String(unreachable)}`); }
     }

@@ -1,0 +1,1 @@
+SELECT `tenantId`, `entityId`, `category`, `state`, `part_specifications`, `matched_part_ids`, `countOfParts`, `updatedAt` FROM `entity_ots_component` LIMIT 1 BY in(`entityId`, (SELECT `entityId` FROM `entity_ots_component`))

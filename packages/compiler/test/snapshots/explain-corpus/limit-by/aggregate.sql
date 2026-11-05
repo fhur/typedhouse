@@ -1,0 +1,1 @@
+SELECT `__typedhouse_input`.`tenantId` AS `tenantId`, `__typedhouse_input`.`state` AS `state`, count() AS `n` FROM `entity_ots_component` AS `__typedhouse_input` GROUP BY `__typedhouse_input`.`tenantId`, `__typedhouse_input`.`state` ORDER BY `n` ASC LIMIT 1 BY `tenantId`

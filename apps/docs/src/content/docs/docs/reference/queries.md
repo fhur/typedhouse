@@ -21,9 +21,9 @@ The [Query Builder section](/docs/query-builder/overview/) documents each implem
 
 [map](/docs/query-builder/projection/) — shape outputs and choose names.
 
-## orderBy, thenBy, limit
+## orderBy, thenBy, limit, limitBy
 
-[orderBy / thenBy](/docs/query-builder/ordering/) and [limit](/docs/query-builder/limits/) — sort, break ties, and bound results while respecting operation order.
+[orderBy / thenBy](/docs/query-builder/ordering/) and [limit and limitBy](/docs/query-builder/limits/) — sort, break ties, and bound results, overall or per key, while respecting operation order.
 
 ## groupBy and aggregate
 
@@ -31,7 +31,7 @@ The [Query Builder section](/docs/query-builder/overview/) documents each implem
 
 ## Scan-only ClickHouse modifiers
 
-[final / sample](/docs/query-builder/scan-modifiers/) — apply FINAL and SAMPLE before general query operations.
+[final / sample / prewhere](/docs/query-builder/scan-modifiers/) — apply FINAL, SAMPLE and an explicit PREWHERE before general query operations.
 
 ## Combining and expanding rows
 

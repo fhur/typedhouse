@@ -46,7 +46,7 @@ function fenceClause(steps: readonly PlanStep[], s: Pick<Structure, 'fences' | '
   const allowed = new Set([...stepTypes.base, ...[...s.fences].flatMap(k => stepTypes.byFence[k])]);
   const types = flatten(steps).map(step => step.type);
   const problems = types.filter(t => !allowed.has(t) || /Subquery/.test(t) && !s.fences.has('Subquery')).map(t => `unjustified step ${t}`);
-  for (const kind of ['Aggregate', 'Sort', 'Limit', 'Distinct', 'Union', 'Join', 'ArrayJoin'] as const satisfies readonly FenceKind[]) {
+  for (const kind of ['Aggregate', 'Sort', 'LimitBy', 'Limit', 'Distinct', 'Union', 'Join', 'ArrayJoin'] as const satisfies readonly FenceKind[]) {
     if (s.planned.has(kind) && !types.some(t => stepTypes.byFence[kind].includes(t))) problems.push(`no step for ${kind}`);
   }
   return problems;
