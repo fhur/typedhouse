@@ -16,7 +16,8 @@ Type-safe ClickHouse query builder for TypeScript: typed builder → relational 
 
 ## Commands
 - Setup: `corepack enable && pnpm install --frozen-lockfile`
-- Full gate: `pnpm check:all` (testcontainers patch checks → typecheck → test → verify:type-corpus → build → package consumer verifications → verify:expr-surface → codegen integration → verify:fixture-seed → compiler/client integration). Takes ~5 min and needs Docker.
+- Format: `pnpm format` rewrites in place and repeats until stable; `pnpm format:check` only reads, and fails on a Prettier deviation or a missing blank line. Both take optional paths. See "Formatting".
+- Full gate: `pnpm check:all` (format check → testcontainers patch checks → typecheck → test → verify:type-corpus → build → package consumer verifications → verify:expr-surface → codegen integration → verify:fixture-seed → compiler/client integration). Takes ~5 min and needs Docker.
 - Individually: `pnpm typecheck`, `pnpm test` (unit only), `pnpm build`, `pnpm test:compiler-integration`, `pnpm test:codegen-integration`.
 - Docs: `pnpm docs:dev`, `pnpm docs:verify` (also regenerates/checks example SQL; `pnpm --filter @typedhouse/docs examples:*` to regenerate).
 - Expr surface is generated: edit the catalog, then `pnpm generate:expr-surface --write`; `verify:expr-surface` fails on drift.
@@ -31,6 +32,23 @@ Type-safe ClickHouse query builder for TypeScript: typed builder → relational 
 - IR sharing is by object identity; shared nodes become CTEs `tN`.
 - New features ship with: runtime tests, native (integration) tests, type-level positive and negative tests, snapshot updates, and a TODO.md entry recording verification evidence.
 - Do not commit `apps/playground/` or `.worktrees/`.
+
+## Formatting
+- Prettier (`.prettierrc.json`) sets the layout. Two options exist to keep it from changing code: `embeddedLanguageFormatting: off`, because it would otherwise rewrite runtime strings in `html`, `css`, `graphql` and `markdown` templates; and `quoteProps: preserve`, because unquoting keys such as `'select'` and `'ñ'` changes the syntax tree, which would defeat the check that formatting leaves it unchanged. It does not add blank lines, so ESLint (`eslint.config.mjs`) enables exactly two autofixable rules for them: `@stylistic/padding-line-between-statements` and `@stylistic/lines-between-class-members`. Add no other lint rules here. Inline ESLint comments are disabled.
+- Scope: TS, TSX, JS and MJS under `packages/`, `scripts/`, `apps/docs/` and `test/types/`, minus `.prettierignore`, which is the only exclude list (ESLint reads it too). Docs Markdown examples use their own width 60 formatter (`format:examples`).
+- Never format the excluded paths. A check depends on the exact bytes or lines of `test/types/negative/` (diagnostics matched by line), `test/types/bench/` and `scripts/generate-type-{bench,stress}.mjs` (`inputHash`), and generated snapshots, corpora, `expr-methods.generated.*` and fixtures. No check covers the other two: `apps/docs/src/playground/generated/` is generated output, and `apps/docs/src/examples/` is shown verbatim on the homepage. Each entry in `.prettierignore` states its reason.
+- `// @ts-expect-error` applies only to the next line. To stop Prettier wrapping that statement, put `// prettier-ignore` directly above the directive before formatting; it does not unwrap a statement that is already wrapped.
+
+### Migrating a long-lived branch
+Run these on the branch, with `<tooling>` and `<rewrite>` as the two formatter commits on master. `<rewrite>` is formatting only, so keeping the branch's side of a conflict in step 5 loses nothing, as long as you merge exactly `<rewrite>` and not a later commit.
+1. Commit all pending work: `git status` must be clean.
+2. `git merge <tooling>` and resolve conflicts normally. If `pnpm-lock.yaml` conflicts, take one side, run `pnpm install --no-frozen-lockfile`, and confirm that `pnpm install --frozen-lockfile` then passes. Plain `pnpm install` defaults to frozen when `CI` is set. If there is no lockfile conflict, run `pnpm install --frozen-lockfile`.
+3. New paths under `packages/`, such as `packages/studio`, are already in scope. Add any generated, snapshot, or fixture paths on the branch to `.prettierignore`, along with any file a check reads byte for byte.
+4. `pnpm format`, then `pnpm typecheck`, then `git add -A && git commit -m "style: format branch"`. A TS2578 means a `@ts-expect-error` statement wrapped: fix that statement so it fits on the next line again, because adding `// prettier-ignore` does not unwrap it.
+5. `git merge -X ours <rewrite>`. `-X ours` does not settle modify/delete conflicts. For each file the branch deleted or renamed, run `git rm <path>`. A rename also appears this way, because rename detection does not fire after the rewrite, and `git add -A` would bring the old file back. Then restore every existing file that step 3 newly excluded, which the merge still reformats: `git checkout <step 4 commit> -- <path>`. If the merge stopped, `git commit --no-edit` finishes it, including those restores. If it completed by itself, commit them with `git commit -m "style: restore excluded files"`.
+6. `pnpm format`, and if it changed anything, `git add -A && git commit -m "style: reformat after merge"`.
+7. `pnpm format:check` must pass. `git diff <step 4 commit> HEAD` should be empty.
+8. `git merge master` for anything newer, resolving conflicts normally.
 
 ## Worktrees
 - Create worktrees under the ignored `.worktrees/` directory: `mkdir -p .worktrees && git worktree add -b <branch> .worktrees/<name> master`.

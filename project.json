@@ -3,9 +3,16 @@
   "name": "chql-checks",
   "root": ".",
   "targets": {
+    "check-format": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": [],
+      "outputs": [],
+      "options": { "command": "pnpm format:check" }
+    },
     "check-testcontainers-port-patch": {
       "executor": "nx:run-commands",
-      "dependsOn": [],
+      "dependsOn": ["check-format"],
       "outputs": [],
       "options": { "command": "node scripts/test-testcontainers-port-patch.mjs" }
     },

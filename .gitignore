@@ -16,6 +16,8 @@ coverage/
 
 # Ephemeral compiler controls; each invocation removes only its own directory.
 /.chql-corpus-control-*/
+# Left behind only if type-mapping.test.ts crashes.
+/test/types/.runtime-mapping-*
 
 # Local proprietary application; never commit its contents.
 /apps/playground/

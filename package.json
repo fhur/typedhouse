@@ -9,6 +9,8 @@
   },
   "nx": { "includedScripts": [] },
   "scripts": {
+    "format": "node scripts/format.mjs",
+    "format:check": "node scripts/format.mjs --check",
     "count:typescript": "node scripts/count-package-typescript.mjs",
     "capture:type-corpus": "tsup scripts/capture-type-corpus.ts --format esm --external testcontainers --out-dir node_modules/.cache/typedhouse-capture && node node_modules/.cache/typedhouse-capture/capture-type-corpus.js",
     "generate:fixture-seed": "tsup scripts/generate-fixture-seed.ts --format esm --out-dir node_modules/.cache/typedhouse-seed && node node_modules/.cache/typedhouse-seed/generate-fixture-seed.js",
@@ -31,13 +33,17 @@
     "verify:codegen-package": "node scripts/verify-codegen-package.mjs",
     "check:publish": "node scripts/publish.mjs",
     "check:all": "nx run chql-checks:check-all --outputStyle=static",
-    "check:all:uncached-baseline": "node scripts/test-testcontainers-port-patch.mjs && node scripts/smoke-testcontainers-port-patch.mjs && pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm verify:query-package && pnpm verify:expr-surface && pnpm test:codegen-integration && pnpm verify:codegen-package && pnpm verify:fixture-seed && pnpm test:compiler-integration"
+    "check:all:uncached-baseline": "pnpm format:check && node scripts/test-testcontainers-port-patch.mjs && node scripts/smoke-testcontainers-port-patch.mjs && pnpm typecheck && pnpm test && pnpm verify:type-corpus && pnpm build && pnpm verify:core-package && pnpm verify:query-package && pnpm verify:expr-surface && pnpm test:codegen-integration && pnpm verify:codegen-package && pnpm verify:fixture-seed && pnpm test:compiler-integration"
   },
   "devDependencies": {
+    "@stylistic/eslint-plugin": "5.10.0",
     "@types/node": "^22.15.0",
+    "@typescript-eslint/parser": "8.72.1",
+    "eslint": "10.14.0",
     "expect-type": "^1.2.1",
     "fast-check": "^4.1.1",
     "nx": "^24.0.2",
+    "prettier": "3.9.10",
     "testcontainers": "12.2.1",
     "tsup": "^9.0.0",
     "typescript": "^5.8.3",

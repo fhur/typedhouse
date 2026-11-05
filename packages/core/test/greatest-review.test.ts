@@ -19,6 +19,7 @@ it('review regression: a possibly empty variadic tail must not promise its preci
 
 it('pattern zone types fail closed while runtime still validates actual zones', () => {
   function patternedZones(first: `Etc/GMT+${number}`, second: `Etc/GMT+${number}`) {
+    // prettier-ignore
     // @ts-expect-error identical pattern types are not singleton timezone evidence
     return greatest(val(new Date(0), col.DateTime64(3, first)), val(new Date(0), col.DateTime64(3, second)));
   }
