@@ -1,3 +1,21 @@
+## `.in()` type/runtime mismatches (2026-11-04)
+
+**Done (uncommitted).** Several `.in()`/`.notIn()` receivers typechecked, then threw `unsupported_membership_type` at compile time. Each now either works or is a type error.
+
+- **Now supported:** `LowCardinality` over String, integers, floats, Bool, UUID and FixedString; `FixedString`; `Enum8`/`Enum16`. All may be nullable, and all work with lists and subqueries. List parameters bind to the unwrapped type, for example `Array(FixedString(3))`.
+- **Now type errors:** `DateTime64(4..9)`, which decodes as a string and has no parameter encoding; `LowCardinality(Enum)`, which ClickHouse 24.8 refuses to create; a String or FixedString receiver with an Enum set (the server throws); a String receiver with a UUID set.
+- **Second bug:** `LowCardinality(Nullable(T))` membership can return NULL, but the runtime type said `Bool`. The core catalog and the compiler resolver now both use `isNullable`.
+- **Set families:** FixedString shares the String family, because the server compares them across widths. Enum is its own family, and any Enum compares with any Enum.
+- **Stale doc removed:** the JSDoc said non-null UUID lists fail serialization. They have worked since `d10b5fa`.
+
+**Limit kept.** A query annotated as `Query<{...}>` loses its descriptors, so an unsupported column still typechecks and is rejected at compile time.
+
+**Type cost.** `MembershipReceiver` is a closed union on purpose: a recursive first version hit TS2589 on `scalar(totals).in(totals)`. Instantiations rose about 5% on TypeScript 7.0.2 (built 1352341 to 1429658, source 1627373 to 1706544) and stay within the hard budget.
+
+**Also changed.** `CLAUDE.md` now gives `pnpm generate:expr-surface --write`; without the flag the script throws. `check-type-diagnostics.mjs` reads built declarations, so run `pnpm build` first or it reports stale results.
+
+**Evidence.** `check:all` passes on TypeScript 5.5.4 and latest (1442 unit tests passed and 1 skipped, 374 compiler integration tests passed). Precise diagnostics pass on 5.5.4, 5.8.3 and latest. `docs:verify` and `check-type-performance.mjs --all` pass; they last ran before a one-line fix to the stub in `verify-expr-surface.mjs`, which neither uses. Two new native tests cover run and stream, handwritten SQL comparison, NULLs, outer joins, enum names containing `'` and `\`, and FixedString padding. Negative controls in `membership.test.ts`: no LowCardinality unwrap, allowing LowCardinality(Date), a non-nullable result for `LowCardinality(Nullable(T))`, no FixedString/Enum support, allowing LowCardinality(Enum), and Enum in the String family each fail a test. The draft animal-table endpoint's 448 page requests still match a JavaScript oracle with `kind` as `LowCardinality(String)`.
+
 ## argMax date versions and the "Latest value and average" guide (2026-11-04)
 
 **Done (uncommitted).** `argMax` and `argMaxIf` now accept a non-null `Date`, `Date32`, `DateTime` or `DateTime64` (precision 0–3) version, so "latest value by date" no longer needs a numeric workaround. New guide `tutorials/latest-and-average.md` joins dogs to per-animal temperature stats using `argMax(agg.value, agg.date)` and `avg`. It is registered in the Guides sidebar and in `compiler-examples.mjs`.

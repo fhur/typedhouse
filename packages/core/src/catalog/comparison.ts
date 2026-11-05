@@ -1,6 +1,6 @@
 import { col } from '../columns.js';
 import { defineFunction } from './define.js';
-import { anyType, unwrap, type Matcher } from './matchers.js';
+import { anyType, isNullable, unwrap, type Matcher } from './matchers.js';
 /** The range envelope matches serializable comparison operands: no Decimal,
  * Enum/address strings, Date32/DateTime or sub-millisecond timestamps yet. */
 const rangeInput: Matcher<number | bigint | string | Date> = { match: type => {
@@ -16,6 +16,6 @@ export const comparison = [...binary, defineFunction({
   deterministic: true, origin: 'typed', surface: 'between',
 }).definition, ...['in', 'notIn'].map(name => defineFunction({
   name, args: [anyType, anyType], argumentPolicies: ['sibling', 'set'],
-  returns: (args: readonly import('../ch-type.js').CHType[]) => args[0]?.kind === 'Nullable' ? { kind: 'Nullable' as const, inner: col.Bool.type } : col.Bool.type,
+  returns: (args: readonly import('../ch-type.js').CHType[]) => args[0] && isNullable(args[0]) ? { kind: 'Nullable' as const, inner: col.Bool.type } : col.Bool.type,
   tsReturns: 'Expr<NullResult<T, boolean>, N, M>', nullable: 'never', deterministic: true, origin: 'typed', surface: 'membership',
 }).definition)];

@@ -5,7 +5,7 @@ import { invoke } from './catalog/define.js';
 import { methodCatalog } from './catalog/index.js';
 import { orderingCatalog } from './catalog/ordering.js';
 import { Ordering } from './ordering.js';
-import type { SetQuery, DateSetQuery, DateMembershipDescriptor } from './subquery.js';
+import type { SetQuery, DateSetQuery, DateMembershipDescriptor, MembershipReceiver } from './subquery.js';
 import type { BetweenReceiver, ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
 type NullResult<T, R> = null extends T ? R | null : R;
 type NumericResult<T> = T extends bigint ? bigint : T extends Decimal ? Decimal : number | bigint;
@@ -223,11 +223,11 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
    * @remarks
    * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
    * Expression operands must use that mode; constants can be used in any mode.
-   * This overload supports integer/float, String, Bool and UUID descriptors, optionally
-   * Nullable; not FixedString, Decimal, Enum, IP or LowCardinality. Matching decoded
-   * families are required; UUID remains distinct from String and number from bigint.
-   * UUID query sets are supported, but non-null UUID JS list parameters currently
-   * fail serialization; a branded string does not supply parameter support.
+   * This overload supports integer/float, String, FixedString, Bool, UUID and Enum
+   * descriptors, optionally Nullable or LowCardinality (never LowCardinality(Enum)); not
+   * Decimal, IP or DateTime64 above millisecond precision. Matching decoded families are
+   * required; UUID remains distinct from String and number from bigint. An Enum receiver
+   * matches declared names and Enum sets, and a String receiver rejects Enum and UUID sets.
    * @param values Non-null values bound as one Array parameter against the receiver
    * descriptor. Empty lists are supported; expressions inside the list are not.
    * @returns boolean, conservatively boolean | null for a nullable receiver.
@@ -238,7 +238,7 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
    * from(parts).where(p => p.mpn.in(['ABC', 'DEF']));
    * ```
    */
-  in(this: Expr<string | number | bigint | boolean | null, string, M>, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;
+  in<D>(this: Expr<string | number | bigint | boolean | null, string, M> & { readonly ir: { readonly type: D } } & MembershipReceiver<D>, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;
   /**
    * Test membership in a value array or a one-column query. Empty arrays match nothing.
    * A query operand is a set, not a scalar subquery; it may return many rows.
@@ -246,11 +246,11 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
    * @remarks
    * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
    * Expression operands must use that mode; constants can be used in any mode.
-   * This overload supports integer/float, String, Bool and UUID descriptors, optionally
-   * Nullable; not FixedString, Decimal, Enum, IP or LowCardinality. Matching decoded
-   * families are required; UUID remains distinct from String and number from bigint.
-   * UUID query sets are supported, but non-null UUID JS list parameters currently
-   * fail serialization; a branded string does not supply parameter support.
+   * This overload supports integer/float, String, FixedString, Bool, UUID and Enum
+   * descriptors, optionally Nullable or LowCardinality (never LowCardinality(Enum)); not
+   * Decimal, IP or DateTime64 above millisecond precision. Matching decoded families are
+   * required; UUID remains distinct from String and number from bigint. An Enum receiver
+   * matches declared names and Enum sets, and a String receiver rejects Enum and UUID sets.
    * @param query An independently scoped, flat one-column query of the compatible
    * family, with any number of rows. Nullable set columns are allowed; outer-column
    * captures are not. Do not wrap this set in scalar().
@@ -263,7 +263,7 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
    * from(parts).where(p => p.mpn.in(selectedMpns));
    * ```
    */
-  in<R>(this: Expr<string | number | bigint | boolean | null, string, M>, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;
+  in<R, D>(this: Expr<string | number | bigint | boolean | null, string, M> & { readonly ir: { readonly type: D } } & MembershipReceiver<D>, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;
   /**
    * Test non-membership in a value array or a one-column query. Empty arrays exclude nothing.
    * Nullable receivers retain a nullable result type; use isNull() for an explicit NULL test.
@@ -311,11 +311,11 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
    * @remarks
    * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
    * Expression operands must use that mode; constants can be used in any mode.
-   * This overload supports integer/float, String, Bool and UUID descriptors, optionally
-   * Nullable; not FixedString, Decimal, Enum, IP or LowCardinality. Matching decoded
-   * families are required; UUID remains distinct from String and number from bigint.
-   * UUID query sets are supported, but non-null UUID JS list parameters currently
-   * fail serialization; a branded string does not supply parameter support.
+   * This overload supports integer/float, String, FixedString, Bool, UUID and Enum
+   * descriptors, optionally Nullable or LowCardinality (never LowCardinality(Enum)); not
+   * Decimal, IP or DateTime64 above millisecond precision. Matching decoded families are
+   * required; UUID remains distinct from String and number from bigint. An Enum receiver
+   * matches declared names and Enum sets, and a String receiver rejects Enum and UUID sets.
    * @param values Non-null values bound as one Array parameter against the receiver
    * descriptor. Empty lists are supported; expressions inside the list are not.
    * @returns boolean, conservatively boolean | null for a nullable receiver.
@@ -326,18 +326,18 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
    * from(parts).where(p => p.mpn.notIn(['obsolete']));
    * ```
    */
-  notIn(this: Expr<string | number | bigint | boolean | null, string, M>, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;
+  notIn<D>(this: Expr<string | number | bigint | boolean | null, string, M> & { readonly ir: { readonly type: D } } & MembershipReceiver<D>, values: readonly NoInfer<NonNullable<T>>[]): Expr<NullResult<T, boolean>, N, M>;
   /**
    * Test non-membership in a value array or a one-column query. Empty arrays exclude nothing.
    * Nullable receivers retain a nullable result type; use isNull() for an explicit NULL test.
    * @remarks
    * Builds SQL without evaluating in JavaScript; preserves the receiver’s expression mode.
    * Expression operands must use that mode; constants can be used in any mode.
-   * This overload supports integer/float, String, Bool and UUID descriptors, optionally
-   * Nullable; not FixedString, Decimal, Enum, IP or LowCardinality. Matching decoded
-   * families are required; UUID remains distinct from String and number from bigint.
-   * UUID query sets are supported, but non-null UUID JS list parameters currently
-   * fail serialization; a branded string does not supply parameter support.
+   * This overload supports integer/float, String, FixedString, Bool, UUID and Enum
+   * descriptors, optionally Nullable or LowCardinality (never LowCardinality(Enum)); not
+   * Decimal, IP or DateTime64 above millisecond precision. Matching decoded families are
+   * required; UUID remains distinct from String and number from bigint. An Enum receiver
+   * matches declared names and Enum sets, and a String receiver rejects Enum and UUID sets.
    * @param query An independently scoped, flat one-column query of the compatible
    * family, with any number of rows. Nullable set columns are allowed; outer-column
    * captures are not. Do not wrap this set in scalar().
@@ -350,7 +350,7 @@ export interface GeneratedExprMethods<T, N extends string = never, M extends Mod
    * from(parts).where(p => p.mpn.notIn(selectedMpns));
    * ```
    */
-  notIn<R>(this: Expr<string | number | bigint | boolean | null, string, M>, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;
+  notIn<R, D>(this: Expr<string | number | bigint | boolean | null, string, M> & { readonly ir: { readonly type: D } } & MembershipReceiver<D>, query: SetQuery<R, NoInfer<T>>): Expr<NullResult<T, boolean>, N, M>;
   /**
    * Combine boolean expressions using SQL three-valued AND, not JavaScript short-circuiting.
    * A false operand makes the result false; otherwise NULL can propagate.

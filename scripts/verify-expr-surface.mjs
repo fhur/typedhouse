@@ -138,7 +138,7 @@ try {
   // Only published type re-exports, not core source or a fake expression implementation.
   writeFileSync(join(directory, 'ordering.d.ts'), "export { Ordering } from '@typedhouse/core';\n");
   writeFileSync(join(directory, 'expr.d.ts'), "export type { Expr, Constant, ExprOperand, ConstantOperand } from '@typedhouse/core';\n");
-  writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery, DateSetQuery, DateMembershipDescriptor } from '@typedhouse/core';\n");
+  writeFileSync(join(directory, 'subquery.d.ts'), "export type { SetQuery, DateSetQuery, DateMembershipDescriptor, MembershipReceiver } from '@typedhouse/core';\n");
   writeFileSync(join(directory, 'types.d.ts'), "export type { Mode, Decimal } from '@typedhouse/core';\n");
   mkdirSync(join(directory, 'catalog'));
   writeFileSync(join(directory, 'catalog/descriptor-types.d.ts'), "export type { BetweenReceiver, ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from '@typedhouse/core';\n");

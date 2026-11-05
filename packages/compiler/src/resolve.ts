@@ -119,11 +119,14 @@ export function resolveCall(e: Extract<ExprNode, { kind: 'Call' }>, resolve: (e:
     }
     const family = (t: CHType) => {
       const b = membershipBase(t);
+      // FixedString compares with String on the server; Enum sets only match Enum receivers.
+      if (b.kind === 'FixedString') return 'String';
+      if (b.kind === 'Enum') return 'Enum';
       if (b.kind !== 'scalar') throw new Error('unsupported_membership_type');
       return /^U?Int(64|128|256)$/.test(b.name) ? 'bigint' : /^(U?Int|Float)/.test(b.name) ? 'number' : b.name;
     };
     if (family(left) !== family(right)) throw new Error('incompatible_operands');
-    const result: CHType = left.kind === 'Nullable' ? nullable({ kind: 'scalar', name: 'Bool' }) : { kind: 'scalar', name: 'Bool' };
+    const result: CHType = isNullable(left) ? nullable({ kind: 'scalar', name: 'Bool' }) : { kind: 'scalar', name: 'Bool' };
     if (print(result) !== print(e.type)) throw new Error('invalid_expression_type');
     return { types: [left, set.kind === 'Subquery' ? right : { kind: 'Array', inner: base }], result, sqlName: def.name };
   }

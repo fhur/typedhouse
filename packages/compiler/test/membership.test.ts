@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { Expr, col, table, from, val, countIf, scalar, count, exprNode, relNode, flatOutput, type ExprNode } from '@typedhouse/core';
+import { Expr, col, table, from, val, countIf, scalar, count, exprNode, relNode, flatOutput, type ExprNode, type Query } from '@typedhouse/core';
 import { compile, emitNaive } from '../src/index.js';
 const q = from(table('membership', { id: col.String, n: col.Nullable(col.Int64) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
 function fields<T extends { readonly id: unknown }>(n: T): Omit<T, 'id'> { const { id: _id, ...f } = n; return f; }
@@ -143,8 +143,57 @@ it('rejects cycles, forged set schemas, unsupported descriptors and grouped rece
   cyclic.columns = cyclic.output.columns;
   expect(() => emitNaive(cyclic)).toThrow('cyclic_ir');
   const unsupported = from(table('unsupported', { date: col.DateTime64(9) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-  expect(() => emitNaive(unsupported.map(r => r.date.in(['x'])).ir)).toThrow('unsupported_membership_type');
+  expect(() => emitNaive((unsupported as unknown as Query<{ date: string }>).map(r => r.date.in(['x'])).ir)).toThrow('unsupported_membership_type');
   q.aggregate(g => { expect(() => emitNaive(project(g.id.in(['x']).ir))).toThrow('invalid_expression_mode'); return countIf(g.id.in(['x'])); });
+});
+it('accepts LowCardinality receivers and sets, binding lists to the inner type and keeping nullability', () => {
+  const lc = from(table('lc', { kind: col.LowCardinality(col.String), maybe: col.LowCardinality(col.Nullable(col.String)), plain: col.String, count: col.LowCardinality(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  for (const emitter of [emitNaive, compile]) {
+    const list = emitter(lc.where(r => r.kind.in(['dog', 'cat'])).ir);
+    expect(list.sql).toContain('{p0:Array(String)}');
+    expect(list.params).toEqual({ p0: "['dog','cat']" });
+    expect(emitter(lc.map(r => ({ a: r.kind.notIn([]), b: r.count.in([1]), c: r.maybe.in(['x']) })).ir).sql).toContain('notIn(');
+    const sets = lc.map(r => ({ a: r.plain.in(lc.map(s => s.kind)), b: r.kind.in(lc.map(s => s.plain)), c: r.kind.in(lc.map(s => s.maybe)) }));
+    expect(emitter(sets.ir).sql).toContain('in(');
+  }
+  expect(lc.row.kind.in([]).ir.type).toEqual(col.Bool.type);
+  expect(lc.row.maybe.in([]).ir.type).toEqual(col.Nullable(col.Bool).type);
+  // A value from another family stays rejected through the wrapper.
+  expect(() => emitNaive(lc.map(r => ({ bad: (r.count as unknown as typeof r.kind).in(lc.map(s => s.plain)) })).ir)).toThrow(/incompatible_operands/);
+  const stale = lc.row.maybe.in([]).ir;
+  if (stale.kind !== 'Call') throw new Error('fixture');
+  const output = flatOutput([['result', col.Bool.type]]);
+  expect(() => emitNaive(relNode({ kind: 'Project', input: lc.ir, exprs: { result: exprNode({ ...fields(stale), type: col.Bool.type }) }, output, columns: output.columns }))).toThrow(/invalid_expression_type/);
+  for (const descriptor of [col.LowCardinality(col.Date), col.LowCardinality(col.Enum8({ a: 1 })), col.DateTime64(9), col.Nullable(col.DateTime64(6))]) {
+    const bad = from(table('bad_lc', { value: descriptor }, { engine: 'Memory', sortingKey: [], partitionKey: [] })) as unknown as Query<{ value: string }>;
+    expect(() => emitNaive(bad.map(r => ({ result: r.value.in(['x']) })).ir)).toThrow(/unsupported_membership_type/);
+  }
+});
+it('binds FixedString, Enum and LowCardinality(UUID) lists to their own descriptors and checks set families', () => {
+  const hostile = col.Enum8({ "o'x": 1, 'y\\z': 2 });
+  const u = '123e4567-e89b-12d3-a456-426614174000' as never;
+  const s = from(table('strings', { fixed: col.FixedString(3), other: col.FixedString(4), en: col.Enum8({ a: 1, b: 2 }), en16: col.Enum16({ a: 1, b: 2 }), hostile, text: col.String, lcFixed: col.LowCardinality(col.FixedString(3)), maybeFixed: col.Nullable(col.FixedString(3)), maybeEn: col.Nullable(col.Enum8({ a: 1, b: 2 })), lcUuid: col.LowCardinality(col.UUID) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  for (const emitter of [emitNaive, compile]) {
+    expect(emitter(s.where(r => r.fixed.in(['abc'])).ir).sql).toContain('{p0:Array(FixedString(3))}');
+    expect(emitter(s.where(r => r.lcFixed.in(['abc'])).ir).sql).toContain('{p0:Array(FixedString(3))}');
+    expect(emitter(s.where(r => r.lcUuid.in([u])).ir).sql).toContain('{p0:Array(UUID)}');
+    const en = emitter(s.where(r => r.en.in(['a'])).ir);
+    expect(en.sql).toContain("{p0:Array(Enum8('a' = 1, 'b' = 2))}");
+    expect(en.params).toEqual({ p0: "['a']" });
+    expect(emitter(s.where(r => r.hostile.in(["o'x", 'y\\z'])).ir).params).toEqual({ p0: "['o\\'x','y\\\\z']" });
+    // Compatible server sets: FixedString with String and other widths, and any Enum with any Enum.
+    expect(() => emitter(s.map(r => ({ a: r.fixed.in(s.map(x => x.text)), b: r.text.in(s.map(x => x.fixed)), c: r.fixed.in(s.map(x => x.other)), d: r.en.in(s.map(x => x.en16)), e: r.maybeEn.in(s.map(x => x.en)) })).ir)).not.toThrow();
+  }
+  expect(s.row.fixed.in([]).ir.type).toEqual(col.Bool.type);
+  expect(s.row.maybeFixed.in([]).ir.type).toEqual(col.Nullable(col.Bool).type);
+  expect(s.row.maybeEn.in([]).ir.type).toEqual(col.Nullable(col.Bool).type);
+  // Enum names stay validated before reaching the server.
+  expect(() => emitNaive(s.where(r => r.en.in(['zzz' as 'a'])).ir)).toThrow(/param_incompatible/);
+  // The server rejects these mixes, or never matches them, so they fail at compile time.
+  const loose = s as unknown as Query<{ text: string; en: string; fixed: string; other: string }>;
+  expect(() => emitNaive(loose.map(r => ({ x: r.text.in(loose.map(x => x.en)) })).ir)).toThrow(/incompatible_operands/);
+  expect(() => emitNaive(loose.map(r => ({ x: r.en.in(loose.map(x => x.text)) })).ir)).toThrow(/incompatible_operands/);
+  expect(() => emitNaive(loose.map(r => ({ x: r.fixed.in(loose.map(x => x.en)) })).ir)).toThrow(/incompatible_operands/);
 });
 it('rejects standalone set usage, scalar-in-set position, bad shape/type/metadata and inner scope', () => {
   const member = q.row.id.in(q.map(r => r.id)).ir;

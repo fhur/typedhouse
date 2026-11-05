@@ -23,9 +23,18 @@ type Descriptor<P, K extends PropertyKey> = K extends keyof P ? P[K] extends { r
 export type DateMembershipDescriptor = { readonly kind: 'scalar'; readonly name: 'Date' } | { readonly kind: 'Nullable'; readonly inner: { readonly kind: 'scalar'; readonly name: 'Date' } };
 export type DateSetQuery<R> = SetQuery<R, Date> & { readonly row: { readonly [K in keyof R]: { readonly ir: { readonly type: DateMembershipDescriptor } } } };
 
+/** Closed twin of membershipBase for receivers whose decoded value alone looks supported. */
+type RejectedDateTime64 = { readonly kind: 'DateTime64' };
+type RejectedReceiver = RejectedDateTime64 | { readonly kind: 'Nullable'; readonly inner: RejectedDateTime64 } |
+  { readonly kind: 'LowCardinality'; readonly inner: { readonly kind: 'Enum' } | { readonly kind: 'Nullable'; readonly inner: { readonly kind: 'Enum' } } };
+export type MembershipReceiver<D> = [CHType] extends [D] ? unknown : [D] extends [RejectedReceiver] ? never : unknown;
 export type SetQuery<R, T> = { readonly _rowType: R; readonly ir: Rel } &
   ([OneKey<R>] extends [never] ? { readonly set_column_count: never } :
-    [R[OneKey<R>]] extends [NonNullable<T> | null] ? unknown : { readonly incompatible_set_values: never });
+    [R[OneKey<R>]] extends [NonNullable<T> | null] ? PlainStringSet<R[OneKey<R>], T> : { readonly incompatible_set_values: never });
+/** A plain string receiver cannot test Enum or UUID sets, whose values also decode as strings. */
+type PlainStringSet<V, T> = [string] extends [NonNullable<T>]
+  ? [NonNullable<V>] extends [never] ? unknown : [string] extends [NonNullable<V>] ? unknown : { readonly incompatible_set_values: never }
+  : unknown;
 
 /** Set evidence deliberately imposes no scalar cardinality restriction. */
 export function setDescriptor(rel: Rel): CHType {
@@ -36,8 +45,15 @@ export function setDescriptor(rel: Rel): CHType {
   return type;
 }
 export function membershipBase(type: CHType): CHType {
-  const inner = type.kind === 'Nullable' ? type.inner : type;
+  const lowCardinality = type.kind === 'LowCardinality';
+  const unwrapped = lowCardinality ? type.inner : type;
+  const inner = unwrapped.kind === 'Nullable' ? unwrapped.inner : unwrapped;
+  if (inner.kind === 'FixedString') return inner;
+  // ClickHouse has no LowCardinality(Enum) column.
+  if (inner.kind === 'Enum' && !lowCardinality) return inner;
   if (inner.kind !== 'scalar' || !/^(U?Int(8|16|32|64|128|256)|Float(32|64)|String|Bool|Date|UUID)$/.test(inner.name)) throw new Error('unsupported_membership_type');
+  // Date membership has its own typed surface, which requires a plain Date.
+  if (lowCardinality && inner.name === 'Date') throw new Error('unsupported_membership_type');
   return inner;
 }
 export function setOperand(value: unknown): ExprNode {

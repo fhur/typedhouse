@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
 import { createClient } from '@typedhouse/client';
-import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@typedhouse/core';
+import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, cast, count, countIf, sum, sumIf, max, maxIf, from, col, table, val, registerCompiler, join, leftJoin, crossJoin, unionAll, scalar, print, relNode, Query, type Column } from '@typedhouse/core';
 import { compile, emitNaive, quoteIdentifier } from '../src/index.js';
 import { QueryError } from '@typedhouse/client';
 import { db } from '../../codegen/test/snapshots/schema.js';
@@ -679,6 +679,67 @@ it('selects latest tenant metrics with FINAL, NULL skipping, conditional exclusi
   expect(await client.run(nullPredicate)).toEqual(await direct("SELECT argMaxIf(stock_index,version,CAST(NULL AS Nullable(Bool))) AS value FROM latest_metrics FINAL WHERE tenantId='acme'"));
   expect(await client.run(scoped.limit(0).aggregate(g => ({ stock: argMax(g.stock_index, g.version), lead: argMax(g.lead_time_max_days, g.version) })))).toEqual([{ stock: 0, lead: null }]);
   expect(await client.run(scoped.limit(0).groupBy(r => r.entityId).aggregate(g => argMax(g.stock_index, g.version)))).toEqual([]);
+});
+it('matches LowCardinality membership with lists, sets, NULLs and outer joins through run and stream', async () => {
+  await sql("CREATE TABLE lc_members (id UInt32, kind LowCardinality(String), maybe LowCardinality(Nullable(String)), plain String) ENGINE=Memory");
+  await sql("INSERT INTO lc_members VALUES (1,'dog','dog','dog'),(2,'cat',NULL,'bird'),(3,'owl','owl','cat')");
+  const members = from(table('lc_members', { id: col.UInt32, kind: col.LowCardinality(col.String), maybe: col.LowCardinality(col.Nullable(col.String)), plain: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const ids = async (query: Parameters<typeof client.run>[0]) => (await client.run(query) as { id: number }[]).map(r => r.id);
+  expect(await ids(members.where(r => r.kind.in(['dog', 'owl'])).map(r => ({ id: r.id })).orderBy(r => r.id))).toEqual([1, 3]);
+  expect(await ids(members.where(r => r.kind.notIn(['dog', 'owl'])).map(r => ({ id: r.id })).orderBy(r => r.id))).toEqual([2]);
+  expect(await ids(members.where(r => r.kind.in([])).map(r => ({ id: r.id })))).toEqual([]);
+  expect(await ids(members.where(r => r.kind.in(["o'wl"])).map(r => ({ id: r.id })))).toEqual([]);
+  const truth = members.map(r => ({ id: r.id, list: r.kind.in(['dog']), none: r.kind.notIn([]), nullable: r.maybe.in(['dog']), absent: r.maybe.notIn(['dog']), lowInPlain: r.kind.in(members.map(s => s.plain)), plainInLow: r.plain.in(members.map(s => s.kind)), lowInLow: r.kind.in(members.where(s => s.id.gt(1)).map(s => s.kind)) })).orderBy(r => r.id);
+  const expected = [
+    { id: 1, list: true, none: true, nullable: true, absent: false, lowInPlain: true, plainInLow: true, lowInLow: false },
+    { id: 2, list: false, none: true, nullable: null, absent: null, lowInPlain: true, plainInLow: false, lowInLow: true },
+    { id: 3, list: false, none: true, nullable: false, absent: true, lowInPlain: false, plainInLow: true, lowInLow: true },
+  ];
+  expect(await client.run(truth)).toEqual(expected);
+  const rows = []; for await (const row of client.stream(truth)) rows.push(row);
+  expect(rows).toEqual(expected);
+  expect(compile(truth.ir).sql).not.toContain('transform_null_in');
+  // An unmatched outer-join row turns LowCardinality(String) into LowCardinality(Nullable(String)).
+  const outer = leftJoin({ left: members.map(r => ({ id: r.id })) }, { right: members.where(r => r.id.eq(1)) }).on(r => r.left.id.eq(r.right.id)).map(r => ({ id: r.left.id, member: r.right.kind.in(['dog']) })).orderBy(r => r.id);
+  expect(print(outer.row.member.ir.type)).toBe('Nullable(Bool)');
+  expect(await client.run(outer)).toEqual([{ id: 1, member: true }, { id: 2, member: null }, { id: 3, member: null }]);
+  // Other wrappers need allow_suspicious_low_cardinality_types to exist, and compare identically.
+  const createScalars = await fetch(`${url}${url.includes('?') ? '&' : '?'}allow_suspicious_low_cardinality_types=1`, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: 'CREATE TABLE lc_scalars (u32 LowCardinality(UInt32), u64 LowCardinality(UInt64), f64 LowCardinality(Float64), flag LowCardinality(Bool), nu LowCardinality(Nullable(UInt32))) ENGINE=Memory' });
+  expect(createScalars.ok, await createScalars.text()).toBe(true);
+  await sql("INSERT INTO lc_scalars VALUES (1,10000000000,1.5,true,NULL)");
+  const scalars = from(table('lc_scalars', { u32: col.LowCardinality(col.UInt32), u64: col.LowCardinality(col.UInt64), f64: col.LowCardinality(col.Float64), flag: col.LowCardinality(col.Bool), nu: col.LowCardinality(col.Nullable(col.UInt32)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  expect(await client.run(scalars.map(r => ({ u32: r.u32.in([1]), u64: r.u64.in([10000000000n]), f64: r.f64.notIn([1.5]), flag: r.flag.in([true]), nu: r.nu.in([1]) })))).toEqual([{ u32: true, u64: true, f64: false, flag: true, nu: null }]);
+});
+it('matches FixedString, Enum and UUID membership with handwritten SQL through run and stream', async () => {
+  const hostile = `Enum8('o\\'x' = 1, 'y\\\\z' = 2)`;
+  await sql(`CREATE TABLE str_members (id UInt32, fixed FixedString(3), other FixedString(4), text String, en Enum8('a' = 1, 'b' = 2), en16 Enum16('a' = 1, 'c' = 2), hostile ${hostile}, uuid UUID, maybeEn Nullable(Enum8('a' = 1, 'b' = 2)), maybeFixed Nullable(FixedString(3)), lcFixed LowCardinality(FixedString(3)), lcMaybe LowCardinality(Nullable(FixedString(3)))) ENGINE=Memory`);
+  const u = '123e4567-e89b-12d3-a456-426614174000';
+  await sql(`INSERT INTO str_members VALUES (1,'ab','ab','ab','a','a','o\\'x','${u}','a',NULL,'abc',NULL),(2,'xyz','xyzw','xyz','b','c','y\\\\z','00000000-0000-0000-0000-000000000000',NULL,'abc','xyz','abc')`);
+  const s = from(table('str_members', { id: col.UInt32, fixed: col.FixedString(3), other: col.FixedString(4), text: col.String, en: col.Enum8({ a: 1, b: 2 }), en16: col.Enum16({ a: 1, c: 2 }), hostile: col.Enum8({ "o'x": 1, 'y\\z': 2 }), uuid: col.UUID, maybeEn: col.Nullable(col.Enum8({ a: 1, b: 2 })), maybeFixed: col.Nullable(col.FixedString(3)), lcFixed: col.LowCardinality(col.FixedString(3)), lcMaybe: col.LowCardinality(col.Nullable(col.FixedString(3))) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  const uuid = u as never;
+  const truth = s.map(r => ({ id: r.id,
+    fixed: r.fixed.in(['xyz']), padded: r.fixed.in(['ab']), noFixed: r.fixed.notIn(['xyz']), en: r.en.in(['a']), noEn: r.en.notIn(['a']), en16: r.en16.in(['c']), empty: r.en.in([]),
+    hostile: r.hostile.in(["o'x"]), slash: r.hostile.in(['y\\z']), uuid: r.uuid.in([uuid]), lcFixed: r.lcFixed.in(['abc']), maybeEn: r.maybeEn.in(['a']), maybeFixed: r.maybeFixed.in(['abc']), lcMaybe: r.lcMaybe.notIn(['abc']),
+    fixedInText: r.fixed.in(s.map(x => x.text)), textInFixed: r.text.in(s.map(x => x.fixed)), fixedInOther: r.fixed.in(s.map(x => x.other)), enInEn: r.en.in(s.where(x => x.id.eq(1)).map(x => x.en)) })).orderBy(r => r.id);
+  const direct = await sql(`SELECT id, fixed IN ('xyz') AS fixed, fixed IN ('ab') AS padded, fixed NOT IN ('xyz') AS noFixed, en IN ('a') AS en, en NOT IN ('a') AS noEn, en16 IN ('c') AS en16, 0 AS empty,
+    hostile = 'o\\'x' AS hostile, hostile = 'y\\\\z' AS slash, uuid IN ('${u}') AS uuid, lcFixed IN ('abc') AS lcFixed, maybeEn IN ('a') AS maybeEn, maybeFixed IN ('abc') AS maybeFixed, lcMaybe NOT IN ('abc') AS lcMaybe,
+    fixed IN (SELECT text FROM str_members) AS fixedInText, text IN (SELECT fixed FROM str_members) AS textInFixed, fixed IN (SELECT other FROM str_members) AS fixedInOther, en IN (SELECT en FROM str_members WHERE id = 1) AS enInEn
+    FROM str_members AS m ORDER BY id FORMAT JSONEachRow SETTINGS prefer_column_name_to_alias = 1, output_format_json_quote_64bit_integers = 0`);
+  const boolean = (v: unknown) => v === null ? null : Boolean(v);
+  const expected = direct.trim().split('\n').map(line => Object.fromEntries(Object.entries(JSON.parse(line) as Record<string, unknown>).map(([k, v]) => [k, k === 'id' ? v : boolean(v)])));
+  expect(await client.run(truth)).toEqual(expected);
+  // Pinned so the comparison cannot pass by both sides being wrong.
+  expect(expected[0]).toMatchObject({ fixed: false, padded: true, en: true, hostile: true, slash: false, uuid: true, maybeEn: true, maybeFixed: null, lcMaybe: null });
+  expect(expected[1]).toMatchObject({ fixed: true, padded: false, en: false, hostile: false, slash: true, uuid: false, maybeEn: null, maybeFixed: true, lcMaybe: false });
+  const rows = []; for await (const row of client.stream(truth)) rows.push(row);
+  expect(rows).toEqual(expected);
+  expect(await client.run(s.where(r => r.en.in(['b'])).map(r => ({ id: r.id })))).toEqual([{ id: 2 }]);
+  // Requires allow_suspicious_low_cardinality_types to exist as a column.
+  const lcUuid = await fetch(`${url}${url.includes('?') ? '&' : '?'}allow_suspicious_low_cardinality_types=1`, { method: 'POST', headers: { 'X-ClickHouse-User': 'fixture', 'X-ClickHouse-Key': 'fixture' }, body: 'CREATE TABLE lc_uuid (id LowCardinality(UUID)) ENGINE=Memory' });
+  expect(lcUuid.ok, await lcUuid.text()).toBe(true);
+  await sql(`INSERT INTO lc_uuid VALUES ('${u}'),('00000000-0000-0000-0000-000000000000')`);
+  const lc = from(table('lc_uuid', { id: col.LowCardinality(col.UUID) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+  expect(await client.run(lc.where(r => r.id.in([uuid])).map(r => ({ id: r.id })))).toEqual([{ id: u }]);
 });
 it('picks the latest value by Date, Date32, DateTime and millisecond DateTime64 argMax versions through run and stream', async () => {
   await sql('CREATE TABLE argmax_dates (id UInt32, value Float64, d Date, d32 Date32, dt DateTime(\'UTC\'), dt64 DateTime64(3, \'UTC\')) ENGINE=Memory');
