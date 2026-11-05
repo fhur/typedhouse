@@ -23,7 +23,7 @@ The [Query Builder section](/docs/query-builder/overview/) documents each implem
 
 ## orderBy, thenBy, limit, limitBy
 
-[orderBy / thenBy](/docs/query-builder/ordering/) and [limit and limitBy](/docs/query-builder/limits/) — sort, break ties, and bound results, overall or per key, while respecting operation order.
+[orderBy / thenBy](/docs/query-builder/ordering/) and [limit](/docs/query-builder/limits/) and [limitBy](/docs/query-builder/limit-by/) — sort, break ties, and bound results, overall or per key, while respecting operation order.
 
 ## groupBy and aggregate
 
@@ -31,7 +31,7 @@ The [Query Builder section](/docs/query-builder/overview/) documents each implem
 
 ## Scan-only ClickHouse modifiers
 
-[final / sample / prewhere](/docs/query-builder/scan-modifiers/) — apply FINAL, SAMPLE and an explicit PREWHERE before general query operations.
+[final](/docs/query-builder/final/), [sample](/docs/query-builder/sample/) and [prewhere](/docs/query-builder/prewhere/) — apply FINAL, SAMPLE and an explicit PREWHERE before general query operations.
 
 ## Combining and expanding rows
 

@@ -537,7 +537,7 @@ To try either checkpoint in the [playground](/playground/), include its collapse
 - For a single query-derived value rather than a membership set, read
   [scalar subqueries](/docs/query-builder/scalar-subqueries/).
 - If your real table needs `FINAL` or `SAMPLE`, check the engine and metadata
-  requirements in [scan modifiers](/docs/query-builder/scan-modifiers/).
+  requirements in [final](/docs/query-builder/final/) and [sample](/docs/query-builder/sample/).
 - When nullable columns enter the report, decide their meaning explicitly with
   [isNull](/docs/functions/is-null/) and [ifNull](/docs/functions/if-null/).
 - To understand emitted SQL boundaries and rewrites, continue with the

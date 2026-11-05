@@ -1,0 +1,22 @@
+---
+// This page was split into final and sample. Published READMEs still link here.
+import GoogleAnalytics from '../../../components/GoogleAnalytics.astro';
+import { withBase } from '../../../lib/urls';
+
+const target = withBase('/docs/query-builder/final/');
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Moved | TypedHouse</title>
+    <meta http-equiv="refresh" content={`0;url=${target}`} />
+    <meta name="robots" content="noindex" />
+    <link rel="canonical" href={target} />
+    <GoogleAnalytics />
+  </head>
+  <body>
+    <a href={target}>This page moved to final and sample.</a>
+  </body>
+</html>

@@ -1,72 +1,13 @@
 ---
-title: final / sample / prewhere
-description: Apply FINAL, SAMPLE and PREWHERE directly to table scans.
+title: prewhere
+description: Filter table rows early with an explicit ClickHouse PREWHERE.
 sidebar:
-  order: 7
+  order: 7.5
 ---
 
-`final`, `sample` and `prewhere` are scan-only modifiers. Apply them immediately after `from`, before `where`, `map`, or other general query operations, which drop scan-only methods. `prewhere` comes last, because it returns an ordinary query.
+`prewhere(predicate)` emits ClickHouse `PREWHERE`, which reads the predicate's columns first and skips the rest of a filtered row. It takes the same predicate as `where`. It is explicit: the compiler never turns a `where` into one, and never moves, splits, reorders or drops one. ClickHouse can still move a `where` into its own `PREWHERE` step when `optimize_move_to_prewhere` allows it, so add this only when you want that choice to be yours.
 
 ## Example
-
-Request `FINAL` for a ReplacingMergeTree table. The engine performs its query-time merge behavior; the query retains the scan's row shape.
-
-<details>
-<summary>Setup: imports and table definitions</summary>
-
-```ts
-import { col, from, table } from '@typedhouse/core';
-import { compile } from '@typedhouse/compiler';
-
-const events = table(
-  'events',
-  {
-    id: col.UInt32,
-    category: col.String,
-  },
-  {
-    engine: 'ReplacingMergeTree',
-    sortingKey: ['id'],
-    partitionKey: [],
-  },
-);
-```
-
-</details>
-
-```ts
-const query = from(events).final();
-
-export default compile(query.ir);
-```
-
-<!-- generated-sql:start -->
-
-Final SQL:
-
-```sql
-SELECT
-  `id`,
-  `category`
-FROM
-  `events` FINAL
-```
-
-Parameters:
-
-```json
-{}
-```
-
-<!-- generated-sql:end -->
-
-Use `FINAL` only with an appropriate engine and actual table configuration. It can add execution cost and does not generally resolve tied versions deterministically.
-
-`sample(fraction)` requests ClickHouse sampling with a finite fraction in `(0, 1]`. Execution requires an actual table with a suitable sampling key; adding a descriptor does not configure one. SAMPLE is emitted after FINAL when both are requested, with the fraction inline rather than as an expression parameter.
-
-## Filter early with prewhere
-
-`prewhere(predicate)` emits ClickHouse `PREWHERE`, which reads the predicate's columns first and skips the rest of a filtered row. It takes the same predicate as `where`. It is explicit: the compiler never turns a `where` into one, and never moves, splits, reorders or drops one. ClickHouse can still move a `where` into its own `PREWHERE` step when `optimize_move_to_prewhere` allows it, so add this only when you want that choice to be yours.
 
 <details>
 <summary>Setup: imports and table definitions</summary>
@@ -127,6 +68,8 @@ Parameters:
 ```
 
 <!-- generated-sql:end -->
+
+## With final and sample
 
 :::caution[`final().prewhere()` filters before merging]
 Under `final()`, `PREWHERE` runs before the merge and `WHERE` runs after it. A predicate on a non-key column can therefore return a stale row version that the merge would have replaced.
@@ -209,7 +152,7 @@ Parameters:
 
 <!-- generated-sql:end -->
 
-### Rules
+## Rules
 
 - **Where it attaches.** Only directly on a table: after `from`, `final` or `sample`. It is a type error after `where`, `map` or any other operator, on a join or union, and a second time. To filter one side of a join, use `join({ a: from(t).prewhere(p), b: from(u) })`, which renders that side as a derived table.
 - **Engines.** The compiler does not check them. On ClickHouse 24.8 it worked on the MergeTree family, Merge, Distributed, Buffer and a materialized view with `TO`. Memory, Log, View and `numbers()` reject it with code 182 (`ILLEGAL_PREWHERE`), which surfaces as a `QueryError`.
