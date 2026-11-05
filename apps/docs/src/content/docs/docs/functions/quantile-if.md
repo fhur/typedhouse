@@ -7,7 +7,11 @@ sidebar:
 
 `quantileIf(level)(value, predicate)` estimates a quantile among rows whose Bool predicate is true. The API is curried: supply a finite level from 0 through 1 first, then the value and predicate. False or NULL predicates exclude rows, and NULL values are skipped.
 
-Integer and float inputs produce `Float64` (`number`); nullable values retain nullable result descriptors. Decimal operands are unsupported. Reservoir sampling makes the result approximate and nondeterministic. Each application creates a fresh level parameter; reuse the resulting expression to share it. `State`/`Merge` execution is unsupported.
+Integer and float inputs produce `Float64` (`number`); nullable values retain nullable result descriptors. Decimal operands are unsupported. Reservoir sampling makes the result approximate and nondeterministic.
+
+Use [`quantileExactIf`](/docs/functions/quantile-exact-if/) for an exact result. `quantileIf` interpolates and always returns `Float64`; `quantileExactIf` returns an input element in the input type and holds all qualifying values in memory. Over `[1, 2, 3, 4]`, level `0.5` gives `2.5` from `quantileIf` and `3` from `quantileExactIf`.
+
+Each application creates a fresh level parameter; reuse the resulting expression to share it. `State`/`Merge` execution is unsupported.
 
 ## Example
 

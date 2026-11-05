@@ -155,7 +155,13 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         let resolved: ReturnType<typeof resolveAggregate>;
         try { resolved = resolveAggregate(e, resolvedType); } catch (error) { return fail(error instanceof Error ? error.message : 'invalid_aggregate', e, path); }
         const parameters = e.params.length ? `(${e.params.map((p, i) => expression(p, input, `${path}.params[${i}]`, undefined, false, 'operand', qualifier, binding)).join(', ')})` : '';
-        return `${resolved.sqlName}${parameters}(${e.args.map((a, i) => expression(a, input, `${path}.args[${i}]`, undefined, false, 'operand', qualifier, binding)).join(', ')})`;
+        const args = e.args.map((a, i) => expression(a, input, `${path}.args[${i}]`, undefined, false, 'operand', qualifier, binding));
+        // On ClickHouse 24.8, minIf/maxIf over UInt, Float, Date and DateTime values can count a row whose
+        // computed predicate is NULL. Collapsing NULL to false excludes it for every value type.
+        if (e.fn.origin === 'typed' && (e.fn.name === 'min' || e.fn.name === 'max') && e.combinators[0] === 'If' && isNullable(resolvedType(e.args[e.args.length - 1]!))) {
+          args[args.length - 1] = `ifNull(${args[args.length - 1]!}, false)`;
+        }
+        return `${resolved.sqlName}${parameters}(${args.join(', ')})`;
       }
       case 'Call': {
         let resolved: ReturnType<typeof resolveCall>;

@@ -105,7 +105,7 @@ export function totalExpression(e: ExprNode): boolean {
   return e.kind === 'ColumnRef' || e.kind === 'Param' || resolveTotal(e, true) !== undefined;
 }
 /** Whole-computation envelope, not merely determinism: direct non-null
- * String/Bool/integer keys, count(), max of those direct columns and integer
+ * String/Bool/integer keys, count(), max and min of those direct columns and integer
  * sum. No casts, combinators,
  * nullable/decimal state, raw calls or hidden fallible outputs may be suppressed.
  * Integer sum has ClickHouse's wrapping semantics, not checked overflow. */
@@ -115,7 +115,7 @@ export function safeAggregate(rel: Extract<Rel, { kind: 'Aggregate' }>): boolean
   return Object.getOwnPropertyNames(rel.aggs).every(k => {
     const e = rel.aggs[k]!;
     if (e.kind !== 'Agg' || e.fn.origin !== 'typed' || e.params.length || e.combinators.length) return false;
-    if (e.fn.name !== 'count' && e.fn.name !== 'max' && e.fn.name !== 'sum') return false;
+    if (e.fn.name !== 'count' && e.fn.name !== 'max' && e.fn.name !== 'min' && e.fn.name !== 'sum') return false;
     if (!e.args.every(a => direct(a) && (e.fn.name !== 'sum' || family(a.type!) === 'integer'))) return false;
     try { resolveAggregate(e, a => { if (!a.type) throw new Error('untyped'); return a.type; }); return true; } catch { return false; }
   });
