@@ -1,7 +1,12 @@
 export * from './ch-type.js';
 export * from './columns.js';
 export * from './table.js';
-export { InsertCommand, getInsertCommandData, type InsertRow, type InsertCommandData } from './insert.js';
+export {
+  InsertCommand,
+  getInsertCommandData,
+  type InsertRow,
+  type InsertCommandData,
+} from './insert.js';
 export * from './query.js';
 export * from './join.js';
 export * from './union.js';
@@ -13,11 +18,31 @@ export * from './output.js';
 export * from './canonical-key.js';
 export * from './type-mapping.js';
 export { Expr, columnExpr, defaultType, val, cast, operand } from './expr.js';
-export type { DescribedExpr, DescribedConstant, ExprValue, ExprOperand, ConstantOperand, Constant } from './expr.js';
+export type {
+  DescribedExpr,
+  DescribedConstant,
+  ExprValue,
+  ExprOperand,
+  ConstantOperand,
+  Constant,
+} from './expr.js';
 export * from './known-functions.js';
 export { sql, type SqlSnippet, type SqlValue } from './sql.js';
 export * from './catalog/index.js';
-export type { BetweenReceiver, ExpReceiver, ExpResult, WeekReceiver, WeekResult, IfNullResult, FallbackDescriptor, StructuralReceiver, StructuralResult, ArrayElementResult, ElementKeys, ElementResult } from './catalog/descriptor-types.js';
+export type {
+  BetweenReceiver,
+  ExpReceiver,
+  ExpResult,
+  WeekReceiver,
+  WeekResult,
+  IfNullResult,
+  FallbackDescriptor,
+  StructuralReceiver,
+  StructuralResult,
+  ArrayElementResult,
+  ElementKeys,
+  ElementResult,
+} from './catalog/descriptor-types.js';
 import { installBuiltinMethods } from './expr.js';
 import { installMethods } from './expr-methods.generated.js';
 installMethods(installBuiltinMethods);

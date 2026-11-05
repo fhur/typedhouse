@@ -17,11 +17,18 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'TypedHouse',
-      description: 'TypedHouse is a type-safe ClickHouse query builder for TypeScript. Compose reusable queries and inspect the SQL you run.',
+      description:
+        'TypedHouse is a type-safe ClickHouse query builder for TypeScript. Compose reusable queries and inspect the SQL you run.',
       logo: { src: './src/assets/logo.svg', alt: '' },
       customCss: ['./src/styles/docs.css'],
-      expressiveCode: { themes: [typedhouseDark, typedhouseLight], useStarlightUiThemeColors: true },
-      components: { Head: './src/components/Head.astro', PageTitle: './src/components/DocTitle.astro' },
+      expressiveCode: {
+        themes: [typedhouseDark, typedhouseLight],
+        useStarlightUiThemeColors: true,
+      },
+      components: {
+        Head: './src/components/Head.astro',
+        PageTitle: './src/components/DocTitle.astro',
+      },
       sidebar: [
         {
           label: 'Guides',
@@ -35,7 +42,10 @@ export default defineConfig({
         { label: 'Query Builder', items: [{ autogenerate: { directory: 'docs/query-builder' } }] },
         { label: 'Functions', items: [{ autogenerate: { directory: 'docs/functions' } }] },
         { label: 'Reference', items: [{ autogenerate: { directory: 'docs/reference' } }] },
-        { label: 'Simplifying Compiler', items: [{ autogenerate: { directory: 'docs/compiler' } }] },
+        {
+          label: 'Simplifying Compiler',
+          items: [{ autogenerate: { directory: 'docs/compiler' } }],
+        },
         { label: 'Playground', link: '/playground/' },
         { label: 'Engineering blog', link: '/blog/' },
         { label: 'Agent index', link: '/llms.txt' },

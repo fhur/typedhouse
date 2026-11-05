@@ -5,13 +5,42 @@ import { nullHandling } from './null-handling.js';
 import { strings } from './string.js';
 import { arrays } from './array.js';
 import { dates } from './date.js';
-export const methodCatalog = Object.freeze([...comparison, ...booleans, ...arithmetic, ...nullHandling, ...strings, ...arrays, ...dates]);
+
+export const methodCatalog = Object.freeze([
+  ...comparison,
+  ...booleans,
+  ...arithmetic,
+  ...nullHandling,
+  ...strings,
+  ...arrays,
+  ...dates,
+]);
+
 import { greatestDefinition } from './greatest.js';
 import { projectionDefinitions } from './projection.js';
-export const functionCatalog = Object.freeze([...methodCatalog, greatestDefinition, ...projectionDefinitions]);
+
+export const functionCatalog = Object.freeze([
+  ...methodCatalog,
+  greatestDefinition,
+  ...projectionDefinitions,
+]);
+
 export { now, dateDiff, multiIf, isDayDescriptor } from './projection.js';
 export { greatest } from './greatest.js';
 export { orderingCatalog } from './ordering.js';
-export { unwrap, anyType, numeric, stringLike, boolean, dateLike, arrayOf, byteString, stringOrArray, tupleLike, isNullable, nullable } from './matchers.js';
+export {
+  unwrap,
+  anyType,
+  numeric,
+  stringLike,
+  boolean,
+  dateLike,
+  arrayOf,
+  byteString,
+  stringOrArray,
+  tupleLike,
+  isNullable,
+  nullable,
+} from './matchers.js';
 export * from './aggregate.js';
 export { exp } from './arithmetic.js';

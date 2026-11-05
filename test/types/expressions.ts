@@ -1,10 +1,44 @@
 import { expectTypeOf } from 'expect-type';
-import { Expr, cast, col, count, countIf, max, maxIf, maxState, countMerge, sum, sumIf, sumState, val, type DescribedConstant, type DescribedExpr, type AggExpr, type AggregateState, type Grouped, type GroupedRow, type Infer, type Row } from '@typedhouse/core';
-const forTenant = (tenantId: string) => <R extends { tenantId: string }>(r: Row<R>) => r.tenantId.eq(tenantId);
-expectTypeOf(forTenant('acme')({ tenantId: val('acme') as Expr<string, 'tenantId'> })).toEqualTypeOf<Expr<boolean, 'tenantId'>>();
-function genericVersion<R extends { version: number }>(r: Row<R>, v: Expr<number, 'version'>) { return r.version.eq(v); }
+import {
+  Expr,
+  cast,
+  col,
+  count,
+  countIf,
+  max,
+  maxIf,
+  maxState,
+  countMerge,
+  sum,
+  sumIf,
+  sumState,
+  val,
+  type DescribedConstant,
+  type DescribedExpr,
+  type AggExpr,
+  type AggregateState,
+  type Grouped,
+  type GroupedRow,
+  type Infer,
+  type Row,
+} from '@typedhouse/core';
+
+const forTenant =
+  (tenantId: string) =>
+  <R extends { tenantId: string }>(r: Row<R>) =>
+    r.tenantId.eq(tenantId);
+
+expectTypeOf(
+  forTenant('acme')({ tenantId: val('acme') as Expr<string, 'tenantId'> }),
+).toEqualTypeOf<Expr<boolean, 'tenantId'>>();
+
+function genericVersion<R extends { version: number }>(r: Row<R>, v: Expr<number, 'version'>) {
+  return r.version.eq(v);
+}
+
 void genericVersion;
 declare const r: Row<{ stock: bigint; nullable: number | null; name: string }>;
+
 declare const g: GroupedRow<{ stock: bigint; nullable: number | null; name: string }>;
 expectTypeOf(r.stock.gt(3n)).toEqualTypeOf<Expr<boolean, 'stock'>>();
 expectTypeOf(r.stock.gt(3n)).not.toBeAny();
@@ -20,11 +54,26 @@ expectTypeOf(max(g.nullable)).toEqualTypeOf<AggExpr<number | null, 'nullable'>>(
 expectTypeOf(sumState(g.stock)).toEqualTypeOf<AggExpr<AggregateState<'sum'>, 'stock'>>();
 expectTypeOf(r.stock.plus(val(1n))).toEqualTypeOf<Expr<bigint, 'stock'>>();
 expectTypeOf(g.stock.plus(val(1n))).toEqualTypeOf<Grouped<bigint, 'stock'>>();
-expectTypeOf(cast(g.stock, col.Float64)).toEqualTypeOf<DescribedExpr<number, 'stock', 'grouped', typeof col.Float64.type>>();
-expectTypeOf(g.stock.as(col.String)).toEqualTypeOf<DescribedExpr<string, 'stock', 'grouped', typeof col.String.type>>();
-expectTypeOf<Infer<typeof r>>().toEqualTypeOf<{ stock: bigint; nullable: number | null; name: string }>();
+
+expectTypeOf(cast(g.stock, col.Float64)).toEqualTypeOf<
+  DescribedExpr<number, 'stock', 'grouped', typeof col.Float64.type>
+>();
+
+expectTypeOf(g.stock.as(col.String)).toEqualTypeOf<
+  DescribedExpr<string, 'stock', 'grouped', typeof col.String.type>
+>();
+
+expectTypeOf<Infer<typeof r>>().toEqualTypeOf<{
+  stock: bigint;
+  nullable: number | null;
+  name: string;
+}>();
+
 expectTypeOf<Infer<typeof r.stock>>().toEqualTypeOf<{ stock: bigint }>();
-declare function phantoms<E>(value: E): E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
+declare function phantoms<E>(
+  value: E,
+): E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
+
 const declaredConstant = val(1n).as(col.UInt64);
 expectTypeOf(declaredConstant).toEqualTypeOf<DescribedConstant<typeof col.UInt64>>();
 expectTypeOf(declaredConstant).not.toBeAny();
@@ -32,11 +81,45 @@ expectTypeOf(phantoms(sum(declaredConstant))).toEqualTypeOf<AggExpr<bigint, 'sum
 expectTypeOf(phantoms(max(declaredConstant))).toEqualTypeOf<AggExpr<bigint, 'max'>>();
 expectTypeOf(countIf(val(true))).toEqualTypeOf<AggExpr<bigint, 'count'>>();
 expectTypeOf(phantoms(sumIf(declaredConstant, val(true)))).toEqualTypeOf<AggExpr<bigint, 'sum'>>();
-expectTypeOf(phantoms(sumIf(declaredConstant, g.stock.gt(0n)))).toEqualTypeOf<AggExpr<bigint, 'stock'>>();
-expectTypeOf(phantoms(maxIf(declaredConstant, g.stock.gt(0n)))).toEqualTypeOf<AggExpr<bigint, 'stock'>>();
-expectTypeOf(sumState(declaredConstant)).toEqualTypeOf<DescribedExpr<AggregateState<'sum'>, 'sum', 'agg', { readonly kind: 'AggregateFunction'; readonly fn: 'sum'; readonly args: [typeof declaredConstant.ir.type & import('@typedhouse/core').CHType] }>>();
-expectTypeOf(maxState(declaredConstant)).toEqualTypeOf<DescribedExpr<AggregateState<'max'>, 'max', 'agg', { readonly kind: 'AggregateFunction'; readonly fn: 'max'; readonly args: [typeof declaredConstant.ir.type & import('@typedhouse/core').CHType] }>>();
-expectTypeOf(countMerge(val({ __aggregateState: 'count' }, col.AggregateFunction('count')))).toEqualTypeOf<AggExpr<bigint, 'count'>>();
+
+expectTypeOf(phantoms(sumIf(declaredConstant, g.stock.gt(0n)))).toEqualTypeOf<
+  AggExpr<bigint, 'stock'>
+>();
+
+expectTypeOf(phantoms(maxIf(declaredConstant, g.stock.gt(0n)))).toEqualTypeOf<
+  AggExpr<bigint, 'stock'>
+>();
+
+expectTypeOf(sumState(declaredConstant)).toEqualTypeOf<
+  DescribedExpr<
+    AggregateState<'sum'>,
+    'sum',
+    'agg',
+    {
+      readonly kind: 'AggregateFunction';
+      readonly fn: 'sum';
+      readonly args: [typeof declaredConstant.ir.type & import('@typedhouse/core').CHType];
+    }
+  >
+>();
+
+expectTypeOf(maxState(declaredConstant)).toEqualTypeOf<
+  DescribedExpr<
+    AggregateState<'max'>,
+    'max',
+    'agg',
+    {
+      readonly kind: 'AggregateFunction';
+      readonly fn: 'max';
+      readonly args: [typeof declaredConstant.ir.type & import('@typedhouse/core').CHType];
+    }
+  >
+>();
+
+expectTypeOf(
+  countMerge(val({ __aggregateState: 'count' }, col.AggregateFunction('count'))),
+).toEqualTypeOf<AggExpr<bigint, 'count'>>();
+
 // @ts-expect-error declaring a row column does not turn it into a constant
 sum(r.stock.as(col.UInt64));
 // @ts-expect-error If predicates still reject real row-mode columns

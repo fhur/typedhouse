@@ -3,14 +3,23 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
-import { assertSmokeEnvironment, expectedDynamicPort, isolateSmoke } from './smoke-testcontainers-port-patch.mjs';
+import {
+  assertSmokeEnvironment,
+  expectedDynamicPort,
+  isolateSmoke,
+} from './smoke-testcontainers-port-patch.mjs';
 
 // Execute the installed package, not a copy of the patch's allocation logic.
 const require = createRequire(import.meta.url);
+
 const filename = require.resolve('testcontainers/build/generic-container/generic-container.js');
+
 const localRequire = createRequire(filename);
+
 const source = readFileSync(filename, 'utf8');
+
 const { getReaperImage } = localRequire('../reaper/reaper');
+
 const REAPER_IMAGE = getReaperImage();
 assert.equal(require('testcontainers/package.json').version, '12.2.1');
 
@@ -30,35 +39,72 @@ const cases = [
 
 test('smoke platform expectations match all allocation guard cases', () => {
   for (const scenario of cases) {
-    assert.equal(expectedDynamicPort(scenario.platform ?? 'darwin', {
-      operatingSystem: Object.hasOwn(scenario, 'os') ? scenario.os : 'Docker Desktop',
-      host: scenario.host ?? 'localhost',
-    }, scenario.inContainer ?? false), scenario.expected, scenario.name);
+    assert.equal(
+      expectedDynamicPort(
+        scenario.platform ?? 'darwin',
+        {
+          operatingSystem: Object.hasOwn(scenario, 'os') ? scenario.os : 'Docker Desktop',
+          host: scenario.host ?? 'localhost',
+        },
+        scenario.inContainer ?? false,
+      ),
+      scenario.expected,
+      scenario.name,
+    );
   }
 });
 
 test('smoke refuses override environments before modifying anything', () => {
-  for (const key of ['TESTCONTAINERS_RYUK_DISABLED', 'TESTCONTAINERS_RYUK_PORT', 'RYUK_CONTAINER_IMAGE']) {
-    for (const value of ['true', 'false', '']) assert.throws(() => assertSmokeEnvironment({ [key]: value }), /Unset/);
+  for (const key of [
+    'TESTCONTAINERS_RYUK_DISABLED',
+    'TESTCONTAINERS_RYUK_PORT',
+    'RYUK_CONTAINER_IMAGE',
+  ]) {
+    for (const value of ['true', 'false', ''])
+      assert.throws(() => assertSmokeEnvironment({ [key]: value }), /Unset/);
   }
 });
 
 test('repeated isolation preserves foreign/concurrent containers and restores methods and environment', async () => {
-  const foreign = { Id: 'foreign', State: 'running', Labels: { 'org.testcontainers.ryuk': 'true' } };
+  const foreign = {
+    Id: 'foreign',
+    State: 'running',
+    Labels: { 'org.testcontainers.ryuk': 'true' },
+  };
+
   const app = { Id: 'app', State: 'running', Labels: {} };
   const stopped = { ...foreign, Id: 'stopped', State: 'exited' };
-  const labelled = { ...foreign, Id: 'labelled', Labels: { ...foreign.Labels, TESTCONTAINERS_RYUK_TEST_LABEL: 'true' } };
+
+  const labelled = {
+    ...foreign,
+    Id: 'labelled',
+    Labels: { ...foreign.Labels, TESTCONTAINERS_RYUK_TEST_LABEL: 'true' },
+  };
+
   const rows = [foreign, app, stopped, labelled];
   const originalRows = structuredClone(rows);
   const calls = [];
-  const client = { container: {
-    list: async function (...args) { assert.equal(this, client.container); calls.push(args); return rows; },
-    create: async function (options) { assert.equal(this, client.container); return { id: options.Image }; },
-  } };
+
+  const client = {
+    container: {
+      list: async function (...args) {
+        assert.equal(this, client.container);
+        calls.push(args);
+        return rows;
+      },
+      create: async function (options) {
+        assert.equal(this, client.container);
+        return { id: options.Image };
+      },
+    },
+  };
+
   const { list, create } = client.container;
+
   for (const previous of [undefined, 'false', 'true']) {
     const env = previous === undefined ? {} : { TESTCONTAINERS_RYUK_TEST_LABEL: previous };
     const isolation = isolateSmoke(client, env);
+
     try {
       assert.equal(env.TESTCONTAINERS_RYUK_TEST_LABEL, 'true');
       assert.deepEqual(await client.container.list(), [app, stopped, labelled]);
@@ -70,16 +116,36 @@ test('repeated isolation preserves foreign/concurrent containers and restores me
       assert.deepEqual(calls.at(-1), [filter]);
       await client.container.create({ Image: 'clickhouse/clickhouse-server:24.8' });
       await client.container.create({ Image: REAPER_IMAGE });
-      assert.equal(client.container.list, list, 'startup listing restored as soon as own Ryuk exists');
+
+      assert.equal(
+        client.container.list,
+        list,
+        'startup listing restored as soon as own Ryuk exists',
+      );
+
       assert.equal(await client.container.list(), rows);
-      assert.deepEqual(isolation.owned.map(({ container }) => container.id), ['clickhouse/clickhouse-server:24.8', REAPER_IMAGE]);
+
+      assert.deepEqual(
+        isolation.owned.map(({ container }) => container.id),
+        ['clickhouse/clickhouse-server:24.8', REAPER_IMAGE],
+      );
+
       rows.pop();
-    } finally { isolation.restore(); }
+    } finally {
+      isolation.restore();
+    }
+
     assert.equal(client.container.list, list);
     assert.equal(client.container.create, create);
-    assert.deepEqual(env, previous === undefined ? {} : { TESTCONTAINERS_RYUK_TEST_LABEL: previous });
+
+    assert.deepEqual(
+      env,
+      previous === undefined ? {} : { TESTCONTAINERS_RYUK_TEST_LABEL: previous },
+    );
+
     assert.deepEqual(rows, originalRows);
   }
+
   const isolation = isolateSmoke(client, {});
   isolation.restore(); // startup failure before any successful create
   assert.deepEqual(isolation.owned, []);
@@ -93,46 +159,81 @@ for (const scenario of cases) {
       const stoppedAtCreate = new Error('captured create; no Docker operation');
       let captured;
       let reaperCalls = 0;
+
       const client = {
-        info: { containerRuntime: {
-          operatingSystem: Object.hasOwn(scenario, 'os') ? scenario.os : 'Docker Desktop',
-          host: scenario.host ?? 'localhost',
-        } },
-        image: { pull: async () => {} },
-        container: { create: async (options) => {
-          captured = options;
-          throw stoppedAtCreate;
-        } },
-      };
-      const exports = {};
-      vm.runInNewContext(source, {
-        exports,
-        process: { platform: scenario.platform ?? 'darwin', env: {} },
-        require: (id) => {
-          if (id === 'node:fs') return { ...localRequire(id), existsSync: (path) => {
-            assert.equal(path, '/.dockerenv');
-            return scenario.inContainer ?? false;
-          } };
-          if (id === '../container-runtime') return {
-            ...localRequire(id), getContainerRuntimeClient: async () => client,
-          };
-          if (id === '../reaper/reaper') return {
-            getReaperImage: () => REAPER_IMAGE,
-            getReaper: async () => { reaperCalls++; return { sessionId: 'patch-unit' }; },
-          };
-          if (id === '../port-forwarder/port-forwarder') return {
-            SSHD_IMAGE: 'unused', PortForwarderInstance: { isRunning: () => false },
-          };
-          return localRequire(id);
+        info: {
+          containerRuntime: {
+            operatingSystem: Object.hasOwn(scenario, 'os') ? scenario.os : 'Docker Desktop',
+            host: scenario.host ?? 'localhost',
+          },
         },
-      }, { filename });
+        image: { pull: async () => {} },
+        container: {
+          create: async options => {
+            captured = options;
+            throw stoppedAtCreate;
+          },
+        },
+      };
+
+      const exports = {};
+
+      vm.runInNewContext(
+        source,
+        {
+          exports,
+          process: { platform: scenario.platform ?? 'darwin', env: {} },
+          require: id => {
+            if (id === 'node:fs')
+              return {
+                ...localRequire(id),
+                existsSync: path => {
+                  assert.equal(path, '/.dockerenv');
+                  return scenario.inContainer ?? false;
+                },
+              };
+
+            if (id === '../container-runtime')
+              return {
+                ...localRequire(id),
+                getContainerRuntimeClient: async () => client,
+              };
+
+            if (id === '../reaper/reaper')
+              return {
+                getReaperImage: () => REAPER_IMAGE,
+                getReaper: async () => {
+                  reaperCalls++;
+                  return { sessionId: 'patch-unit' };
+                },
+              };
+
+            if (id === '../port-forwarder/port-forwarder')
+              return {
+                SSHD_IMAGE: 'unused',
+                PortForwarderInstance: { isRunning: () => false },
+              };
+
+            return localRequire(id);
+          },
+        },
+        { filename },
+      );
+
       const container = new exports.GenericContainer(image)
-        .withExposedPorts(8123, 8080, { container: 9000, host: 19000 }, { container: 9001, host: 0 })
+        .withExposedPorts(
+          8123,
+          8080,
+          { container: 9000, host: 19000 },
+          { container: 9001, host: 0 },
+        )
         .withExposedPorts(9002, { container: 9002, host: 19002 })
         .withExposedPorts({ container: 9003, host: 19003 }, 9003)
         // 12.x port strings/protocols: only numeric (TCP) declarations are rewritten, last one wins.
         .withExposedPorts('9004/tcp', 9005, '9005/tcp', '9006/udp', 9006);
-      await assert.rejects(container.start(), (error) => error === stoppedAtCreate);
+
+      await assert.rejects(container.start(), error => error === stoppedAtCreate);
+
       assert.deepEqual(JSON.parse(JSON.stringify(captured.HostConfig.PortBindings)), {
         '8123/tcp': [{ HostPort: scenario.expected }],
         '8080/tcp': [{ HostPort: scenario.expected }],
@@ -145,6 +246,7 @@ for (const scenario of cases) {
         '9006/udp': [{ HostPort: '0' }],
         '9006/tcp': [{ HostPort: scenario.expected }],
       });
+
       assert.equal(reaperCalls, image === REAPER_IMAGE ? 0 : 1);
     });
   }

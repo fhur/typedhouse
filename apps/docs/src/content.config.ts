@@ -9,9 +9,13 @@ export const collections = {
   blog: defineCollection({
     loader: glob({ pattern: '**/*.md', base: './src/content/blog' }),
     schema: z.object({
-      title: z.string(), description: z.string(), author: z.string(),
-      date: z.coerce.date(), updated: z.coerce.date().optional(),
-      tags: z.array(z.string()), draft: z.boolean().default(false),
+      title: z.string(),
+      description: z.string(),
+      author: z.string(),
+      date: z.coerce.date(),
+      updated: z.coerce.date().optional(),
+      tags: z.array(z.string()),
+      draft: z.boolean().default(false),
     }),
   }),
 };

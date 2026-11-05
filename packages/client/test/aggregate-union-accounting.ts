@@ -12,6 +12,7 @@ export function assertAggregateUnionAccounting(
     expect(runs).toBeLessThanOrEqual(500);
     return 'replay-only';
   }
+
   expect(runs).toBe(500);
   expect(coverage.shapes).toBeGreaterThan(100);
   expect(coverage.agg).toBeGreaterThanOrEqual(500);

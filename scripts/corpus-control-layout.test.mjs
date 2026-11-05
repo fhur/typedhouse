@@ -19,4 +19,7 @@ for (const [paths, root, externalTemp] of [
   assert.ok(!relative.split(paths.sep).includes('.worktrees'));
   assert.match(relative, /^\.chql-corpus-control-/);
 }
-console.log('Corpus control layout: distinct Windows drives, UNC and POSIX remain inside explicit repository rootDir.');
+
+console.log(
+  'Corpus control layout: distinct Windows drives, UNC and POSIX remain inside explicit repository rootDir.',
+);

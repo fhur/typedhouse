@@ -1,9 +1,17 @@
 import { expect, it } from 'vitest';
 import { col, count, from, join, sum, table, val } from '../src/index.js';
 
-const source = from(table('grouped_then_by', {
-  price_type: col.String, origin: col.Nullable(col.String), quantity: col.UInt32,
-}, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const source = from(
+  table(
+    'grouped_then_by',
+    {
+      price_type: col.String,
+      origin: col.Nullable(col.String),
+      quantity: col.UInt32,
+    },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+);
 
 it('appends keys immutably and aggregates the original input', () => {
   const first = source.groupBy(r => r.price_type);
@@ -22,10 +30,12 @@ it('appends keys immutably and aggregates the original input', () => {
 });
 
 it('supports nested join inputs, expressions and prototype-shaped aliases', () => {
-  const grouped = join({ a: source, b: source }).on(r => r.a.price_type.eq(r.b.price_type))
+  const grouped = join({ a: source, b: source })
+    .on(r => r.a.price_type.eq(r.b.price_type))
     .groupBy(r => ({ kind: r.a.price_type }))
     .thenBy(r => ({ ['__proto__']: r.b.origin.ifNull('unknown') }))
     .count();
+
   expect(grouped.row.__proto__.ir.type).toEqual(col.String.type);
   expect(grouped.row.kind.ir.type).toEqual(col.String.type);
 });

@@ -1,17 +1,85 @@
 import { expectTypeOf } from 'expect-type';
-import { uniqExact, uniqExactIf, quantile, quantileIf, avg, avgIf, argMax, argMaxIf, count, countIf, sum, sumIf, max, maxIf, col, table, from, val, type Query, type Infer, type Row, type IsLive } from '@typedhouse/core';
-import { createClient, createClientFromBackend, createClickHouseBackend, type Backend, type Plan } from '@typedhouse/client';
-const t = table('entity', { tenantId: col.String, id: col.UInt64, updatedAt: col.DateTime64(3), category: col.Nullable(col.String), tuple: col.Tuple({ name: col.String }) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+import {
+  uniqExact,
+  uniqExactIf,
+  quantile,
+  quantileIf,
+  avg,
+  avgIf,
+  argMax,
+  argMaxIf,
+  count,
+  countIf,
+  sum,
+  sumIf,
+  max,
+  maxIf,
+  col,
+  table,
+  from,
+  val,
+  type Query,
+  type Infer,
+  type Row,
+  type IsLive,
+} from '@typedhouse/core';
+import {
+  createClient,
+  createClientFromBackend,
+  createClickHouseBackend,
+  type Backend,
+  type Plan,
+} from '@typedhouse/client';
+
+const t = table(
+  'entity',
+  {
+    tenantId: col.String,
+    id: col.UInt64,
+    updatedAt: col.DateTime64(3),
+    category: col.Nullable(col.String),
+    tuple: col.Tuple({ name: col.String }),
+  },
+  { engine: 'Memory', sortingKey: [], partitionKey: [] },
+);
+
 import { cast, crossJoin, unionAll, scalar } from '@typedhouse/core';
-const metrics = from(table('metrics', { entityId: col.String, version: col.UInt32, stock: col.Float32, lead: col.Nullable(col.Float64), label: col.String, enabled: col.Bool, wide: col.UInt256 }, { engine: 'ReplacingMergeTree', sortingKey: [], partitionKey: [] }));
+
+const metrics = from(
+  table(
+    'metrics',
+    {
+      entityId: col.String,
+      version: col.UInt32,
+      stock: col.Float32,
+      lead: col.Nullable(col.Float64),
+      label: col.String,
+      enabled: col.Bool,
+      wide: col.UInt256,
+    },
+    { engine: 'ReplacingMergeTree', sortingKey: [], partitionKey: [] },
+  ),
+);
+
 // Generic/descriptor-erased helpers retain the public bigint/root contract.
-const genericExact = <R extends { category: string | null }>(q: Query<R>) => q.aggregate(g => uniqExact(g.category));
+const genericExact = <R extends { category: string | null }>(q: Query<R>) =>
+  q.aggregate(g => uniqExact(g.category));
+
 const genericExactResult = genericExact(from(t));
 expectTypeOf<Infer<typeof genericExactResult>>().toEqualTypeOf<{ category: bigint }>();
 expectTypeOf<Infer<typeof genericExactResult>>().not.toBeAny();
-const exactPredicateUnion = from(table('exact_predicate_union', { s: col.String, p: Math.random() ? col.Bool : col.Nullable(col.Bool) }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).aggregate(g => uniqExactIf(g.s, g.p));
+
+const exactPredicateUnion = from(
+  table(
+    'exact_predicate_union',
+    { s: col.String, p: Math.random() ? col.Bool : col.Nullable(col.Bool) },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+).aggregate(g => uniqExactIf(g.s, g.p));
+
 expectTypeOf<Infer<typeof exactPredicateUnion>>().toEqualTypeOf<{ s: bigint }>();
 expectTypeOf<Infer<typeof exactPredicateUnion>>().not.toBeAny();
+
 const exactCounts = from(t).aggregate(g => {
   const n = uniqExact(g.category);
   expectTypeOf(n).not.toBeAny();
@@ -19,9 +87,14 @@ const exactCounts = from(t).aggregate(g => {
   expectTypeOf(n.mode).toEqualTypeOf<'agg'>();
   expectTypeOf(n.ir.type.kind).toEqualTypeOf<'scalar'>();
   expectTypeOf(n.ir.type.name).toEqualTypeOf<'UInt64'>();
-  expectTypeOf(uniqExactIf(val('constant'), g.category.isNotNull()).name).toEqualTypeOf<'uniqExact'>();
+
+  expectTypeOf(
+    uniqExactIf(val('constant'), g.category.isNotNull()).name,
+  ).toEqualTypeOf<'uniqExact'>();
+
   return { n, selected: uniqExactIf(g.category, g.category.eq('a')) };
 });
+
 expectTypeOf<Infer<typeof exactCounts>>().toEqualTypeOf<{ n: bigint; selected: bigint }>();
 expectTypeOf<Infer<typeof exactCounts>>().not.toBeAny();
 expectTypeOf(exactCounts.row.n.ir.type.name).toEqualTypeOf<'UInt64'>();
@@ -30,53 +103,97 @@ expectTypeOf(exactScalar.name).toEqualTypeOf<'category'>();
 expectTypeOf(exactScalar.mode).toEqualTypeOf<'row'>();
 expectTypeOf<Infer<typeof exactScalar>>().toEqualTypeOf<{ category: bigint | null }>();
 expectTypeOf(exactScalar).not.toBeAny();
-const exactUnion = from(table('exact_union', { s: Math.random() ? col.String : col.Nullable(col.String) }, { engine: 'Memory', sortingKey: [], partitionKey: [] })).aggregate(g => uniqExact(g.s));
+
+const exactUnion = from(
+  table(
+    'exact_union',
+    { s: Math.random() ? col.String : col.Nullable(col.String) },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+).aggregate(g => uniqExact(g.s));
+
 expectTypeOf<Infer<typeof exactUnion>>().toEqualTypeOf<{ s: bigint }>();
 expectTypeOf<Infer<typeof exactUnion>>().not.toBeAny();
-const quantiles = metrics.groupBy(r => r.entityId).aggregate(g => {
-  const median = quantile(0.5)(g.wide);
-  expectTypeOf(median.name).toEqualTypeOf<'wide'>();
-  expectTypeOf(median.mode).toEqualTypeOf<'agg'>();
-  expectTypeOf(median.ir.type.name).toEqualTypeOf<'Float64'>();
-  expectTypeOf(median).not.toBeAny();
-  const conditional = quantileIf(0.5)(g.lead, g.enabled);
-  expectTypeOf(conditional.ir.type.inner.name).toEqualTypeOf<'Float64'>();
-  expectTypeOf(conditional).not.toBeAny();
-  expectTypeOf(quantileIf(0)(val(1), g.enabled).name).toEqualTypeOf<'quantile'>();
-  return { median, conditional };
-});
-expectTypeOf<Infer<typeof quantiles>>().toEqualTypeOf<{ entityId: string; median: number; conditional: number | null }>();
+
+const quantiles = metrics
+  .groupBy(r => r.entityId)
+  .aggregate(g => {
+    const median = quantile(0.5)(g.wide);
+    expectTypeOf(median.name).toEqualTypeOf<'wide'>();
+    expectTypeOf(median.mode).toEqualTypeOf<'agg'>();
+    expectTypeOf(median.ir.type.name).toEqualTypeOf<'Float64'>();
+    expectTypeOf(median).not.toBeAny();
+    const conditional = quantileIf(0.5)(g.lead, g.enabled);
+    expectTypeOf(conditional.ir.type.inner.name).toEqualTypeOf<'Float64'>();
+    expectTypeOf(conditional).not.toBeAny();
+    expectTypeOf(quantileIf(0)(val(1), g.enabled).name).toEqualTypeOf<'quantile'>();
+    return { median, conditional };
+  });
+
+expectTypeOf<Infer<typeof quantiles>>().toEqualTypeOf<{
+  entityId: string;
+  median: number;
+  conditional: number | null;
+}>();
+
 expectTypeOf<Infer<typeof quantiles>>().not.toBeAny();
-const regroupedQuantiles = unionAll(quantiles, quantiles).aggregate(g => ({ median: quantileIf(0.25)(g.conditional, g.conditional.gt(0)) }));
+
+const regroupedQuantiles = unionAll(quantiles, quantiles).aggregate(g => ({
+  median: quantileIf(0.25)(g.conditional, g.conditional.gt(0)),
+}));
+
 expectTypeOf<Infer<typeof regroupedQuantiles>>().toEqualTypeOf<{ median: number | null }>();
 expectTypeOf<Infer<typeof regroupedQuantiles>>().not.toBeAny();
 expectTypeOf(regroupedQuantiles.row.median.ir.type.inner.name).toEqualTypeOf<'Float64'>();
 const quantileScalar = metrics.map(() => scalar(metrics.aggregate(g => quantile(0.5)(g.stock))));
 expectTypeOf<Infer<typeof quantileScalar>>().toEqualTypeOf<{ stock: number | null }>();
 expectTypeOf<Infer<typeof quantileScalar>>().not.toBeAny();
-const weeklyDates = from(t).groupBy(r => r.updatedAt.toStartOfWeek()).aggregate(g => {
-  const groupedWeek = g.updatedAt.toStartOfWeek();
-  expectTypeOf(groupedWeek.mode).toEqualTypeOf<'grouped'>();
-  const latestWeek = max(g.updatedAt).toStartOfWeek();
-  expectTypeOf(latestWeek.mode).toEqualTypeOf<'agg'>();
-  expectTypeOf(latestWeek.ir.type.name).toEqualTypeOf<'Date'>();
-  return { mean: avg(g.id), latestWeek };
-});
-expectTypeOf<Infer<typeof weeklyDates>>().toEqualTypeOf<{ updatedAt: Date; mean: number; latestWeek: Date }>();
+
+const weeklyDates = from(t)
+  .groupBy(r => r.updatedAt.toStartOfWeek())
+  .aggregate(g => {
+    const groupedWeek = g.updatedAt.toStartOfWeek();
+    expectTypeOf(groupedWeek.mode).toEqualTypeOf<'grouped'>();
+    const latestWeek = max(g.updatedAt).toStartOfWeek();
+    expectTypeOf(latestWeek.mode).toEqualTypeOf<'agg'>();
+    expectTypeOf(latestWeek.ir.type.name).toEqualTypeOf<'Date'>();
+    return { mean: avg(g.id), latestWeek };
+  });
+
+expectTypeOf<Infer<typeof weeklyDates>>().toEqualTypeOf<{
+  updatedAt: Date;
+  mean: number;
+  latestWeek: Date;
+}>();
+
 expectTypeOf<Infer<typeof weeklyDates>>().not.toBeAny();
 expectTypeOf(weeklyDates.row.updatedAt.ir.type.name).toEqualTypeOf<'Date'>();
+
 // Rejecting any unsupported temporal alternative must not reject supported unions.
-const supportedScalarUnions = from(table('scalar_unions', {
-  text: Math.random() ? col.String : col.Nullable(col.String),
-  numeric: Math.random() ? col.UInt32 : col.Float64,
-  day: Math.random() ? col.Date : col.Nullable(col.Date),
-}, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const supportedScalarUnions = from(
+  table(
+    'scalar_unions',
+    {
+      text: Math.random() ? col.String : col.Nullable(col.String),
+      numeric: Math.random() ? col.UInt32 : col.Float64,
+      day: Math.random() ? col.Date : col.Nullable(col.Date),
+    },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+);
+
 const supportedUnionScalars = supportedScalarUnions.map(() => ({
   text: scalar(supportedScalarUnions.aggregate(g => max(g.text))),
   numeric: scalar(supportedScalarUnions.aggregate(g => max(g.numeric))),
   day: scalar(supportedScalarUnions.aggregate(g => max(g.day))),
 }));
-expectTypeOf<Infer<typeof supportedUnionScalars>>().toEqualTypeOf<{ text: string | null; numeric: number | null; day: Date | null }>();
+
+expectTypeOf<Infer<typeof supportedUnionScalars>>().toEqualTypeOf<{
+  text: string | null;
+  numeric: number | null;
+  day: Date | null;
+}>();
+
 expectTypeOf<Infer<typeof supportedUnionScalars>>().not.toBeAny();
 const newestWeek = scalar(weeklyDates.aggregate(g => max(g.updatedAt)));
 expectTypeOf(newestWeek).not.toBeAny();
@@ -88,7 +205,13 @@ expectTypeOf(newestWeek.ir.type).not.toBeAny();
 const newestHistory = weeklyDates.where(r => r.updatedAt.eq(newestWeek)).map(() => newestWeek);
 expectTypeOf<Infer<typeof newestHistory>>().toEqualTypeOf<{ updatedAt: Date | null }>();
 expectTypeOf<Infer<typeof newestHistory>>().not.toBeAny();
-const nullableDateScalar = scalar(from(t).map(() => ({ day: val(null, col.Nullable(col.Date)) })).aggregate(g => max(g.day)));
+
+const nullableDateScalar = scalar(
+  from(t)
+    .map(() => ({ day: val(null, col.Nullable(col.Date)) }))
+    .aggregate(g => max(g.day)),
+);
+
 expectTypeOf(nullableDateScalar.name).toEqualTypeOf<'day'>();
 expectTypeOf(nullableDateScalar.mode).toEqualTypeOf<'row'>();
 expectTypeOf(nullableDateScalar.ir.type.kind).toEqualTypeOf<'Nullable'>();
@@ -97,9 +220,23 @@ expectTypeOf(nullableDateScalar.ir.type).not.toBeAny();
 const nullableDateProjection = from(t).map(() => nullableDateScalar);
 expectTypeOf<Infer<typeof nullableDateProjection>>().toEqualTypeOf<{ day: Date | null }>();
 expectTypeOf<Infer<typeof nullableDateProjection>>().not.toBeAny();
-const nestedDateScalar = scalar(unionAll(nullableDateProjection, nullableDateProjection).aggregate(g => max(g.day)));
-const nestedScalarDateTruth = from(t).map(() => ({ day: nestedDateScalar, yes: nestedDateScalar.in(nullableDateProjection), no: nestedDateScalar.notIn([]) }));
-expectTypeOf<Infer<typeof nestedScalarDateTruth>>().toEqualTypeOf<{ day: Date | null; yes: boolean | null; no: boolean | null }>();
+
+const nestedDateScalar = scalar(
+  unionAll(nullableDateProjection, nullableDateProjection).aggregate(g => max(g.day)),
+);
+
+const nestedScalarDateTruth = from(t).map(() => ({
+  day: nestedDateScalar,
+  yes: nestedDateScalar.in(nullableDateProjection),
+  no: nestedDateScalar.notIn([]),
+}));
+
+expectTypeOf<Infer<typeof nestedScalarDateTruth>>().toEqualTypeOf<{
+  day: Date | null;
+  yes: boolean | null;
+  no: boolean | null;
+}>();
+
 expectTypeOf<Infer<typeof nestedScalarDateTruth>>().not.toBeAny();
 expectTypeOf(nestedDateScalar.name).toEqualTypeOf<'day'>();
 expectTypeOf(nestedDateScalar.mode).toEqualTypeOf<'row'>();
@@ -108,54 +245,104 @@ expectTypeOf(nestedDateScalar.ir.type).not.toBeAny();
 const nullableWeek = val(null, col.Nullable(col.DateTime64(2))).toStartOfWeek();
 expectTypeOf(nullableWeek.ir.type.inner.name).toEqualTypeOf<'Date'>();
 expectTypeOf(nullableWeek.mode).toEqualTypeOf<'row'>();
-const weeklyAligned = unionAll(weeklyDates, weeklyDates).where(r => r.updatedAt.ge(new Date('2024-01-01')));
-expectTypeOf<Infer<typeof weeklyAligned>>().toEqualTypeOf<{ updatedAt: Date; mean: number; latestWeek: Date }>();
+
+const weeklyAligned = unionAll(weeklyDates, weeklyDates).where(r =>
+  r.updatedAt.ge(new Date('2024-01-01')),
+);
+
+expectTypeOf<Infer<typeof weeklyAligned>>().toEqualTypeOf<{
+  updatedAt: Date;
+  mean: number;
+  latestWeek: Date;
+}>();
+
 expectTypeOf<Infer<typeof weeklyAligned>>().not.toBeAny();
-const expandedWeeks = from(t).map(() => ({ days: val([null, new Date('2024-03-11')], col.Array(col.Nullable(col.Date))) }))
-  .arrayJoin(r => r.days, 'day').map(r => ({ week: r.day.toStartOfWeek().toStartOfWeek() }));
+
+const expandedWeeks = from(t)
+  .map(() => ({ days: val([null, new Date('2024-03-11')], col.Array(col.Nullable(col.Date))) }))
+  .arrayJoin(r => r.days, 'day')
+  .map(r => ({ week: r.day.toStartOfWeek().toStartOfWeek() }));
+
 expectTypeOf<Infer<typeof expandedWeeks>>().toEqualTypeOf<{ week: Date | null }>();
 expectTypeOf<Infer<typeof expandedWeeks>>().not.toBeAny();
 expectTypeOf(expandedWeeks.row.week.ir.type.inner.name).toEqualTypeOf<'Date'>();
-const regroupedWeeks = unionAll(expandedWeeks, expandedWeeks).groupBy(r => r.week).aggregate(() => count());
+
+const regroupedWeeks = unionAll(expandedWeeks, expandedWeeks)
+  .groupBy(r => r.week)
+  .aggregate(() => count());
+
 expectTypeOf<Infer<typeof regroupedWeeks>>().toEqualTypeOf<{ week: Date | null; count: bigint }>();
 expectTypeOf<Infer<typeof regroupedWeeks>>().not.toBeAny();
 const dateSet = unionAll(expandedWeeks, expandedWeeks.limit(0));
+
 const nestedDateSet = dateSet.where(r => r.week.notIn(dateSet)).distinct();
-const nestedDateTruth = weeklyAligned.map(r => ({ yes: r.updatedAt.in(nestedDateSet), no: r.updatedAt.notIn([]) }));
+
+const nestedDateTruth = weeklyAligned.map(r => ({
+  yes: r.updatedAt.in(nestedDateSet),
+  no: r.updatedAt.notIn([]),
+}));
+
 expectTypeOf<Infer<typeof nestedDateTruth>>().toEqualTypeOf<{ yes: boolean; no: boolean }>();
 expectTypeOf<Infer<typeof nestedDateTruth>>().not.toBeAny();
 expectTypeOf(weeklyAligned.row.updatedAt.in(nestedDateSet).name).toEqualTypeOf<'updatedAt'>();
 expectTypeOf(weeklyAligned.row.updatedAt.in(nestedDateSet).mode).toEqualTypeOf<'row'>();
 const selectedWeeks = weeklyAligned.where(r => r.updatedAt.in(dateSet)).orderBy(r => r.updatedAt);
-expectTypeOf<Infer<typeof selectedWeeks>>().toEqualTypeOf<{ updatedAt: Date; mean: number; latestWeek: Date }>();
+
+expectTypeOf<Infer<typeof selectedWeeks>>().toEqualTypeOf<{
+  updatedAt: Date;
+  mean: number;
+  latestWeek: Date;
+}>();
+
 expectTypeOf<Infer<typeof selectedWeeks>>().not.toBeAny();
-const dateTruth = expandedWeeks.map(r => ({ yes: r.week.in(dateSet), no: r.week.notIn([new Date('2024-03-10')] as const) }));
-expectTypeOf<Infer<typeof dateTruth>>().toEqualTypeOf<{ yes: boolean | null; no: boolean | null }>();
+
+const dateTruth = expandedWeeks.map(r => ({
+  yes: r.week.in(dateSet),
+  no: r.week.notIn([new Date('2024-03-10')] as const),
+}));
+
+expectTypeOf<Infer<typeof dateTruth>>().toEqualTypeOf<{
+  yes: boolean | null;
+  no: boolean | null;
+}>();
+
 expectTypeOf<Infer<typeof dateTruth>>().not.toBeAny();
 expectTypeOf(expandedWeeks.row.week.in(dateSet).name).toEqualTypeOf<'week'>();
 expectTypeOf(expandedWeeks.row.week.in(dateSet).mode).toEqualTypeOf<'row'>();
+
 expandedWeeks.aggregate(g => {
   expectTypeOf(g.week.in(dateSet).mode).toEqualTypeOf<'grouped'>();
   expectTypeOf(max(g.week).notIn([]).mode).toEqualTypeOf<'agg'>();
   return countIf(g.week.in(dateSet));
 });
-const meanMetrics = metrics.final().groupBy(r => r.entityId).aggregate(g => {
-  const mean = avg(g.wide);
-  expectTypeOf(mean.name).toEqualTypeOf<'wide'>();
-  expectTypeOf(mean.mode).toEqualTypeOf<'agg'>();
-  expectTypeOf(mean.ir.type.name).toEqualTypeOf<'Float64'>();
-  const constant = avg(val(1));
-  expectTypeOf(constant.name).toEqualTypeOf<'avg'>();
-  const conditional = avgIf(val(1), g.enabled);
-  expectTypeOf(conditional.name).toEqualTypeOf<'enabled'>();
-  return { mean, nullable: avgIf(g.lead, g.enabled), ratio: avg(g.stock).divide(mean) };
-});
-const meanUnion = unionAll(meanMetrics, meanMetrics).where(r => r.mean.gt(0)).orderBy(r => r.entityId).limit(2);
+
+const meanMetrics = metrics
+  .final()
+  .groupBy(r => r.entityId)
+  .aggregate(g => {
+    const mean = avg(g.wide);
+    expectTypeOf(mean.name).toEqualTypeOf<'wide'>();
+    expectTypeOf(mean.mode).toEqualTypeOf<'agg'>();
+    expectTypeOf(mean.ir.type.name).toEqualTypeOf<'Float64'>();
+    const constant = avg(val(1));
+    expectTypeOf(constant.name).toEqualTypeOf<'avg'>();
+    const conditional = avgIf(val(1), g.enabled);
+    expectTypeOf(conditional.name).toEqualTypeOf<'enabled'>();
+    return { mean, nullable: avgIf(g.lead, g.enabled), ratio: avg(g.stock).divide(mean) };
+  });
+
+const meanUnion = unionAll(meanMetrics, meanMetrics)
+  .where(r => r.mean.gt(0))
+  .orderBy(r => r.entityId)
+  .limit(2);
+
 type MeanRow = { entityId: string; mean: number; nullable: number | null; ratio: number };
+
 expectTypeOf<Infer<typeof meanUnion>>().toEqualTypeOf<MeanRow>();
 expectTypeOf<Infer<typeof meanUnion>>().not.toBeAny();
 expectTypeOf(meanUnion.row.nullable.ir.type.inner.name).toEqualTypeOf<'Float64'>();
 const nullableMeanInput = metrics.map(r => ({ value: r.lead, predicate: r.lead.gt(0) }));
+
 const nullableMean = nullableMeanInput.aggregate(g => avgIf(g.value, g.predicate));
 expectTypeOf<Infer<typeof nullableMean>>().toEqualTypeOf<{ value: number | null }>();
 expectTypeOf<Infer<typeof nullableMean>>().not.toBeAny();
@@ -166,54 +353,150 @@ expectTypeOf<Infer<typeof nestedMean>>().not.toBeAny();
 const meanScalar = metrics.map(() => scalar(metrics.aggregate(g => avg(g.wide))));
 expectTypeOf<Infer<typeof meanScalar>>().toEqualTypeOf<{ wide: number | null }>();
 expectTypeOf<Infer<typeof meanScalar>>().not.toBeAny();
-const meanClient = createClient(), meanRun = meanClient.run(meanUnion), meanStream = meanClient.stream(meanUnion);
+
+const meanClient = createClient(),
+  meanRun = meanClient.run(meanUnion),
+  meanStream = meanClient.stream(meanUnion);
+
 expectTypeOf<Awaited<typeof meanRun>>().toEqualTypeOf<MeanRow[]>();
 expectTypeOf<Awaited<typeof meanRun>>().not.toBeAny();
 expectTypeOf<StreamRow<typeof meanStream>>().toEqualTypeOf<MeanRow>();
 expectTypeOf<StreamRow<typeof meanStream>>().not.toBeAny();
-const latestMetrics = metrics.final().groupBy(r => r.entityId).aggregate(g => {
-  const selected = argMax(g.stock, g.version);
-  expectTypeOf(selected.name).toEqualTypeOf<'stock'>();
-  expectTypeOf(selected.mode).toEqualTypeOf<'agg'>();
-  expectTypeOf(selected.ir.type.name).toEqualTypeOf<'Float32'>();
-  const constant = argMaxIf(val('fixed', col.String), g.version, g.enabled);
-  expectTypeOf(constant.name).toEqualTypeOf<'argMax'>();
-  expectTypeOf(constant.ir.type.name).toEqualTypeOf<'String'>();
-  return { stock: selected, lead: argMaxIf(g.lead, g.version, g.enabled), label: argMax(g.label, g.version), enabled: argMax(g.enabled, g.version), wide: argMax(g.wide, g.version), arithmetic: selected.divide(max(g.version)) };
-});
-const nestedLatest = unionAll(latestMetrics, latestMetrics).cte().aggregate(g => ({ selected: argMaxIf(g.wide, g.stock, g.enabled), label: argMax(g.label, g.wide) }));
+
+const latestMetrics = metrics
+  .final()
+  .groupBy(r => r.entityId)
+  .aggregate(g => {
+    const selected = argMax(g.stock, g.version);
+    expectTypeOf(selected.name).toEqualTypeOf<'stock'>();
+    expectTypeOf(selected.mode).toEqualTypeOf<'agg'>();
+    expectTypeOf(selected.ir.type.name).toEqualTypeOf<'Float32'>();
+    const constant = argMaxIf(val('fixed', col.String), g.version, g.enabled);
+    expectTypeOf(constant.name).toEqualTypeOf<'argMax'>();
+    expectTypeOf(constant.ir.type.name).toEqualTypeOf<'String'>();
+
+    return {
+      stock: selected,
+      lead: argMaxIf(g.lead, g.version, g.enabled),
+      label: argMax(g.label, g.version),
+      enabled: argMax(g.enabled, g.version),
+      wide: argMax(g.wide, g.version),
+      arithmetic: selected.divide(max(g.version)),
+    };
+  });
+
+const nestedLatest = unionAll(latestMetrics, latestMetrics)
+  .cte()
+  .aggregate(g => ({
+    selected: argMaxIf(g.wide, g.stock, g.enabled),
+    label: argMax(g.label, g.wide),
+  }));
+
 expectTypeOf<Infer<typeof nestedLatest>>().toEqualTypeOf<{ selected: bigint; label: string }>();
 expectTypeOf<Infer<typeof nestedLatest>>().not.toBeAny();
 expectTypeOf(nestedLatest.row.selected.ir.type.name).toEqualTypeOf<'UInt256'>();
-const readings = from(table('readings', { animalId: col.UInt32, value: col.Float64, label: col.Nullable(col.String), date: col.Date, date32: col.Date32, at: col.DateTime(), atUtc: col.DateTime('UTC'), precise: col.DateTime64(3), preciseUtc: col.DateTime64(0, 'UTC') }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-const latestByDate = readings.groupBy(r => r.animalId).aggregate(g => ({ date: argMax(g.value, g.date), date32: argMax(g.value, g.date32), at: argMax(g.value, g.at), atUtc: argMax(g.value, g.atUtc), precise: argMax(g.value, g.precise), preciseUtc: argMax(g.value, g.preciseUtc), label: argMaxIf(g.label, g.date, g.value.gt(0)) }));
-expectTypeOf<Infer<typeof latestByDate>>().toEqualTypeOf<{ animalId: number; date: number; date32: number; at: number; atUtc: number; precise: number; preciseUtc: number; label: string | null }>();
-const nullableLatestScalar = metrics.map(() => scalar(metrics.aggregate(g => argMaxIf(g.lead, g.version, g.enabled))));
+
+const readings = from(
+  table(
+    'readings',
+    {
+      animalId: col.UInt32,
+      value: col.Float64,
+      label: col.Nullable(col.String),
+      date: col.Date,
+      date32: col.Date32,
+      at: col.DateTime(),
+      atUtc: col.DateTime('UTC'),
+      precise: col.DateTime64(3),
+      preciseUtc: col.DateTime64(0, 'UTC'),
+    },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+);
+
+const latestByDate = readings
+  .groupBy(r => r.animalId)
+  .aggregate(g => ({
+    date: argMax(g.value, g.date),
+    date32: argMax(g.value, g.date32),
+    at: argMax(g.value, g.at),
+    atUtc: argMax(g.value, g.atUtc),
+    precise: argMax(g.value, g.precise),
+    preciseUtc: argMax(g.value, g.preciseUtc),
+    label: argMaxIf(g.label, g.date, g.value.gt(0)),
+  }));
+
+expectTypeOf<Infer<typeof latestByDate>>().toEqualTypeOf<{
+  animalId: number;
+  date: number;
+  date32: number;
+  at: number;
+  atUtc: number;
+  precise: number;
+  preciseUtc: number;
+  label: string | null;
+}>();
+
+const nullableLatestScalar = metrics.map(() =>
+  scalar(metrics.aggregate(g => argMaxIf(g.lead, g.version, g.enabled))),
+);
+
 expectTypeOf<Infer<typeof nullableLatestScalar>>().toEqualTypeOf<{ lead: number | null }>();
 expectTypeOf<Infer<typeof nullableLatestScalar>>().not.toBeAny();
-type LatestMetricRow = { entityId: string; stock: number; lead: number | null; label: string; enabled: boolean; wide: bigint; arithmetic: number };
+
+type LatestMetricRow = {
+  entityId: string;
+  stock: number;
+  lead: number | null;
+  label: string;
+  enabled: boolean;
+  wide: bigint;
+  arithmetic: number;
+};
+
 expectTypeOf<Infer<typeof latestMetrics>>().toEqualTypeOf<LatestMetricRow>();
 expectTypeOf<Infer<typeof latestMetrics>>().not.toBeAny();
 expectTypeOf(latestMetrics.row.lead.ir.type.inner.name).toEqualTypeOf<'Float64'>();
 expectTypeOf(latestMetrics.row.wide.ir.type.name).toEqualTypeOf<'UInt256'>();
-const latestUnion = unionAll(latestMetrics, latestMetrics).where(r => r.stock.gt(0)).orderBy(r => r.entityId).limit(2);
+
+const latestUnion = unionAll(latestMetrics, latestMetrics)
+  .where(r => r.stock.gt(0))
+  .orderBy(r => r.entityId)
+  .limit(2);
+
 expectTypeOf<Infer<typeof latestUnion>>().toEqualTypeOf<LatestMetricRow>();
 expectTypeOf<Infer<typeof latestUnion>>().not.toBeAny();
 const latestScalar = metrics.map(() => scalar(metrics.aggregate(g => argMax(g.stock, g.version))));
 expectTypeOf<Infer<typeof latestScalar>>().toEqualTypeOf<{ stock: number | null }>();
 expectTypeOf<Infer<typeof latestScalar>>().not.toBeAny();
 const metricClient = createClient();
-const metricRun = metricClient.run(latestUnion), metricStream = metricClient.stream(latestUnion);
+
+const metricRun = metricClient.run(latestUnion),
+  metricStream = metricClient.stream(latestUnion);
+
 expectTypeOf<Awaited<typeof metricRun>>().toEqualTypeOf<LatestMetricRow[]>();
 expectTypeOf<Awaited<typeof metricRun>>().not.toBeAny();
 expectTypeOf<StreamRow<typeof metricStream>>().toEqualTypeOf<LatestMetricRow>();
 expectTypeOf<StreamRow<typeof metricStream>>().not.toBeAny();
-const castSource = from(table('casts', { n: col.UInt32, f: col.Float64, nullable: col.Nullable(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+
+const castSource = from(
+  table(
+    'casts',
+    { n: col.UInt32, f: col.Float64, nullable: col.Nullable(col.UInt32) },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+);
+
 const castValue = cast(castSource.row.n, col.Float64);
 expectTypeOf(castValue.name).toEqualTypeOf<'n'>();
 expectTypeOf(castValue.mode).toEqualTypeOf<'row'>();
 expectTypeOf(castValue.ir.type.name).toEqualTypeOf<'Float64'>();
-const castUnion = unionAll(castSource.map(r => ({ value: cast(r.n, col.Float64) })), castSource.map(r => ({ value: r.f })));
+
+const castUnion = unionAll(
+  castSource.map(r => ({ value: cast(r.n, col.Float64) })),
+  castSource.map(r => ({ value: r.f })),
+);
+
 expectTypeOf<Infer<typeof castUnion>>().toEqualTypeOf<{ value: number }>();
 expectTypeOf<Infer<typeof castUnion>>().not.toBeAny();
 expectTypeOf(castUnion.row.value.ir.type.name).toEqualTypeOf<'Float64'>();
@@ -221,6 +504,7 @@ const castNullable = castSource.map(r => cast(r.nullable, col.Nullable(col.Strin
 expectTypeOf<Infer<typeof castNullable>>().toEqualTypeOf<{ nullable: string | null }>();
 expectTypeOf<Infer<typeof castNullable>>().not.toBeAny();
 expectTypeOf(castNullable.row.nullable.ir.type.inner.name).toEqualTypeOf<'String'>();
+
 const castAggregate = castSource.aggregate(g => {
   const grouped = cast(g.n, col.Float64);
   expectTypeOf(grouped.mode).toEqualTypeOf<'grouped'>();
@@ -230,68 +514,224 @@ const castAggregate = castSource.aggregate(g => {
   expectTypeOf(result.ir.type.name).toEqualTypeOf<'UInt64'>();
   return result;
 });
+
 expectTypeOf<Infer<typeof castAggregate>>().toEqualTypeOf<{ n: bigint }>();
 expectTypeOf<Infer<typeof castAggregate>>().not.toBeAny();
-const adversarialCast = crossJoin({ left: castUnion, right: castNullable }).cte()
-  .map(r => ({ value: cast(r.left.value, col.UInt256), nullable: cast(r.right.nullable, col.Nullable(col.Bool)), member: cast(r.left.value.in(castUnion), col.String) }));
-expectTypeOf<Infer<typeof adversarialCast>>().toEqualTypeOf<{ value: bigint; nullable: boolean | null; member: string }>();
+
+const adversarialCast = crossJoin({ left: castUnion, right: castNullable })
+  .cte()
+  .map(r => ({
+    value: cast(r.left.value, col.UInt256),
+    nullable: cast(r.right.nullable, col.Nullable(col.Bool)),
+    member: cast(r.left.value.in(castUnion), col.String),
+  }));
+
+expectTypeOf<Infer<typeof adversarialCast>>().toEqualTypeOf<{
+  value: bigint;
+  nullable: boolean | null;
+  member: string;
+}>();
+
 expectTypeOf<Infer<typeof adversarialCast>>().not.toBeAny();
 expectTypeOf(adversarialCast.row.value.ir.type.name).toEqualTypeOf<'UInt256'>();
 expectTypeOf(adversarialCast.row.nullable.ir.type.inner.name).toEqualTypeOf<'Bool'>();
-const castScalar = castSource.map(() => ({ total: cast(scalar(castAggregate), col.Nullable(col.String)) }));
+
+const castScalar = castSource.map(() => ({
+  total: cast(scalar(castAggregate), col.Nullable(col.String)),
+}));
+
 expectTypeOf<Infer<typeof castScalar>>().toEqualTypeOf<{ total: string | null }>();
 expectTypeOf<Infer<typeof castScalar>>().not.toBeAny();
 const castClient = createClient();
+
 const castRun = castClient.run(castUnion);
+
 const castStream = castClient.stream(castAggregate);
 expectTypeOf<Awaited<typeof castRun>>().toEqualTypeOf<{ value: number }[]>();
 expectTypeOf<Awaited<typeof castRun>>().not.toBeAny();
 expectTypeOf<StreamRow<typeof castStream>>().toEqualTypeOf<{ n: bigint }>();
 expectTypeOf<StreamRow<typeof castStream>>().not.toBeAny();
-const materialized = from(t).orderBy(r => r.id).cte();
-expectTypeOf<'materialize' extends keyof typeof materialized ? true : false>().toEqualTypeOf<false>();
+
+const materialized = from(t)
+  .orderBy(r => r.id)
+  .cte();
+
+expectTypeOf<
+  'materialize' extends keyof typeof materialized ? true : false
+>().toEqualTypeOf<false>();
+
 expectTypeOf<Infer<typeof materialized>>().toEqualTypeOf<Infer<typeof t>>();
 expectTypeOf<Infer<typeof materialized>>().not.toBeAny();
 expectTypeOf(materialized.row.tuple).toEqualTypeOf(from(t).row.tuple);
 expectTypeOf<IsLive<typeof materialized>>().toEqualTypeOf<false>();
 expectTypeOf<'thenBy' extends keyof typeof materialized ? true : false>().toEqualTypeOf<false>();
 expectTypeOf<'final' extends keyof typeof materialized ? true : false>().toEqualTypeOf<false>();
-const materializedNested = crossJoin({ a: from(t), b: from(t) }).leftArrayJoin(() => val([1n, null], col.Array(col.Nullable(col.Int64))), 'item').cte();
-expectTypeOf<Infer<typeof materializedNested>>().toEqualTypeOf<{ a: Infer<typeof t>; b: Infer<typeof t>; item: bigint | null }>();
+
+const materializedNested = crossJoin({ a: from(t), b: from(t) })
+  .leftArrayJoin(() => val([1n, null], col.Array(col.Nullable(col.Int64))), 'item')
+  .cte();
+
+expectTypeOf<Infer<typeof materializedNested>>().toEqualTypeOf<{
+  a: Infer<typeof t>;
+  b: Infer<typeof t>;
+  item: bigint | null;
+}>();
+
 expectTypeOf<Infer<typeof materializedNested>>().not.toBeAny();
 expectTypeOf(materializedNested.row.item.ir.type.kind).toEqualTypeOf<'Nullable'>();
-const materializedGrouped = materializedNested.groupBy(r => r.a.category).aggregate(g => ({ total: sum(g.b.id) }));
-expectTypeOf<Infer<typeof materializedGrouped>>().toEqualTypeOf<{ category: string | null; total: bigint }>();
+
+const materializedGrouped = materializedNested
+  .groupBy(r => r.a.category)
+  .aggregate(g => ({ total: sum(g.b.id) }));
+
+expectTypeOf<Infer<typeof materializedGrouped>>().toEqualTypeOf<{
+  category: string | null;
+  total: bigint;
+}>();
+
 expectTypeOf<Infer<typeof materializedGrouped>>().not.toBeAny();
 const streamClient = createClient();
+
 const flatStream = streamClient.stream(materialized);
+
 const nestedStream = streamClient.stream(materializedNested);
+
 type StreamRow<S> = S extends AsyncIterable<infer R> ? R : never;
+
 expectTypeOf<StreamRow<typeof flatStream>>().toEqualTypeOf<Infer<typeof t>>();
 expectTypeOf<StreamRow<typeof flatStream>>().not.toBeAny();
-expectTypeOf<StreamRow<typeof nestedStream>>().toEqualTypeOf<{ a: Infer<typeof t>; b: Infer<typeof t>; item: bigint | null }>();
+
+expectTypeOf<StreamRow<typeof nestedStream>>().toEqualTypeOf<{
+  a: Infer<typeof t>;
+  b: Infer<typeof t>;
+  item: bigint | null;
+}>();
+
 expectTypeOf<StreamRow<typeof nestedStream>>().not.toBeAny();
-const structuralStream = streamClient.stream({ ir: materializedNested.ir, _rowType: materializedNested._rowType, caps: materializedNested.caps });
+
+const structuralStream = streamClient.stream({
+  ir: materializedNested.ir,
+  _rowType: materializedNested._rowType,
+  caps: materializedNested.caps,
+});
+
 expectTypeOf<StreamRow<typeof structuralStream>>().toEqualTypeOf<StreamRow<typeof nestedStream>>();
 expectTypeOf<StreamRow<typeof structuralStream>>().not.toBeAny();
 const aggregateStream = streamClient.stream(materializedGrouped);
-expectTypeOf<StreamRow<typeof aggregateStream>>().toEqualTypeOf<{ category: string | null; total: bigint }>();
+
+expectTypeOf<StreamRow<typeof aggregateStream>>().toEqualTypeOf<{
+  category: string | null;
+  total: bigint;
+}>();
+
 expectTypeOf<StreamRow<typeof aggregateStream>>().not.toBeAny();
 const fencedUnion = unionAll(materializedNested, materializedNested).cte().cte();
-const fencedProjection = fencedUnion.map(r => ({ category: r.a.category, item: r.item, tuple: r.b.tuple }));
-expectTypeOf<Infer<typeof fencedProjection>>().toEqualTypeOf<{ category: string | null; item: bigint | null; tuple: { name: string } }>();
+
+const fencedProjection = fencedUnion.map(r => ({
+  category: r.a.category,
+  item: r.item,
+  tuple: r.b.tuple,
+}));
+
+expectTypeOf<Infer<typeof fencedProjection>>().toEqualTypeOf<{
+  category: string | null;
+  item: bigint | null;
+  tuple: { name: string };
+}>();
+
 expectTypeOf<Infer<typeof fencedProjection>>().not.toBeAny();
 expectTypeOf(fencedUnion.row.item.ir.type.inner.name).toEqualTypeOf<'Int64'>();
-const fencedLive = from(table('live_fence', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [], source: { kind: 'test' } })).cte();
+
+const fencedLive = from(
+  table(
+    'live_fence',
+    { id: col.UInt64 },
+    { engine: 'Memory', sortingKey: [], partitionKey: [], source: { kind: 'test' } },
+  ),
+).cte();
+
 expectTypeOf<IsLive<typeof fencedLive>>().toEqualTypeOf<true>();
-const lowCardinalitySource = from(table('lc_members', { kind: col.LowCardinality(col.String), maybe: col.LowCardinality(col.Nullable(col.String)), plain: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-const lowCardinalityMembers = lowCardinalitySource.map(r => ({ list: r.kind.in(['dog']), missing: r.kind.notIn([]), nullable: r.maybe.in(['dog']), set: r.kind.in(lowCardinalitySource.map(s => s.plain)), reverse: r.plain.in(lowCardinalitySource.map(s => s.kind)) }));
-expectTypeOf<Infer<typeof lowCardinalityMembers>>().toEqualTypeOf<{ list: boolean; missing: boolean; nullable: boolean | null; set: boolean; reverse: boolean }>();
-const stringMemberSource = from(table('string_members', { text: col.String, fixed: col.FixedString(3), en: col.Enum8({ a: 1, b: 2 }), en16: col.Enum16({ a: 1, b: 2, c: 3 }), lcFixed: col.LowCardinality(col.FixedString(3)), maybeEn: col.Nullable(col.Enum8({ a: 1, b: 2 })), maybeFixed: col.LowCardinality(col.Nullable(col.FixedString(3))) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-const stringMembers = stringMemberSource.map(r => ({ fixed: r.fixed.in(['abc']), en: r.en.notIn(['a']), lcFixed: r.lcFixed.in(['abc']), maybeEn: r.maybeEn.in(['b']), maybeFixed: r.maybeFixed.in(['abc']), fixedText: r.fixed.in(stringMemberSource.map(s => s.text)), textFixed: r.text.in(stringMemberSource.map(s => s.fixed)), enEn: r.en16.in(stringMemberSource.map(s => s.en)) }));
-expectTypeOf<Infer<typeof stringMembers>>().toEqualTypeOf<{ fixed: boolean; en: boolean; lcFixed: boolean; maybeEn: boolean | null; maybeFixed: boolean | null; fixedText: boolean; textFixed: boolean; enEn: boolean }>();
-const membershipQuery = from(t).map(r => ({ member: r.id.in(from(t).map(r => r.id).distinct()), missing: r.category.notIn(['EOL', 'Obsolete'] as const) }));
-expectTypeOf<Infer<typeof membershipQuery>>().toEqualTypeOf<{ member: boolean; missing: boolean | null }>();
+
+const lowCardinalitySource = from(
+  table(
+    'lc_members',
+    {
+      kind: col.LowCardinality(col.String),
+      maybe: col.LowCardinality(col.Nullable(col.String)),
+      plain: col.String,
+    },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+);
+
+const lowCardinalityMembers = lowCardinalitySource.map(r => ({
+  list: r.kind.in(['dog']),
+  missing: r.kind.notIn([]),
+  nullable: r.maybe.in(['dog']),
+  set: r.kind.in(lowCardinalitySource.map(s => s.plain)),
+  reverse: r.plain.in(lowCardinalitySource.map(s => s.kind)),
+}));
+
+expectTypeOf<Infer<typeof lowCardinalityMembers>>().toEqualTypeOf<{
+  list: boolean;
+  missing: boolean;
+  nullable: boolean | null;
+  set: boolean;
+  reverse: boolean;
+}>();
+
+const stringMemberSource = from(
+  table(
+    'string_members',
+    {
+      text: col.String,
+      fixed: col.FixedString(3),
+      en: col.Enum8({ a: 1, b: 2 }),
+      en16: col.Enum16({ a: 1, b: 2, c: 3 }),
+      lcFixed: col.LowCardinality(col.FixedString(3)),
+      maybeEn: col.Nullable(col.Enum8({ a: 1, b: 2 })),
+      maybeFixed: col.LowCardinality(col.Nullable(col.FixedString(3))),
+    },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+);
+
+const stringMembers = stringMemberSource.map(r => ({
+  fixed: r.fixed.in(['abc']),
+  en: r.en.notIn(['a']),
+  lcFixed: r.lcFixed.in(['abc']),
+  maybeEn: r.maybeEn.in(['b']),
+  maybeFixed: r.maybeFixed.in(['abc']),
+  fixedText: r.fixed.in(stringMemberSource.map(s => s.text)),
+  textFixed: r.text.in(stringMemberSource.map(s => s.fixed)),
+  enEn: r.en16.in(stringMemberSource.map(s => s.en)),
+}));
+
+expectTypeOf<Infer<typeof stringMembers>>().toEqualTypeOf<{
+  fixed: boolean;
+  en: boolean;
+  lcFixed: boolean;
+  maybeEn: boolean | null;
+  maybeFixed: boolean | null;
+  fixedText: boolean;
+  textFixed: boolean;
+  enEn: boolean;
+}>();
+
+const membershipQuery = from(t).map(r => ({
+  member: r.id.in(
+    from(t)
+      .map(r => r.id)
+      .distinct(),
+  ),
+  missing: r.category.notIn(['EOL', 'Obsolete'] as const),
+}));
+
+expectTypeOf<Infer<typeof membershipQuery>>().toEqualTypeOf<{
+  member: boolean;
+  missing: boolean | null;
+}>();
+
 expectTypeOf<Infer<typeof membershipQuery>>().not.toBeAny();
 const membershipSingle = from(t).map(r => r.id.in([]));
 expectTypeOf<Infer<typeof membershipSingle>>().toEqualTypeOf<{ id: boolean }>();
@@ -299,14 +739,29 @@ expectTypeOf<Infer<typeof membershipSingle>>().not.toBeAny();
 const membershipGrouped = from(t).aggregate(g => countIf(g.category.in(['EOL'])));
 expectTypeOf<Infer<typeof membershipGrouped>>().toEqualTypeOf<{ category: bigint }>();
 expectTypeOf<Infer<typeof membershipGrouped>>().not.toBeAny();
-const membershipAggregateSet = from(t).aggregate(g => ({ matched: sum(g.id).in(from(t).map(r => r.id)), count: countIf(g.category.notIn(from(t).map(r => r.category))) }));
-expectTypeOf<Infer<typeof membershipAggregateSet>>().toEqualTypeOf<{ matched: boolean; count: bigint }>();
+
+const membershipAggregateSet = from(t).aggregate(g => ({
+  matched: sum(g.id).in(from(t).map(r => r.id)),
+  count: countIf(g.category.notIn(from(t).map(r => r.category))),
+}));
+
+expectTypeOf<Infer<typeof membershipAggregateSet>>().toEqualTypeOf<{
+  matched: boolean;
+  count: bigint;
+}>();
+
 expectTypeOf<Infer<typeof membershipAggregateSet>>().not.toBeAny();
-const membershipScalarSet = from(t).map(() => scalar(from(t).aggregate(g => max(g.category))).notIn(from(t).map(r => r.category)));
+
+const membershipScalarSet = from(t).map(() =>
+  scalar(from(t).aggregate(g => max(g.category))).notIn(from(t).map(r => r.category)),
+);
+
 expectTypeOf<Infer<typeof membershipScalarSet>>().toEqualTypeOf<{ category: boolean | null }>();
 expectTypeOf<Infer<typeof membershipScalarSet>>().not.toBeAny();
 const scalarTotal = from(t).aggregate(g => sum(g.id));
+
 const scalarValue = scalar(scalarTotal);
+
 const scalarProjection = from(t).map(() => scalarValue);
 expectTypeOf<Infer<typeof scalarProjection>>().toEqualTypeOf<{ id: bigint | null }>();
 expectTypeOf<Infer<typeof scalarProjection>>().not.toBeAny();
@@ -316,9 +771,19 @@ const scalarCountProjection = from(t).map(() => scalar(from(t).aggregate(() => c
 expectTypeOf<Infer<typeof scalarCountProjection>>().toEqualTypeOf<{ count: bigint | null }>();
 expectTypeOf<Infer<typeof scalarCountProjection>>().not.toBeAny();
 const scalarNullText = scalar(from(t).aggregate(g => max(g.category)));
-const scalarComposition = unionAll(from(t).map(() => ({ text: scalarNullText })), from(t).map(() => ({ text: scalarNullText })))
-  .groupBy(r => r.text).aggregate(() => count());
-expectTypeOf<Infer<typeof scalarComposition>>().toEqualTypeOf<{ text: string | null; count: bigint }>();
+
+const scalarComposition = unionAll(
+  from(t).map(() => ({ text: scalarNullText })),
+  from(t).map(() => ({ text: scalarNullText })),
+)
+  .groupBy(r => r.text)
+  .aggregate(() => count());
+
+expectTypeOf<Infer<typeof scalarComposition>>().toEqualTypeOf<{
+  text: string | null;
+  count: bigint;
+}>();
+
 expectTypeOf<Infer<typeof scalarComposition>>().not.toBeAny();
 expectTypeOf(scalarNullText.ir.type.kind).toEqualTypeOf<'Nullable'>();
 expectTypeOf(scalarNullText.ir.type.inner.name).toEqualTypeOf<'String'>();
@@ -329,175 +794,462 @@ expectTypeOf(united.row.tuple).toEqualTypeOf(from(t).row.tuple);
 expectTypeOf<IsLive<typeof united>>().toEqualTypeOf<false>();
 expectTypeOf<'thenBy' extends keyof typeof united ? true : false>().toEqualTypeOf<false>();
 expectTypeOf<'final' extends keyof typeof united ? true : false>().toEqualTypeOf<false>();
-const unionNested = unionAll(crossJoin({ a: from(t), b: from(t) }), crossJoin({ b: from(t), a: from(t) }));
-expectTypeOf<Infer<typeof unionNested>>().toEqualTypeOf<{ a: Infer<typeof t>; b: Infer<typeof t> }>();
+
+const unionNested = unionAll(
+  crossJoin({ a: from(t), b: from(t) }),
+  crossJoin({ b: from(t), a: from(t) }),
+);
+
+expectTypeOf<Infer<typeof unionNested>>().toEqualTypeOf<{
+  a: Infer<typeof t>;
+  b: Infer<typeof t>;
+}>();
+
 expectTypeOf<Infer<typeof unionNested>>().not.toBeAny();
-const unionGrouped = unionNested.groupBy(r => r.a.category).aggregate(g => ({ total: sum(g.b.id) }));
-expectTypeOf<Infer<typeof unionGrouped>>().toEqualTypeOf<{ category: string | null; total: bigint }>();
+
+const unionGrouped = unionNested
+  .groupBy(r => r.a.category)
+  .aggregate(g => ({ total: sum(g.b.id) }));
+
+expectTypeOf<Infer<typeof unionGrouped>>().toEqualTypeOf<{
+  category: string | null;
+  total: bigint;
+}>();
+
 expectTypeOf<Infer<typeof unionGrouped>>().not.toBeAny();
-const unionReordered = unionAll(from(t).map(r => ({ id: r.id, category: r.category })), from(t).map(r => ({ category: r.category, id: r.id })));
-expectTypeOf<Infer<typeof unionReordered>>().toEqualTypeOf<{ id: bigint; category: string | null }>();
+
+const unionReordered = unionAll(
+  from(t).map(r => ({ id: r.id, category: r.category })),
+  from(t).map(r => ({ category: r.category, id: r.id })),
+);
+
+expectTypeOf<Infer<typeof unionReordered>>().toEqualTypeOf<{
+  id: bigint;
+  category: string | null;
+}>();
+
 expectTypeOf<Infer<typeof unionReordered>>().not.toBeAny();
-const unionAfterExpansion = unionAll(unionNested, unionNested).leftArrayJoin(() => val([1n, null], col.Array(col.Nullable(col.Int64))), 'item');
-expectTypeOf<Infer<typeof unionAfterExpansion>>().toEqualTypeOf<{ a: Infer<typeof t>; b: Infer<typeof t>; item: bigint | null }>();
+
+const unionAfterExpansion = unionAll(unionNested, unionNested).leftArrayJoin(
+  () => val([1n, null], col.Array(col.Nullable(col.Int64))),
+  'item',
+);
+
+expectTypeOf<Infer<typeof unionAfterExpansion>>().toEqualTypeOf<{
+  a: Infer<typeof t>;
+  b: Infer<typeof t>;
+  item: bigint | null;
+}>();
+
 expectTypeOf<Infer<typeof unionAfterExpansion>>().not.toBeAny();
 expectTypeOf(unionAfterExpansion.row.item.ir.type.kind).toEqualTypeOf<'Nullable'>();
 expectTypeOf(unionAfterExpansion.row.item.ir.type.inner.name).toEqualTypeOf<'Int64'>();
-const unionExpandedAggregate = unionAfterExpansion.groupBy(r => r.item).aggregate(g => ({ total: sum(g.a.id) }));
-expectTypeOf<Infer<typeof unionExpandedAggregate>>().toEqualTypeOf<{ item: bigint | null; total: bigint }>();
+
+const unionExpandedAggregate = unionAfterExpansion
+  .groupBy(r => r.item)
+  .aggregate(g => ({ total: sum(g.a.id) }));
+
+expectTypeOf<Infer<typeof unionExpandedAggregate>>().toEqualTypeOf<{
+  item: bigint | null;
+  total: bigint;
+}>();
+
 expectTypeOf<Infer<typeof unionExpandedAggregate>>().not.toBeAny();
 const cartesian = crossJoin({ a: from(t), b: from(t) });
 expectTypeOf<Infer<typeof cartesian>>().toEqualTypeOf<{ a: Infer<typeof t>; b: Infer<typeof t> }>();
 expectTypeOf<Infer<typeof cartesian>>().not.toBeAny();
 expectTypeOf(cartesian.row.a.tuple).toEqualTypeOf(from(t).row.tuple);
 expectTypeOf<keyof typeof cartesian>().not.toMatchTypeOf<'on'>();
-const crossArraySide = from(table('cross_array_types', { id: col.UInt32, xs: col.Array(col.Nullable(col.Int32)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
-const crossExpanded = crossJoin({ ['__proto__']: crossArraySide, '__typedhouse_leaf_0': crossArraySide }).leftArrayJoin(r => r.__proto__.xs, 'x').leftArrayJoin(r => r.__typedhouse_leaf_0.xs, 'y');
-expectTypeOf<Infer<typeof crossExpanded>>().toEqualTypeOf<{ __proto__: { id: number; xs: (number | null)[] }; __typedhouse_leaf_0: { id: number; xs: (number | null)[] }; x: number | null; y: number | null }>();
+
+const crossArraySide = from(
+  table(
+    'cross_array_types',
+    { id: col.UInt32, xs: col.Array(col.Nullable(col.Int32)) },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+);
+
+const crossExpanded = crossJoin({
+  ['__proto__']: crossArraySide,
+  '__typedhouse_leaf_0': crossArraySide,
+})
+  .leftArrayJoin(r => r.__proto__.xs, 'x')
+  .leftArrayJoin(r => r.__typedhouse_leaf_0.xs, 'y');
+
+expectTypeOf<Infer<typeof crossExpanded>>().toEqualTypeOf<{
+  __proto__: { id: number; xs: (number | null)[] };
+  __typedhouse_leaf_0: { id: number; xs: (number | null)[] };
+  x: number | null;
+  y: number | null;
+}>();
+
 expectTypeOf<Infer<typeof crossExpanded>>().not.toBeAny();
 expectTypeOf(crossExpanded.row.x.ir.type).toEqualTypeOf(crossArraySide.row.xs.ir.type.inner);
-const crossExpandedCount = crossExpanded.groupBy(r => r.x).aggregate(g => ({ total: sum(g.__proto__.id), count: count() }));
-expectTypeOf<Infer<typeof crossExpandedCount>>().toEqualTypeOf<{ x: number | null; total: bigint; count: bigint }>();
+
+const crossExpandedCount = crossExpanded
+  .groupBy(r => r.x)
+  .aggregate(g => ({ total: sum(g.__proto__.id), count: count() }));
+
+expectTypeOf<Infer<typeof crossExpandedCount>>().toEqualTypeOf<{
+  x: number | null;
+  total: bigint;
+  count: bigint;
+}>();
+
 expectTypeOf<Infer<typeof crossExpandedCount>>().not.toBeAny();
-const crossSpread = <R>(input: Query<R>) => crossJoin({ a: input, b: input }).map(r => ({ ...r.a }));
+
+const crossSpread = <R>(input: Query<R>) =>
+  crossJoin({ a: input, b: input }).map(r => ({ ...r.a }));
+
 const concreteCross = crossSpread(from(t));
 expectTypeOf<Infer<typeof concreteCross>>().toEqualTypeOf<Infer<typeof t>>();
 expectTypeOf<Infer<typeof concreteCross>>().not.toBeAny();
-const forTenant = (tenantId: string) => <R extends { tenantId: string }>(r: Row<R>) => r.tenantId.eq(tenantId);
-const q = from(t).where(forTenant('acme')).map(r => ({ id: r.id, updatedAt: r.updatedAt, category: r.category })).limit(10);
-expectTypeOf<Infer<typeof q>>().toEqualTypeOf<{ id: bigint; updatedAt: Date; category: string | null }>();
+
+const forTenant =
+  (tenantId: string) =>
+  <R extends { tenantId: string }>(r: Row<R>) =>
+    r.tenantId.eq(tenantId);
+
+const q = from(t)
+  .where(forTenant('acme'))
+  .map(r => ({ id: r.id, updatedAt: r.updatedAt, category: r.category }))
+  .limit(10);
+
+expectTypeOf<Infer<typeof q>>().toEqualTypeOf<{
+  id: bigint;
+  updatedAt: Date;
+  category: string | null;
+}>();
+
 expectTypeOf<Infer<typeof q>>().not.toBeAny();
 expectTypeOf<IsLive<typeof q>>().toEqualTypeOf<false>();
-const tuple = from(t).where(forTenant('acme')).map(r => ({ renamed: r.tuple })).limit(2).map(r => ({ name: r.renamed.element('name') }));
+
+const tuple = from(t)
+  .where(forTenant('acme'))
+  .map(r => ({ renamed: r.tuple }))
+  .limit(2)
+  .map(r => ({ name: r.renamed.element('name') }));
+
 expectTypeOf<Infer<typeof tuple>>().toEqualTypeOf<{ name: string }>();
 expectTypeOf<Infer<typeof tuple>>().not.toBeAny();
-const wrapped = table('wrapped', { label: col.LowCardinality(col.String), optional: col.LowCardinality(col.Nullable(col.String)) }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
-const composed = from(wrapped).where(r => r.label.eq('safe')).map(r => ({ renamed: r.optional }))
-  .where(r => r.renamed.eq('value')).limit(1, 0).map(r => ({ result: r.renamed }));
+
+const wrapped = table(
+  'wrapped',
+  { label: col.LowCardinality(col.String), optional: col.LowCardinality(col.Nullable(col.String)) },
+  { engine: 'Memory', sortingKey: [], partitionKey: [] },
+);
+
+const composed = from(wrapped)
+  .where(r => r.label.eq('safe'))
+  .map(r => ({ renamed: r.optional }))
+  .where(r => r.renamed.eq('value'))
+  .limit(1, 0)
+  .map(r => ({ result: r.renamed }));
+
 expectTypeOf<Infer<typeof composed>>().toEqualTypeOf<{ result: string | null }>();
 expectTypeOf<Infer<typeof composed>>().not.toBeAny();
 const retainedWrapper: typeof wrapped.columns.optional = composed.row.result.ir.type;
 void retainedWrapper;
-const structuralTable = table('structural', { names: col.Array(col.String), specs: col.Array(col.Tuple({ mpn: col.Nullable(col.String), description: col.Nullable(col.String) })), n: col.UInt32 }, { engine: 'Memory', sortingKey: [], partitionKey: [] });
+
+const structuralTable = table(
+  'structural',
+  {
+    names: col.Array(col.String),
+    specs: col.Array(
+      col.Tuple({ mpn: col.Nullable(col.String), description: col.Nullable(col.String) }),
+    ),
+    n: col.UInt32,
+  },
+  { engine: 'Memory', sortingKey: [], partitionKey: [] },
+);
+
 const hinted = from(structuralTable).final().sample(0.1).final();
 expectTypeOf<Infer<typeof hinted>>().toEqualTypeOf<Infer<typeof structuralTable>>();
 expectTypeOf<Infer<typeof hinted>>().not.toBeAny();
-const expanded = hinted.where(r => r.n.gt(0)).arrayJoin(r => r.specs, 'spec').orderBy(r => r.n).limit(2)
+
+const expanded = hinted
+  .where(r => r.n.gt(0))
+  .arrayJoin(r => r.specs, 'spec')
+  .orderBy(r => r.n)
+  .limit(2)
   .map(r => ({ mpn: r.spec.element('mpn'), names: r.names, spec: r.spec }));
-expectTypeOf<Infer<typeof expanded>>().toEqualTypeOf<{ mpn: string | null; names: string[]; spec: { mpn: string | null; description: string | null } }>();
+
+expectTypeOf<Infer<typeof expanded>>().toEqualTypeOf<{
+  mpn: string | null;
+  names: string[];
+  spec: { mpn: string | null; description: string | null };
+}>();
+
 expectTypeOf<Infer<typeof expanded>>().not.toBeAny();
 const retainedChild: typeof structuralTable.columns.specs.inner = expanded.row.spec.ir.type;
 void retainedChild;
-const leftExpanded = from(structuralTable).leftArrayJoin(r => r.names, 'name').map(r => r.name);
+
+const leftExpanded = from(structuralTable)
+  .leftArrayJoin(r => r.names, 'name')
+  .map(r => r.name);
+
 expectTypeOf<Infer<typeof leftExpanded>>().toEqualTypeOf<{ name: string }>();
 expectTypeOf<Infer<typeof leftExpanded>>().not.toBeAny();
 expectTypeOf<'final' extends keyof typeof expanded ? true : false>().toEqualTypeOf<false>();
 expectTypeOf<'sample' extends keyof typeof expanded ? true : false>().toEqualTypeOf<false>();
 // A runtime string alias must not change the types of the retained source columns.
 const dynamicAlias: string = ['expandedName'].join('');
+
 const dynamicallyExpanded = from(structuralTable).arrayJoin(r => r.names, dynamicAlias);
 expectTypeOf<Infer<typeof dynamicallyExpanded>['n']>().toEqualTypeOf<number>();
 expectTypeOf<Infer<typeof dynamicallyExpanded>['n']>().not.toBeAny();
 const dynamicallyLeftExpanded = from(structuralTable).leftArrayJoin(r => r.names, dynamicAlias);
 expectTypeOf<Infer<typeof dynamicallyLeftExpanded>['n']>().toEqualTypeOf<number>();
 expectTypeOf<Infer<typeof dynamicallyLeftExpanded>['n']>().not.toBeAny();
-const dynamicProjection = dynamicallyExpanded.where(r => r.n.gt(0)).map(r => ({ n: r.n, specs: r.specs }));
-expectTypeOf<Infer<typeof dynamicProjection>>().toEqualTypeOf<{ n: number; specs: { mpn: string | null; description: string | null }[] }>();
+
+const dynamicProjection = dynamicallyExpanded
+  .where(r => r.n.gt(0))
+  .map(r => ({ n: r.n, specs: r.specs }));
+
+expectTypeOf<Infer<typeof dynamicProjection>>().toEqualTypeOf<{
+  n: number;
+  specs: { mpn: string | null; description: string | null }[];
+}>();
+
 expectTypeOf<Infer<typeof dynamicProjection>>().not.toBeAny();
-expectTypeOf<Infer<typeof dynamicallyExpanded>['missing']>().toEqualTypeOf<Infer<typeof structuralTable>[keyof Infer<typeof structuralTable>] | string | undefined>();
-expectTypeOf<Infer<typeof dynamicallyLeftExpanded>['missing']>().toEqualTypeOf<Infer<typeof structuralTable>[keyof Infer<typeof structuralTable>] | string | undefined>();
+
+expectTypeOf<Infer<typeof dynamicallyExpanded>['missing']>().toEqualTypeOf<
+  Infer<typeof structuralTable>[keyof Infer<typeof structuralTable>] | string | undefined
+>();
+
+expectTypeOf<Infer<typeof dynamicallyLeftExpanded>['missing']>().toEqualTypeOf<
+  Infer<typeof structuralTable>[keyof Infer<typeof structuralTable>] | string | undefined
+>();
+
 expectTypeOf<typeof dynamicallyExpanded.row.n>().toEqualTypeOf<typeof hinted.row.n>();
 expectTypeOf<typeof dynamicallyLeftExpanded.row.n>().toEqualTypeOf<typeof hinted.row.n>();
 const unionAlias = dynamicAlias as 'first' | 'second';
+
 const unionExpanded = from(structuralTable).arrayJoin(r => r.specs, unionAlias);
+
 const unionLeftExpanded = from(structuralTable).leftArrayJoin(r => r.specs, unionAlias);
+
 type OptionalSpec = { mpn: string | null; description: string | null } | undefined;
+
 expectTypeOf<Infer<typeof unionExpanded>['first']>().toEqualTypeOf<OptionalSpec>();
 expectTypeOf<Infer<typeof unionLeftExpanded>['second']>().toEqualTypeOf<OptionalSpec>();
 expectTypeOf<Infer<typeof unionExpanded>['n']>().toEqualTypeOf<number>();
 expectTypeOf<Infer<typeof unionLeftExpanded>['n']>().not.toBeAny();
-expectTypeOf<undefined extends typeof unionExpanded.row.first ? true : false>().toEqualTypeOf<true>();
-expectTypeOf<undefined extends typeof dynamicallyExpanded.row['missing'] ? true : false>().toEqualTypeOf<true>();
+
+expectTypeOf<
+  undefined extends typeof unionExpanded.row.first ? true : false
+>().toEqualTypeOf<true>();
+
+expectTypeOf<
+  undefined extends (typeof dynamicallyExpanded.row)['missing'] ? true : false
+>().toEqualTypeOf<true>();
+
 const unionChild = unionExpanded.row.first;
+
 if (unionChild) {
   const childDescriptor: typeof structuralTable.columns.specs.inner = unionChild.ir.type;
   void childDescriptor;
 }
+
 // Template-literal patterns are not singleton aliases: only one matching key exists.
 const patternedAlias: `item_${string}` = `item_${dynamicAlias}`;
+
 const patternedExpanded = from(structuralTable).arrayJoin(r => r.names, patternedAlias);
+
 const patternedLeftExpanded = from(structuralTable).leftArrayJoin(r => r.names, patternedAlias);
 expectTypeOf<Infer<typeof patternedExpanded>['item_missing']>().toEqualTypeOf<string | undefined>();
-expectTypeOf<Infer<typeof patternedLeftExpanded>['item_missing']>().toEqualTypeOf<string | undefined>();
+
+expectTypeOf<Infer<typeof patternedLeftExpanded>['item_missing']>().toEqualTypeOf<
+  string | undefined
+>();
+
 expectTypeOf<Infer<typeof patternedExpanded>['item_missing']>().not.toBeAny();
-expectTypeOf<undefined extends typeof patternedExpanded.row.item_missing ? true : false>().toEqualTypeOf<true>();
-expectTypeOf<undefined extends typeof patternedLeftExpanded.row.item_missing ? true : false>().toEqualTypeOf<true>();
+
+expectTypeOf<
+  undefined extends typeof patternedExpanded.row.item_missing ? true : false
+>().toEqualTypeOf<true>();
+
+expectTypeOf<
+  undefined extends typeof patternedLeftExpanded.row.item_missing ? true : false
+>().toEqualTypeOf<true>();
+
 expectTypeOf<Infer<typeof patternedExpanded>['n']>().toEqualTypeOf<number>();
 const numericAlias = dynamicAlias as `item_${number}`;
+
 const numericExpanded = from(structuralTable).arrayJoin(r => r.specs, numericAlias);
+
 const numericLeftExpanded = from(structuralTable).leftArrayJoin(r => r.specs, numericAlias);
 expectTypeOf<Infer<typeof numericExpanded>['item_42']>().toEqualTypeOf<OptionalSpec>();
 expectTypeOf<Infer<typeof numericLeftExpanded>['item_42']>().toEqualTypeOf<OptionalSpec>();
 expectTypeOf<Infer<typeof numericExpanded>['item_42']>().not.toBeAny();
-expectTypeOf<undefined extends typeof numericExpanded.row.item_42 ? true : false>().toEqualTypeOf<true>();
-expectTypeOf<undefined extends typeof numericLeftExpanded.row.item_42 ? true : false>().toEqualTypeOf<true>();
-const composedPattern = numericLeftExpanded.where(r => r.n.gt(0)).distinct().orderBy(r => r.n).limit(1);
+
+expectTypeOf<
+  undefined extends typeof numericExpanded.row.item_42 ? true : false
+>().toEqualTypeOf<true>();
+
+expectTypeOf<
+  undefined extends typeof numericLeftExpanded.row.item_42 ? true : false
+>().toEqualTypeOf<true>();
+
+const composedPattern = numericLeftExpanded
+  .where(r => r.n.gt(0))
+  .distinct()
+  .orderBy(r => r.n)
+  .limit(1);
+
 expectTypeOf<Infer<typeof composedPattern>['item_42']>().toEqualTypeOf<OptionalSpec>();
 expectTypeOf<Infer<typeof composedPattern>['item_42']>().not.toBeAny();
-expectTypeOf<undefined extends typeof composedPattern.row.item_42 ? true : false>().toEqualTypeOf<true>();
+
+expectTypeOf<
+  undefined extends typeof composedPattern.row.item_42 ? true : false
+>().toEqualTypeOf<true>();
+
 expectTypeOf<typeof composedPattern.row.n>().toEqualTypeOf<typeof hinted.row.n>();
 const numericChild = numericExpanded.row.item_42;
+
 if (numericChild) {
   const descriptor: typeof structuralTable.columns.specs.inner = numericChild.ir.type;
   void descriptor;
 }
+
 // A pattern can include an existing source name without selecting it at runtime.
 const overlappingSource = from(structuralTable).map(r => ({ item_count: r.n, names: r.names }));
+
 const overlapping = overlappingSource.arrayJoin(r => r.names, patternedAlias);
+
 const overlappingLeft = overlappingSource.leftArrayJoin(r => r.names, patternedAlias);
 expectTypeOf<Infer<typeof overlapping>['item_count']>().toEqualTypeOf<number>();
-expectTypeOf<typeof overlapping.row.item_count>().toEqualTypeOf<typeof overlappingSource.row.item_count>();
-expectTypeOf<typeof overlappingLeft.row.item_count>().toEqualTypeOf<typeof overlappingSource.row.item_count>();
-expectTypeOf<Infer<typeof overlapping>['item_missing']>().toEqualTypeOf<string | number | undefined>();
+
+expectTypeOf<typeof overlapping.row.item_count>().toEqualTypeOf<
+  typeof overlappingSource.row.item_count
+>();
+
+expectTypeOf<typeof overlappingLeft.row.item_count>().toEqualTypeOf<
+  typeof overlappingSource.row.item_count
+>();
+
+expectTypeOf<Infer<typeof overlapping>['item_missing']>().toEqualTypeOf<
+  string | number | undefined
+>();
+
 const genericExpand = <T>(input: Query<{ names: T[] }>) => input.arrayJoin(r => r.names, 'item');
+
 const genericExpanded = genericExpand(from(structuralTable).map(r => ({ names: r.names })));
 expectTypeOf<Infer<typeof genericExpanded>>().toEqualTypeOf<{ names: string[]; item: string }>();
 expectTypeOf<Infer<typeof genericExpanded>>().not.toBeAny();
-const structural = from(structuralTable).where(r => r.names.hasAny([]).or(r.names.empty()))
-  .map(r => ({ specs: r.specs, size: r.names.length(), total: r.n.plus(2) })).limit(2)
-  .map(r => ({ mpns: r.specs.element('mpn'), first: r.specs.arrayElement(-1).element('description'), size: r.size, total: r.total.multiply(2n), empty: r.size.eq(0n) }));
-expectTypeOf<Infer<typeof structural>>().toEqualTypeOf<{ mpns: (string | null)[]; first: string | null; size: bigint; total: bigint; empty: boolean }>();
+
+const structural = from(structuralTable)
+  .where(r => r.names.hasAny([]).or(r.names.empty()))
+  .map(r => ({ specs: r.specs, size: r.names.length(), total: r.n.plus(2) }))
+  .limit(2)
+  .map(r => ({
+    mpns: r.specs.element('mpn'),
+    first: r.specs.arrayElement(-1).element('description'),
+    size: r.size,
+    total: r.total.multiply(2n),
+    empty: r.size.eq(0n),
+  }));
+
+expectTypeOf<Infer<typeof structural>>().toEqualTypeOf<{
+  mpns: (string | null)[];
+  first: string | null;
+  size: bigint;
+  total: bigint;
+  empty: boolean;
+}>();
+
 expectTypeOf<Infer<typeof structural>>().not.toBeAny();
-const repairComposition = from(structuralTable).limit(1).map(() => ({
-  flags: val([null, false, true], col.Array(col.Nullable(col.Bool))),
-  missing: val(null, col.Nullable(col.Int32)),
-})).map(r => ({ first: r.flags.arrayElement(1), fallback: r.missing.ifNull(val(4294967295, col.UInt32)) }));
-expectTypeOf<Infer<typeof repairComposition>>().toEqualTypeOf<{ first: boolean | null; fallback: bigint }>();
+
+const repairComposition = from(structuralTable)
+  .limit(1)
+  .map(() => ({
+    flags: val([null, false, true], col.Array(col.Nullable(col.Bool))),
+    missing: val(null, col.Nullable(col.Int32)),
+  }))
+  .map(r => ({
+    first: r.flags.arrayElement(1),
+    fallback: r.missing.ifNull(val(4294967295, col.UInt32)),
+  }));
+
+expectTypeOf<Infer<typeof repairComposition>>().toEqualTypeOf<{
+  first: boolean | null;
+  fallback: bigint;
+}>();
+
 expectTypeOf<Infer<typeof repairComposition>>().not.toBeAny();
-const ordered = from(t).orderBy(r => r.id.desc()).thenBy(r => r.category.asc().nullsLast());
+
+const ordered = from(t)
+  .orderBy(r => r.id.desc())
+  .thenBy(r => r.category.asc().nullsLast());
+
 expectTypeOf<Infer<typeof ordered>>().toEqualTypeOf<Infer<typeof t>>();
 expectTypeOf<Infer<typeof ordered>>().not.toBeAny();
-const named = ordered.map(r => r.tuple).distinct().orderBy(r => r.tuple.element('name')).thenBy(r => r.tuple.element('name').desc()).limit(2).map(r => r.tuple.element('name'));
+
+const named = ordered
+  .map(r => r.tuple)
+  .distinct()
+  .orderBy(r => r.tuple.element('name'))
+  .thenBy(r => r.tuple.element('name').desc())
+  .limit(2)
+  .map(r => r.tuple.element('name'));
+
 expectTypeOf<Infer<typeof named>>().toEqualTypeOf<{ tuple: string }>();
 expectTypeOf<Infer<typeof named>>().not.toBeAny();
-const renamedSingle = from(t).map(r => ({ renamed: r.tuple })).map(r => r.renamed).distinct();
+
+const renamedSingle = from(t)
+  .map(r => ({ renamed: r.tuple }))
+  .map(r => r.renamed)
+  .distinct();
+
 expectTypeOf<Infer<typeof renamedSingle>>().toEqualTypeOf<{ renamed: { name: string } }>();
 expectTypeOf<Infer<typeof renamedSingle>>().not.toBeAny();
-const prototypeSingle = from(t).map(r => ({ ['__proto__']: r.category })).map(r => r.__proto__).distinct().orderBy(r => r.__proto__.desc().nullsLast()).limit(3);
+
+const prototypeSingle = from(t)
+  .map(r => ({ ['__proto__']: r.category }))
+  .map(r => r.__proto__)
+  .distinct()
+  .orderBy(r => r.__proto__.desc().nullsLast())
+  .limit(3);
+
 expectTypeOf<Infer<typeof prototypeSingle>>().toEqualTypeOf<{ __proto__: string | null }>();
 expectTypeOf<Infer<typeof prototypeSingle>>().not.toBeAny();
-const computedSingle = from(t).orderBy(() => val(1)).thenBy(r => r.id).limit(2, 1).map(r => r.id.plus(2n)).distinct();
+
+const computedSingle = from(t)
+  .orderBy(() => val(1))
+  .thenBy(r => r.id)
+  .limit(2, 1)
+  .map(r => r.id.plus(2n))
+  .distinct();
+
 expectTypeOf<Infer<typeof computedSingle>>().toEqualTypeOf<{ id: bigint }>();
 expectTypeOf<Infer<typeof computedSingle>>().not.toBeAny();
 const retainedTuple: typeof t.columns.tuple = renamedSingle.row.renamed.ir.type;
 void retainedTuple;
 expectTypeOf<'thenBy' extends keyof typeof named ? true : false>().toEqualTypeOf<false>();
-const grouped = from(structuralTable).groupBy(r => r.n).aggregate(g => ({ total: sum(g.n), names: max(g.specs), count: count() }));
-expectTypeOf<Infer<typeof grouped>>().toEqualTypeOf<{ n: number; total: bigint; names: { mpn: string | null; description: string | null }[]; count: bigint }>();
+
+const grouped = from(structuralTable)
+  .groupBy(r => r.n)
+  .aggregate(g => ({ total: sum(g.n), names: max(g.specs), count: count() }));
+
+expectTypeOf<Infer<typeof grouped>>().toEqualTypeOf<{
+  n: number;
+  total: bigint;
+  names: { mpn: string | null; description: string | null }[];
+  count: bigint;
+}>();
+
 expectTypeOf<Infer<typeof grouped>>().not.toBeAny();
-const genericGrouped = <R extends { id: bigint; category: string | null }>(input: Query<R>) => input.groupBy(r => r.category).aggregate(g => ({ newest: max(g.id) }));
+
+const genericGrouped = <R extends { id: bigint; category: string | null }>(input: Query<R>) =>
+  input.groupBy(r => r.category).aggregate(g => ({ newest: max(g.id) }));
+
 const genericResult = genericGrouped(from(t));
-expectTypeOf<Infer<typeof genericResult>>().toEqualTypeOf<{ category: string | null; newest: bigint }>();
+
+expectTypeOf<Infer<typeof genericResult>>().toEqualTypeOf<{
+  category: string | null;
+  newest: bigint;
+}>();
+
 expectTypeOf<Infer<typeof genericResult>>().not.toBeAny();
 const global = from(structuralTable).aggregate(g => sum(g.n));
 expectTypeOf<Infer<typeof global>>().toEqualTypeOf<{ n: bigint }>();
@@ -507,51 +1259,143 @@ expectTypeOf<Infer<typeof namedConstantProjection>>().toEqualTypeOf<{ value: num
 const globalCountShortcut = from(t).count();
 expectTypeOf<Infer<typeof globalCountShortcut>>().toEqualTypeOf<{ count: bigint }>();
 expectTypeOf<Infer<typeof globalCountShortcut>>().not.toBeAny();
-const chainedKeys = from(t).groupBy(r => r.category).thenBy(r => r.id).thenBy(r => ({ sourceCategory: r.category })).count();
-expectTypeOf<Infer<typeof chainedKeys>>().toEqualTypeOf<{ category: string | null; id: bigint; sourceCategory: string | null; count: bigint }>();
+
+const chainedKeys = from(t)
+  .groupBy(r => r.category)
+  .thenBy(r => r.id)
+  .thenBy(r => ({ sourceCategory: r.category }))
+  .count();
+
+expectTypeOf<Infer<typeof chainedKeys>>().toEqualTypeOf<{
+  category: string | null;
+  id: bigint;
+  sourceCategory: string | null;
+  count: bigint;
+}>();
+
 expectTypeOf<Infer<typeof chainedKeys>>().not.toBeAny();
-const shortcutCount = from(t).groupBy(r => r.category).count();
-expectTypeOf<Infer<typeof shortcutCount>>().toEqualTypeOf<{ category: string | null; count: bigint }>();
+
+const shortcutCount = from(t)
+  .groupBy(r => r.category)
+  .count();
+
+expectTypeOf<Infer<typeof shortcutCount>>().toEqualTypeOf<{
+  category: string | null;
+  count: bigint;
+}>();
+
 expectTypeOf<Infer<typeof shortcutCount>>().not.toBeAny();
-const chainedCount = shortcutCount.where(r => r.count.gt(1n)).map(r => ({ next: r.count.plus(1n) }));
+
+const chainedCount = shortcutCount
+  .where(r => r.count.gt(1n))
+  .map(r => ({ next: r.count.plus(1n) }));
+
 expectTypeOf<Infer<typeof chainedCount>>().toEqualTypeOf<{ next: bigint }>();
-const namedCount = from(t).groupBy(r => r.category).aggregate(() => count());
-expectTypeOf<Infer<typeof namedCount>>().toEqualTypeOf<{ category: string | null; count: bigint }>();
+
+const namedCount = from(t)
+  .groupBy(r => r.category)
+  .aggregate(() => count());
+
+expectTypeOf<Infer<typeof namedCount>>().toEqualTypeOf<{
+  category: string | null;
+  count: bigint;
+}>();
+
 expectTypeOf<Infer<typeof namedCount>>().not.toBeAny();
-const expandedGroup = grouped.arrayJoin(r => r.names, 'spec').map(r => ({ mpn: r.spec.element('mpn'), total: r.total }));
+
+const expandedGroup = grouped
+  .arrayJoin(r => r.names, 'spec')
+  .map(r => ({ mpn: r.spec.element('mpn'), total: r.total }));
+
 expectTypeOf<Infer<typeof expandedGroup>>().toEqualTypeOf<{ mpn: string | null; total: bigint }>();
 expectTypeOf<Infer<typeof expandedGroup>>().not.toBeAny();
-const afterGroup = grouped.where(r => r.total.gt(1n)).orderBy(r => r.total).limit(2).map(r => r.names.arrayElement(1).element('mpn'));
+
+const afterGroup = grouped
+  .where(r => r.total.gt(1n))
+  .orderBy(r => r.total)
+  .limit(2)
+  .map(r => r.names.arrayElement(1).element('mpn'));
+
 expectTypeOf<Infer<typeof afterGroup>>().toEqualTypeOf<{ names: string | null }>();
 expectTypeOf<Infer<typeof afterGroup>>().not.toBeAny();
-const nullablePredicate = from(table('predicate', { n: col.UInt32, p: col.Nullable(col.Bool) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }))
-  .aggregate(g => ({ s: sumIf(g.n, g.p), m: maxIf(g.n, g.p), c: countIf(g.p) }));
-expectTypeOf<Infer<typeof nullablePredicate>>().toEqualTypeOf<{ s: bigint; m: number; c: bigint }>();
+
+const nullablePredicate = from(
+  table(
+    'predicate',
+    { n: col.UInt32, p: col.Nullable(col.Bool) },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+).aggregate(g => ({ s: sumIf(g.n, g.p), m: maxIf(g.n, g.p), c: countIf(g.p) }));
+
+expectTypeOf<Infer<typeof nullablePredicate>>().toEqualTypeOf<{
+  s: bigint;
+  m: number;
+  c: bigint;
+}>();
+
 expectTypeOf<Infer<typeof nullablePredicate>>().not.toBeAny();
-const repeatedAggregation = grouped.where(r => r.count.gt(1n)).orderBy(r => r.total).limit(1)
+
+const repeatedAggregation = grouped
+  .where(r => r.count.gt(1n))
+  .orderBy(r => r.total)
+  .limit(1)
   .aggregate(g => ({ total: sum(g.total), high: max(g.count), rows: count() }));
-expectTypeOf<Infer<typeof repeatedAggregation>>().toEqualTypeOf<{ total: bigint; high: bigint; rows: bigint }>();
+
+expectTypeOf<Infer<typeof repeatedAggregation>>().toEqualTypeOf<{
+  total: bigint;
+  high: bigint;
+  rows: bigint;
+}>();
+
 expectTypeOf<Infer<typeof repeatedAggregation>>().not.toBeAny();
-const structuralMaximum = from(t).groupBy(r => ({ flag: r.category.isNull() })).aggregate(g => ({ pair: max(g.tuple) }))
+
+const structuralMaximum = from(t)
+  .groupBy(r => ({ flag: r.category.isNull() }))
+  .aggregate(g => ({ pair: max(g.tuple) }))
   .map(r => ({ flag: r.flag, label: r.pair.element('name') }));
+
 expectTypeOf<Infer<typeof structuralMaximum>>().toEqualTypeOf<{ flag: boolean; label: string }>();
 expectTypeOf<Infer<typeof structuralMaximum>>().not.toBeAny();
 const client = createClient();
+
 const structuralRun = () => client.run(structural);
-expectTypeOf<Awaited<ReturnType<typeof structuralRun>>>().toEqualTypeOf<{ mpns: (string | null)[]; first: string | null; size: bigint; total: bigint; empty: boolean }[]>();
+
+expectTypeOf<Awaited<ReturnType<typeof structuralRun>>>().toEqualTypeOf<
+  { mpns: (string | null)[]; first: string | null; size: bigint; total: bigint; empty: boolean }[]
+>();
+
 expectTypeOf<Awaited<ReturnType<typeof structuralRun>>>().not.toBeAny();
 const run = () => client.run(q);
-expectTypeOf<Awaited<ReturnType<typeof run>>>().toEqualTypeOf<{ id: bigint; updatedAt: Date; category: string | null }[]>();
+
+expectTypeOf<Awaited<ReturnType<typeof run>>>().toEqualTypeOf<
+  { id: bigint; updatedAt: Date; category: string | null }[]
+>();
+
 expectTypeOf<Awaited<ReturnType<typeof run>>>().not.toBeAny();
 import { join } from '@typedhouse/core';
+
 const joined = join({ a: q, b: q }).on(r => r.a.id.eq(r.b.id));
 expectTypeOf<Infer<typeof joined>>().toEqualTypeOf<{ a: Infer<typeof q>; b: Infer<typeof q> }>();
 expectTypeOf<Infer<typeof joined>>().not.toBeAny();
 const joinedRun = () => client.run(joined);
-expectTypeOf<Awaited<ReturnType<typeof joinedRun>>>().toEqualTypeOf<{ a: Infer<typeof q>; b: Infer<typeof q> }[]>();
+
+expectTypeOf<Awaited<ReturnType<typeof joinedRun>>>().toEqualTypeOf<
+  { a: Infer<typeof q>; b: Infer<typeof q> }[]
+>();
+
 expectTypeOf<Awaited<ReturnType<typeof joinedRun>>>().not.toBeAny();
-const nestedJoined = join({ ab: joined, c: q }).on(r => r.ab.a.id.eq(r.c.id)).where(r => r.ab.b.id.gt(0n)).orderBy(r => r.c.id).limit(1);
-expectTypeOf<Infer<typeof nestedJoined>>().toEqualTypeOf<{ ab: { a: Infer<typeof q>; b: Infer<typeof q> }; c: Infer<typeof q> }>();
+
+const nestedJoined = join({ ab: joined, c: q })
+  .on(r => r.ab.a.id.eq(r.c.id))
+  .where(r => r.ab.b.id.gt(0n))
+  .orderBy(r => r.c.id)
+  .limit(1);
+
+expectTypeOf<Infer<typeof nestedJoined>>().toEqualTypeOf<{
+  ab: { a: Infer<typeof q>; b: Infer<typeof q> };
+  c: Infer<typeof q>;
+}>();
+
 expectTypeOf<Infer<typeof nestedJoined>>().not.toBeAny();
 const pluginBackend = createClickHouseBackend({}, 'clickhouse-naive');
 expectTypeOf(pluginBackend.name).toEqualTypeOf<'clickhouse' | 'clickhouse-naive'>();
@@ -559,59 +1403,164 @@ expectTypeOf(pluginBackend.compile(nestedJoined.ir)).toEqualTypeOf<Plan>();
 expectTypeOf<Plan['compiled']>().toEqualTypeOf<import('@typedhouse/core').CompiledQuery>();
 expectTypeOf<Plan['compiled']>().not.toBeAny();
 const backendContract: Backend = pluginBackend;
-expectTypeOf(backendContract.run(pluginBackend.compile(q.ir))).toEqualTypeOf<AsyncIterable<unknown[]>>();
+
+expectTypeOf(backendContract.run(pluginBackend.compile(q.ir))).toEqualTypeOf<
+  AsyncIterable<unknown[]>
+>();
+
 const pluginClient = createClientFromBackend(backendContract);
+
 const pluginRun = () => pluginClient.run(nestedJoined);
+
 const pluginStream = pluginClient.stream(nestedJoined);
-expectTypeOf<Awaited<ReturnType<typeof pluginRun>>>().toEqualTypeOf<{ ab: { a: Infer<typeof q>; b: Infer<typeof q> }; c: Infer<typeof q> }[]>();
+
+expectTypeOf<Awaited<ReturnType<typeof pluginRun>>>().toEqualTypeOf<
+  { ab: { a: Infer<typeof q>; b: Infer<typeof q> }; c: Infer<typeof q> }[]
+>();
+
 expectTypeOf<Awaited<ReturnType<typeof pluginRun>>>().not.toBeAny();
-expectTypeOf<StreamRow<typeof pluginStream>>().toEqualTypeOf<{ ab: { a: Infer<typeof q>; b: Infer<typeof q> }; c: Infer<typeof q> }>();
+
+expectTypeOf<StreamRow<typeof pluginStream>>().toEqualTypeOf<{
+  ab: { a: Infer<typeof q>; b: Infer<typeof q> };
+  c: Infer<typeof q>;
+}>();
+
 expectTypeOf<StreamRow<typeof pluginStream>>().not.toBeAny();
 expectTypeOf<'close' extends keyof typeof pluginClient ? true : false>().toEqualTypeOf<false>();
-const nestedRollup = nestedJoined.groupBy(r => r.c.category).aggregate(g => ({ n: max(g.ab.a.id) }));
+
+const nestedRollup = nestedJoined
+  .groupBy(r => r.c.category)
+  .aggregate(g => ({ n: max(g.ab.a.id) }));
+
 expectTypeOf<Infer<typeof nestedRollup>>().toEqualTypeOf<{ category: string | null; n: bigint }>();
 expectTypeOf<Infer<typeof nestedRollup>>().not.toBeAny();
+
 type Versioned = { tenantId: string; entityId: string; version: number };
+
 const latest = <R extends Versioned>(q: Query<R>) => {
-  const newest = q.groupBy(m => ({ tenantId: m.tenantId, entityId: m.entityId })).aggregate(g => ({ version: max(g.version) }));
-  return join({ m: q, v: newest }).on(r => [r.m.tenantId.eq(r.v.tenantId), r.m.entityId.eq(r.v.entityId), r.m.version.eq(r.v.version)]).map(r => ({ ...r.m }));
+  const newest = q
+    .groupBy(m => ({ tenantId: m.tenantId, entityId: m.entityId }))
+    .aggregate(g => ({ version: max(g.version) }));
+
+  return join({ m: q, v: newest })
+    .on(r => [
+      r.m.tenantId.eq(r.v.tenantId),
+      r.m.entityId.eq(r.v.entityId),
+      r.m.version.eq(r.v.version),
+    ])
+    .map(r => ({ ...r.m }));
 };
-const metric = from(table('metric', { tenantId: col.String, entityId: col.String, version: col.UInt32, stock: col.Float64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+
+const metric = from(
+  table(
+    'metric',
+    { tenantId: col.String, entityId: col.String, version: col.UInt32, stock: col.Float64 },
+    { engine: 'Memory', sortingKey: [], partitionKey: [] },
+  ),
+);
+
 const latestMetric = latest(metric);
-expectTypeOf<Infer<typeof latestMetric>>().toEqualTypeOf<{ tenantId: string; entityId: string; version: number; stock: number }>();
+
+expectTypeOf<Infer<typeof latestMetric>>().toEqualTypeOf<{
+  tenantId: string;
+  entityId: string;
+  version: number;
+  stock: number;
+}>();
+
 expectTypeOf<Infer<typeof latestMetric>>().not.toBeAny();
-const priceMetric = metric.map(r => ({ tenantId: r.tenantId, entityId: r.entityId, version: r.version, prices: val([1, 2], col.Array(col.Float64)) }));
+
+const priceMetric = metric.map(r => ({
+  tenantId: r.tenantId,
+  entityId: r.entityId,
+  version: r.version,
+  prices: val([1, 2], col.Array(col.Float64)),
+}));
+
 const latestPrices = latest(priceMetric);
-expectTypeOf<Infer<typeof latestPrices>>().toEqualTypeOf<{ tenantId: string; entityId: string; version: number; prices: number[] }>();
+
+expectTypeOf<Infer<typeof latestPrices>>().toEqualTypeOf<{
+  tenantId: string;
+  entityId: string;
+  version: number;
+  prices: number[];
+}>();
+
 expectTypeOf<Infer<typeof latestPrices>>().not.toBeAny();
+
 // Accepted composition must execute as well as infer an exact nested row.
-const structuralJoin = join({ a: from(structuralTable), b: from(structuralTable) }).on(r => r.a.n.eq(r.b.n));
+const structuralJoin = join({ a: from(structuralTable), b: from(structuralTable) }).on(r =>
+  r.a.n.eq(r.b.n),
+);
+
 const joinedExpansion = structuralJoin.arrayJoin(r => r.a.names, 'item');
+
 const joinedLeftExpansion = structuralJoin.leftArrayJoin(r => r.a.names, 'item');
-type JoinedExpansionRow = { a: Infer<typeof structuralTable>; b: Infer<typeof structuralTable>; item: string };
+
+type JoinedExpansionRow = {
+  a: Infer<typeof structuralTable>;
+  b: Infer<typeof structuralTable>;
+  item: string;
+};
+
 expectTypeOf<Infer<typeof joinedExpansion>>().toEqualTypeOf<JoinedExpansionRow>();
 expectTypeOf<Infer<typeof joinedLeftExpansion>>().toEqualTypeOf<JoinedExpansionRow>();
 expectTypeOf<Infer<typeof joinedExpansion>>().not.toBeAny();
 expectTypeOf<Infer<typeof joinedLeftExpansion>>().not.toBeAny();
-const expandedGrouped = joinedExpansion.where(r => r.a.n.gt(0)).orderBy(r => r.item).limit(2).distinct()
-  .groupBy(r => r.item).aggregate(g => ({ n: max(g.a.n), count: count() }));
-expectTypeOf<Infer<typeof expandedGrouped>>().toEqualTypeOf<{ item: string; n: number; count: bigint }>();
+
+const expandedGrouped = joinedExpansion
+  .where(r => r.a.n.gt(0))
+  .orderBy(r => r.item)
+  .limit(2)
+  .distinct()
+  .groupBy(r => r.item)
+  .aggregate(g => ({ n: max(g.a.n), count: count() }));
+
+expectTypeOf<Infer<typeof expandedGrouped>>().toEqualTypeOf<{
+  item: string;
+  n: number;
+  count: bigint;
+}>();
+
 expectTypeOf<Infer<typeof expandedGrouped>>().not.toBeAny();
 expectTypeOf(joinedExpansion.row.a.n).toEqualTypeOf<typeof structuralJoin.row.a.n>();
 expectTypeOf(joinedExpansion.row.item.ir.type.name).toEqualTypeOf<'String'>();
 expectTypeOf(joinedExpansion.row.item.ir.type.kind).toEqualTypeOf<'scalar'>();
-const nullableArrays = q.map(r => ({ id: r.id, values: val([null, 7], col.Array(col.Nullable(col.Int32))) }));
-const nullableExpanded = join({ a: nullableArrays, b: nullableArrays }).on(r => r.a.id.eq(r.b.id))
-  .leftArrayJoin(r => r.a.values, 'one').arrayJoin(r => r.b.values, 'two');
-expectTypeOf<Infer<typeof nullableExpanded>>().toEqualTypeOf<{ a: { id: bigint; values: (number | null)[] }; b: { id: bigint; values: (number | null)[] }; one: number | null; two: number | null }>();
+
+const nullableArrays = q.map(r => ({
+  id: r.id,
+  values: val([null, 7], col.Array(col.Nullable(col.Int32))),
+}));
+
+const nullableExpanded = join({ a: nullableArrays, b: nullableArrays })
+  .on(r => r.a.id.eq(r.b.id))
+  .leftArrayJoin(r => r.a.values, 'one')
+  .arrayJoin(r => r.b.values, 'two');
+
+expectTypeOf<Infer<typeof nullableExpanded>>().toEqualTypeOf<{
+  a: { id: bigint; values: (number | null)[] };
+  b: { id: bigint; values: (number | null)[] };
+  one: number | null;
+  two: number | null;
+}>();
+
 expectTypeOf<Infer<typeof nullableExpanded>>().not.toBeAny();
 expectTypeOf(nullableExpanded.row.one.ir.type.kind).toEqualTypeOf<'Nullable'>();
 expectTypeOf(nullableExpanded.row.one.ir.type.inner.name).toEqualTypeOf<'Int32'>();
 const conjunctionJoin = join({ a: q, b: q }).on(r => r.a.id.eq(r.b.id).and(r.a.id.gt(0n)));
-expectTypeOf<Infer<typeof conjunctionJoin>>().toEqualTypeOf<{ a: Infer<typeof q>; b: Infer<typeof q> }>();
+
+expectTypeOf<Infer<typeof conjunctionJoin>>().toEqualTypeOf<{
+  a: Infer<typeof q>;
+  b: Infer<typeof q>;
+}>();
+
 expectTypeOf<Infer<typeof conjunctionJoin>>().not.toBeAny();
 const dynamicJoinAlias: string = ['side'].join('');
-const dynamicJoin = join({ [dynamicJoinAlias]: q, fixed: q }).on(r => r[dynamicJoinAlias]!.id.eq(r.fixed.id));
+
+const dynamicJoin = join({ [dynamicJoinAlias]: q, fixed: q }).on(r =>
+  r[dynamicJoinAlias]!.id.eq(r.fixed.id),
+);
+
 expectTypeOf<Infer<typeof dynamicJoin>['absent']>().toEqualTypeOf<Infer<typeof q> | undefined>();
 expectTypeOf<typeof dynamicJoin.row.absent>().toEqualTypeOf<typeof q.row | undefined>();
 // @ts-expect-error predicate must be boolean

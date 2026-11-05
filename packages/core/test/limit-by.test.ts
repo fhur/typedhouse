@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { col, count, exprNode, from, join, LimitByBuilder, LimitByQuery, OrderedQuery, Query, scalar, table, val, Expr } from '../src/index.js';
+import {
+  col,
+  count,
+  exprNode,
+  from,
+  join,
+  LimitByBuilder,
+  LimitByQuery,
+  OrderedQuery,
+  Query,
+  scalar,
+  table,
+  val,
+  Expr,
+} from '../src/index.js';
 
-const t = table('t', { id: col.UInt32, cat: col.String, n: col.Nullable(col.UInt32) }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] });
+const t = table(
+  't',
+  { id: col.UInt32, cat: col.String, n: col.Nullable(col.UInt32) },
+  { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] },
+);
+
 const q = from(t);
 
 describe('limitBy builder', () => {
@@ -10,8 +29,15 @@ describe('limitBy builder', () => {
     expect(pending).toBeInstanceOf(LimitByBuilder);
     expect(pending).not.toBeInstanceOf(Query);
     expect(Object.keys(pending)).toEqual([]);
-    expect(Object.getOwnPropertyNames(LimitByBuilder.prototype).sort()).toEqual(['constructor', 'take']);
-    for (const name of ['ir', 'toSQL', 'where', 'map', 'limit', 'orderBy', 'offset', 'row']) expect((pending as unknown as Record<string, unknown>)[name]).toBeUndefined();
+
+    expect(Object.getOwnPropertyNames(LimitByBuilder.prototype).sort()).toEqual([
+      'constructor',
+      'take',
+    ]);
+
+    for (const name of ['ir', 'toSQL', 'where', 'map', 'limit', 'orderBy', 'offset', 'row'])
+      expect((pending as unknown as Record<string, unknown>)[name]).toBeUndefined();
+
     expect(Object.isFrozen(pending)).toBe(true);
   });
 
@@ -50,25 +76,61 @@ describe('limitBy builder', () => {
 
   it('every other operator returns a query without offset', () => {
     const taken = q.limitBy(r => r.cat).take(2);
-    for (const next of [taken.where(r => r.id.gt(1)), taken.limit(1), taken.distinct(), taken.cte(), taken.orderBy(r => r.id), taken.map(r => r.id)]) expect('offset' in next).toBe(false);
+
+    for (const next of [
+      taken.where(r => r.id.gt(1)),
+      taken.limit(1),
+      taken.distinct(),
+      taken.cte(),
+      taken.orderBy(r => r.id),
+      taken.map(r => r.id),
+    ])
+      expect('offset' in next).toBe(false);
+
     expect('thenBy' in taken).toBe(false);
     expect('thenBy' in taken.offset(1)).toBe(false);
   });
 
   it('is available after every query shape, and its result composes', () => {
-    const ordered = q.orderBy(r => r.id).limitBy(r => r.cat).take(1);
+    const ordered = q
+      .orderBy(r => r.id)
+      .limitBy(r => r.cat)
+      .take(1);
+
     if (ordered.ir.kind !== 'LimitBy') throw new Error('wrong node');
     expect(ordered.ir.input.kind).toBe('Sort');
-    const aggregate = q.groupBy(r => ({ cat: r.cat })).aggregate(() => ({ c: count() })).limitBy(r => r.cat).take(1);
+
+    const aggregate = q
+      .groupBy(r => ({ cat: r.cat }))
+      .aggregate(() => ({ c: count() }))
+      .limitBy(r => r.cat)
+      .take(1);
+
     expect(aggregate.row.c.ir.type).toEqual(col.UInt64.type);
-    const joined = join({ a: q, b: q }).on(r => r.a.id.eq(r.b.id)).limitBy(r => r.b.cat).take(1).offset(1);
+
+    const joined = join({ a: q, b: q })
+      .on(r => r.a.id.eq(r.b.id))
+      .limitBy(r => r.b.cat)
+      .take(1)
+      .offset(1);
+
     expect(joined.ir.output.shape).toBe('nested');
     expect(joined.row.a.id.ir).toMatchObject({ kind: 'ColumnRef', rel: joined.ir.id });
-    expect(join({ a: q.limitBy(r => r.cat).take(1), b: q }).on(r => r.a.id.eq(r.b.id)).ir.kind).toBe('Join');
+
+    expect(
+      join({ a: q.limitBy(r => r.cat).take(1), b: q }).on(r => r.a.id.eq(r.b.id)).ir.kind,
+    ).toBe('Join');
   });
 
   it('is not live', () => {
-    const live = from(table('s', { id: col.UInt32 }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [], source: {} as never }));
+    const live = from(
+      table(
+        's',
+        { id: col.UInt32 },
+        { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [], source: {} as never },
+      ),
+    );
+
     expect(live.caps.live).toBe(true);
     const taken = live.limitBy(r => r.id).take(1);
     expect(taken.caps.live).toBe(false);
@@ -84,9 +146,26 @@ describe('limitBy builder', () => {
     expect(() => q.limitBy(() => val(1, col.UInt32))).toThrow(/invalid_limit_by_key/);
     expect(() => q.limitBy(r => [r.cat, val(1, col.UInt32)])).toThrow(/invalid_limit_by_key/);
     expect(() => q.limitBy(() => val(1, col.UInt32).plus(2))).toThrow(/invalid_limit_by_key/);
+
     // A subquery opens another scope, so its columns are not the row's.
-    expect(() => q.limitBy(() => scalar(q.aggregate(() => ({ c: count() }))))).toThrow(/invalid_limit_by_key/);
-    const raw = new Expr<number>(exprNode({ kind: 'Raw', type: col.UInt32.type, resolution: 'declared', opaque: true, provenance: { origin: 'sql' }, parts: ['2'], args: [] }), undefined as never, 'row');
+    expect(() => q.limitBy(() => scalar(q.aggregate(() => ({ c: count() }))))).toThrow(
+      /invalid_limit_by_key/,
+    );
+
+    const raw = new Expr<number>(
+      exprNode({
+        kind: 'Raw',
+        type: col.UInt32.type,
+        resolution: 'declared',
+        opaque: true,
+        provenance: { origin: 'sql' },
+        parts: ['2'],
+        args: [],
+      }),
+      undefined as never,
+      'row',
+    );
+
     expect(() => q.limitBy(() => raw)).toThrow(/invalid_limit_by_key/);
   });
 
@@ -104,13 +183,26 @@ describe('limitBy builder', () => {
     expect(() => js.limitBy(() => count())).toThrow(/invalid_limit_by_key/);
   });
 
-  it.each([-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '1', undefined])('rejects %s as a count or offset', bad => {
-    expect(() => q.limitBy(r => r.cat).take(bad as number)).toThrow(/invalid_limit/);
-    expect(() => q.limitBy(r => r.cat).take(1).offset(bad as number)).toThrow(/invalid_limit/);
-  });
+  it.each([-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '1', undefined])(
+    'rejects %s as a count or offset',
+    bad => {
+      expect(() => q.limitBy(r => r.cat).take(bad as number)).toThrow(/invalid_limit/);
+
+      expect(() =>
+        q
+          .limitBy(r => r.cat)
+          .take(1)
+          .offset(bad as number),
+      ).toThrow(/invalid_limit/);
+    },
+  );
 
   it('accepts zero for both', () => {
-    const page = q.limitBy(r => r.cat).take(0).offset(0);
+    const page = q
+      .limitBy(r => r.cat)
+      .take(0)
+      .offset(0);
+
     if (page.ir.kind !== 'LimitBy') throw new Error('wrong node');
     expect([page.ir.n, page.ir.offset]).toEqual([0, 0]);
   });

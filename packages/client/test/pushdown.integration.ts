@@ -6,46 +6,139 @@ import { canonicalKey, crossJoin, join, leftJoin, unionAll, val, col } from '@ty
 import { components, parts } from './differential-arbitrary.js';
 import { createClickHouseBackend, type Backend } from '../src/index.js';
 import { collect, differential, multiplicityDiff, decodedRecord } from './backend-harness.js';
-import { ciLimit, ciMaxExecutionTime, prefetchedCheck, reportSlowestQuery } from './prefetch-check.js';
+import {
+  ciLimit,
+  ciMaxExecutionTime,
+  prefetchedCheck,
+  reportSlowestQuery,
+} from './prefetch-check.js';
 import { rewriteRel } from '../../compiler/src/rewrite-rel.js';
-import { build, fails, intDiv, native, recipeArbitrary, seed, shape, shapeCount, type Recipe } from './pushdown-arbitrary.js';
+import {
+  build,
+  fails,
+  intDiv,
+  native,
+  recipeArbitrary,
+  seed,
+  shape,
+  shapeCount,
+  type Recipe,
+} from './pushdown-arbitrary.js';
+
 let container: StartedTestContainer;
+
 let driver: ReturnType<typeof createClient>;
+
 const backends: ReturnType<typeof createClickHouseBackend>[] = [];
+
 const values = [
-  { tenant: 'acme', id: 'a', category: 'visible', ids: ['p', 'p', 'q'], at: '2024-03-11', amount: '2' },
+  {
+    tenant: 'acme',
+    id: 'a',
+    category: 'visible',
+    ids: ['p', 'p', 'q'],
+    at: '2024-03-11',
+    amount: '2',
+  },
   { tenant: 'acme', id: 'b', category: '', ids: ['p', 'orphan'], at: '2024-03-12', amount: '3' },
   { tenant: 'acme', id: 'c', category: null, ids: [], at: '2024-03-13', amount: '0' },
   { tenant: 'other', id: 'a', category: 'hidden', ids: ['p'], at: '2024-03-14', amount: '5' },
 ];
+
 beforeAll(async () => {
-  container = await new GenericContainer('clickhouse/clickhouse-server:24.8').withEnvironment({ CLICKHOUSE_USER: 'fixture', CLICKHOUSE_PASSWORD: 'fixture', CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1' }).withExposedPorts(8123).withWaitStrategy(Wait.forHttp('/ping', 8123)).start();
-  const options = { url: `http://${container.getHost()}:${container.getMappedPort(8123)}`, username: 'fixture', password: 'fixture', clickhouse_settings: { max_execution_time: ciMaxExecutionTime(10), max_result_rows: '1000', result_overflow_mode: 'throw' as const } };
+  container = await new GenericContainer('clickhouse/clickhouse-server:24.8')
+    .withEnvironment({
+      CLICKHOUSE_USER: 'fixture',
+      CLICKHOUSE_PASSWORD: 'fixture',
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1',
+    })
+    .withExposedPorts(8123)
+    .withWaitStrategy(Wait.forHttp('/ping', 8123))
+    .start();
+
+  const options = {
+    url: `http://${container.getHost()}:${container.getMappedPort(8123)}`,
+    username: 'fixture',
+    password: 'fixture',
+    clickhouse_settings: {
+      max_execution_time: ciMaxExecutionTime(10),
+      max_result_rows: '1000',
+      result_overflow_mode: 'throw' as const,
+    },
+  };
+
   driver = createClient(options);
-  for (const mode of ['clickhouse', 'clickhouse-naive'] as const) backends.push(createClickHouseBackend(options, mode));
-  await driver.command({ query: 'CREATE TABLE differential_components (tenant String,id String,category Nullable(String),ids Array(String),at Date,amount UInt64) ENGINE=Memory' });
-  await driver.command({ query: 'CREATE TABLE differential_parts (tenant String,id String) ENGINE=Memory' });
+
+  for (const mode of ['clickhouse', 'clickhouse-naive'] as const)
+    backends.push(createClickHouseBackend(options, mode));
+
+  await driver.command({
+    query:
+      'CREATE TABLE differential_components (tenant String,id String,category Nullable(String),ids Array(String),at Date,amount UInt64) ENGINE=Memory',
+  });
+
+  await driver.command({
+    query: 'CREATE TABLE differential_parts (tenant String,id String) ENGINE=Memory',
+  });
+
   await driver.insert({ table: 'differential_components', values, format: 'JSONEachRow' });
-  await driver.insert({ table: 'differential_parts', values: [{ tenant: 'acme', id: 'p' }, { tenant: 'acme', id: 'p' }, { tenant: 'acme', id: 'q' }, { tenant: 'other', id: 'p' }], format: 'JSONEachRow' });
+
+  await driver.insert({
+    table: 'differential_parts',
+    values: [
+      { tenant: 'acme', id: 'p' },
+      { tenant: 'acme', id: 'p' },
+      { tenant: 'acme', id: 'q' },
+      { tenant: 'other', id: 'p' },
+    ],
+    format: 'JSONEachRow',
+  });
 }, 120000);
-afterAll(async () => { await reportSlowestQuery(driver, 'pushdown', ciMaxExecutionTime(10)); for (const backend of backends) await backend.close(); await driver?.close(); await container?.stop(); });
+
+afterAll(async () => {
+  await reportSlowestQuery(driver, 'pushdown', ciMaxExecutionTime(10));
+  for (const backend of backends) await backend.close();
+  await driver?.close();
+  await container?.stop();
+});
+
 /** The server error type a backend fails with (QueryError's cause is the driver error), or 'none'. */
 async function failure(backend: Backend, q: ReturnType<typeof build>): Promise<string> {
-  try { await collect(backend.run(backend.compile(q.ir))); return 'none'; }
-  catch (error) { return String((error as { cause?: { type?: string } }).cause?.type ?? error); }
+  try {
+    await collect(backend.run(backend.compile(q.ir)));
+    return 'none';
+  } catch (error) {
+    return String((error as { cause?: { type?: string } }).cause?.type ?? error);
+  }
 }
+
 /** Executions of fallible recipes that failed (in both emitters and the oracle alike). */
 let failedExecutions = 0;
+
 /** Slice 4d: executions of `inputCast` recipes that failed (CANNOT_PARSE_TEXT or, beside the fallible filter, either code)
  * and that returned rows, identically in both emitters and the oracle, split by variant (Tester m1): the variant is the
  * recipe's content, the outcome is observed. */
 const inputCasts = { failing: { failed: 0, rows: 0 }, passing: { failed: 0, rows: 0 } };
+
 async function nativeFailure(sql: string): Promise<string> {
-  try { const r = await driver.query({ query: sql, format: 'JSONEachRow' }); try { await r.json(); } finally { r.close(); } return 'none'; }
-  catch (error) { return String((error as { type?: string }).type ?? error); }
+  try {
+    const r = await driver.query({ query: sql, format: 'JSONEachRow' });
+
+    try {
+      await r.json();
+    } finally {
+      r.close();
+    }
+
+    return 'none';
+  } catch (error) {
+    return String((error as { type?: string }).type ?? error);
+  }
 }
+
 async function check(recipe: Recipe) {
   const q = build(recipe);
+
   if (recipe.fallible || recipe.inputCast !== 'none') {
     // Slice 3b: the two texts must fail or succeed alike, with the same server code, and so must the independent nested
     // SQL. Which rows the server actually divides is its own business (it pushes an alias-independent predicate below an
@@ -55,49 +148,106 @@ async function check(recipe: Recipe) {
     for (const backend of backends) outcomes.push(await failure(backend, q));
     outcomes.push(await nativeFailure(native(recipe)));
     const context = `${native(recipe)}\n${JSON.stringify(backends.map(b => b.compile(q.ir).compiled.sql))}`;
+
     if (outcomes.some(o => o !== 'none')) {
-      const allowed = [...(recipe.fallible ? ['ILLEGAL_DIVISION'] : []), ...(recipe.inputCast === 'failing' ? ['CANNOT_PARSE_TEXT'] : [])];
+      const allowed = [
+        ...(recipe.fallible ? ['ILLEGAL_DIVISION'] : []),
+        ...(recipe.inputCast === 'failing' ? ['CANNOT_PARSE_TEXT'] : []),
+      ];
+
       // One code per recipe kind of failure; with both a failing cast and the division, all three texts must still fail
       // (which of the two the server raises first is its evaluation order).
-      if (allowed.length === 1) expect(outcomes, context).toEqual([allowed[0], allowed[0], allowed[0]]);
+      if (allowed.length === 1)
+        expect(outcomes, context).toEqual([allowed[0], allowed[0], allowed[0]]);
       else for (const o of outcomes) expect(allowed, context).toContain(o);
-      if (outcomes.includes('ILLEGAL_DIVISION') && recipe.inputCast !== 'failing') failedExecutions++;
+
+      if (outcomes.includes('ILLEGAL_DIVISION') && recipe.inputCast !== 'failing')
+        failedExecutions++;
+
       if (recipe.inputCast !== 'none') inputCasts[recipe.inputCast].failed++;
       return [];
     }
+
     expect(fails(recipe), context).toBe(false);
     if (recipe.inputCast !== 'none') inputCasts[recipe.inputCast].rows++;
   }
+
   const rows = await differential(backends, q, true);
   const sql = native(recipe);
   const result = await driver.query({ query: sql, format: 'JSONEachRow' });
+
   try {
-    const expected = (await result.json<Record<string, unknown>>()).map(r => ({ ...r, at: r.at === null ? null : new Date(String(r.at)), amount: BigInt(String(r.amount)) }));
+    const expected = (await result.json<Record<string, unknown>>()).map(r => ({
+      ...r,
+      at: r.at === null ? null : new Date(String(r.at)),
+      amount: BigInt(String(r.amount)),
+    }));
+
     const columns = Object.entries(backends[0]!.compile(q.ir).compiled.columns);
     const keys = (rs: unknown[]) => rs.map(r => canonicalKey(decodedRecord(r), columns));
     expect(multiplicityDiff(keys(rows), keys(expected)), sql).toEqual([]);
     expect(keys(rows), sql).toEqual(keys(expected));
     return rows;
-  } finally { result.close(); }
+  } finally {
+    result.close();
+  }
 }
-const anchor: Recipe = { kind: 'inner', tenant: 'acme', minimum: 0, renames: 2, nullable: false, fence: 'none', take: 9, offset: 0, expansion: 'column', mixed: false, fallible: false, reject: false, inputCast: 'none' };
+
+const anchor: Recipe = {
+  kind: 'inner',
+  tenant: 'acme',
+  minimum: 0,
+  renames: 2,
+  nullable: false,
+  fence: 'none',
+  take: 9,
+  offset: 0,
+  expansion: 'column',
+  mixed: false,
+  fallible: false,
+  reject: false,
+  inputCast: 'none',
+};
+
 it('anchors duplicate, empty-array, NULL, tenant and shared-occurrence cardinalities independently', async () => {
   const decoded = values.map(r => ({ ...r, at: new Date(r.at), amount: BigInt(r.amount) }));
   expect(await check(anchor)).toEqual([...Array(5).fill(decoded[0]), ...Array(2).fill(decoded[1])]);
-  expect(await check({ ...anchor, kind: 'leftArray' })).toEqual([...Array(3).fill(decoded[0]), ...Array(2).fill(decoded[1]), decoded[2]]);
+
+  expect(await check({ ...anchor, kind: 'leftArray' })).toEqual([
+    ...Array(3).fill(decoded[0]),
+    ...Array(2).fill(decoded[1]),
+    decoded[2],
+  ]);
+
   expect(await check({ ...anchor, kind: 'shared' })).toEqual([decoded[0]]);
   expect(await check({ ...anchor, kind: 'cross', tenant: 'other' })).toEqual([decoded[3]]);
-  expect(await check({ ...anchor, fence: 'limit', take: 3, offset: 1 })).toEqual(Array(3).fill(decoded[0]));
+
+  expect(await check({ ...anchor, fence: 'limit', take: 3, offset: 1 })).toEqual(
+    Array(3).fill(decoded[0]),
+  );
+
   // A Param array expands every row, the empty-array row included. The cast
   // keeps the mixed predicate intact; row/cardinality assertions are unchanged.
-  expect(await check({ ...anchor, kind: 'array', expansion: 'constant', mixed: true })).toEqual([...Array(2).fill(decoded[0]), ...Array(2).fill(decoded[1]), ...Array(2).fill(decoded[2])]);
+  expect(await check({ ...anchor, kind: 'array', expansion: 'constant', mixed: true })).toEqual([
+    ...Array(2).fill(decoded[0]),
+    ...Array(2).fill(decoded[1]),
+    ...Array(2).fill(decoded[2]),
+  ]);
+
   // Slice 4b: the mixed filter's cast conjunct fences the join below it (`fallibleExposure`; see the ON-equality anchor below),
   // so nothing crosses it; without the cast the safe conjuncts still reach the expansion.
   const mixed = rewriteRel(build({ ...anchor, mixed: true }).ir);
-  expect(mixed.hits.PushFilterJoin).toBe(0); expect(mixed.hits.PushFilterArrayJoin).toBe(0);
+  expect(mixed.hits.PushFilterJoin).toBe(0);
+  expect(mixed.hits.PushFilterArrayJoin).toBe(0);
   const total = rewriteRel(build(anchor).ir);
-  expect(total.hits.PushFilterJoin).toBeGreaterThan(0); expect(total.hits.PushFilterArrayJoin).toBeGreaterThan(0);
-  expect(await check({ ...anchor, mixed: true })).toEqual([...Array(5).fill(decoded[0]), ...Array(2).fill(decoded[1])]);
+  expect(total.hits.PushFilterJoin).toBeGreaterThan(0);
+  expect(total.hits.PushFilterArrayJoin).toBeGreaterThan(0);
+
+  expect(await check({ ...anchor, mixed: true })).toEqual([
+    ...Array(5).fill(decoded[0]),
+    ...Array(2).fill(decoded[1]),
+  ]);
+
   // Slice 3b: the fallible filter fails in both emitters and the oracle when the amount = 0 row reaches it (cross join,
   // LEFT or constant expansion), and keeps the earlier filters' rows when it does not (the inner expansion drops the
   // empty-array row; the mixed arithmetic conjunct removes it when minimum >= 1; tenant other never has it).
@@ -105,141 +255,339 @@ it('anchors duplicate, empty-array, NULL, tenant and shared-occurrence cardinali
   // below the ARRAY JOIN in both texts and divides by its 0 anyway: both emitters and the oracle fail alike (`check` asserts it).
   expect(fails({ ...anchor, fallible: true })).toBe(false);
   expect(await check({ ...anchor, fallible: true })).toEqual([]);
-  for (const recipe of [{ ...anchor, kind: 'cross' as const, fallible: true }, { ...anchor, kind: 'leftArray' as const, fallible: true }, { ...anchor, kind: 'array' as const, expansion: 'constant' as const, fallible: true }, { ...anchor, kind: 'cross' as const, fallible: true, mixed: true }]) {
+
+  for (const recipe of [
+    { ...anchor, kind: 'cross' as const, fallible: true },
+    { ...anchor, kind: 'leftArray' as const, fallible: true },
+    { ...anchor, kind: 'array' as const, expansion: 'constant' as const, fallible: true },
+    { ...anchor, kind: 'cross' as const, fallible: true, mixed: true },
+  ]) {
     expect(fails(recipe)).toBe(true);
     expect(await check(recipe)).toEqual([]);
   }
-  expect(await check({ ...anchor, kind: 'cross', fallible: true, mixed: true, minimum: 1 })).toEqual([...Array(3).fill(decoded[0]), ...Array(3).fill(decoded[1])]);
-  expect(await check({ ...anchor, kind: 'cross', tenant: 'other', fallible: true })).toEqual([decoded[3]]);
+
+  expect(
+    await check({ ...anchor, kind: 'cross', fallible: true, mixed: true, minimum: 1 }),
+  ).toEqual([...Array(3).fill(decoded[0]), ...Array(3).fill(decoded[1])]);
+
+  expect(await check({ ...anchor, kind: 'cross', tenant: 'other', fallible: true })).toEqual([
+    decoded[3],
+  ]);
+
   // The mixed residual (arithmetic AND cast) is the join block's WHERE; the fallible filter reads its own derived table above it.
-  expect(backends[0]!.compile(build({ ...anchor, kind: 'cross', fallible: true, mixed: true, minimum: 1 }).ir).compiled.sql).toMatch(/CAST\(`c`\.`amount` AS String\) != \{p\d+:String\}\)\) AS `__typedhouse_input` WHERE \(intDiv\(\(\{p\d+:UInt64\}\), \(`__typedhouse_input`\.`__typedhouse_leaf_\d+`\)\)\) > \{p\d+:UInt64\}\)/);
+  expect(
+    backends[0]!.compile(
+      build({ ...anchor, kind: 'cross', fallible: true, mixed: true, minimum: 1 }).ir,
+    ).compiled.sql,
+  ).toMatch(
+    /CAST\(`c`\.`amount` AS String\) != \{p\d+:String\}\)\) AS `__typedhouse_input` WHERE \(intDiv\(\(\{p\d+:UInt64\}\), \(`__typedhouse_input`\.`__typedhouse_leaf_\d+`\)\)\) > \{p\d+:UInt64\}\)/,
+  );
 });
+
 // Slice 4b: 24.8's filter push-down copies an outer WHERE across ON equalities into the other join input, and pushes into
 // any input of an INNER join. Moving a guard into one input (PushFilterJoin) or making the join INNER (LeftToInner) under a
 // fallible Filter would let that Filter divide rows the guard was keeping from it. Both rules are fenced there.
 async function rejects(sql: string) {
-  try { const r = await driver.query({ query: sql, format: 'JSONEachRow', clickhouse_settings: { wait_end_of_query: 1 } }); await r.json(); r.close(); return 'none'; }
-  catch (error) { return String((error as { type?: string }).type); }
+  try {
+    const r = await driver.query({
+      query: sql,
+      format: 'JSONEachRow',
+      clickhouse_settings: { wait_end_of_query: 1 },
+    });
+
+    await r.json();
+    r.close();
+    return 'none';
+  } catch (error) {
+    return String((error as { type?: string }).type);
+  }
 }
+
 async function rows(sql: string) {
-  const r = await driver.query({ query: sql, format: 'JSONEachRow', clickhouse_settings: { wait_end_of_query: 1 } });
-  try { return await r.json<Record<string, unknown>>(); } finally { r.close(); }
+  const r = await driver.query({
+    query: sql,
+    format: 'JSONEachRow',
+    clickhouse_settings: { wait_end_of_query: 1 },
+  });
+
+  try {
+    return await r.json<Record<string, unknown>>();
+  } finally {
+    r.close();
+  }
 }
+
 it('fences PushFilterJoin and LeftToInner under a fallible Filter: the server would copy or push it past the guard', async () => {
   const ten = val(10n, col.UInt64);
+
   // Inner join, ON includes amount: the guard amount > 0 on c alone, then intDiv(10, c.amount).
-  const inner = join({ c: components, p: components }).on(r => [r.c.tenant.eq(r.p.tenant), r.c.amount.eq(r.p.amount)])
-    .where(r => r.c.amount.gt(0n)).where(r => intDiv(ten, r.c.amount).gt(0n)).map(r => ({ id: r.c.id, other: r.p.id }));
+  const inner = join({ c: components, p: components })
+    .on(r => [r.c.tenant.eq(r.p.tenant), r.c.amount.eq(r.p.amount)])
+    .where(r => r.c.amount.gt(0n))
+    .where(r => intDiv(ten, r.c.amount).gt(0n))
+    .map(r => ({ id: r.c.id, other: r.p.id }));
+
   expect(rewriteRel(inner.ir).hits.PushFilterJoin).toBe(0);
-  const innerNative = "SELECT * FROM (SELECT * FROM (SELECT c.id AS id, p.id AS other, c.amount AS amount FROM differential_components c INNER ALL JOIN differential_components p ON c.tenant = p.tenant AND c.amount = p.amount) WHERE amount > 0) WHERE intDiv(10, amount) > 0";
+
+  const innerNative =
+    'SELECT * FROM (SELECT * FROM (SELECT c.id AS id, p.id AS other, c.amount AS amount FROM differential_components c INNER ALL JOIN differential_components p ON c.tenant = p.tenant AND c.amount = p.amount) WHERE amount > 0) WHERE intDiv(10, amount) > 0';
+
   const expectedInner = (await rows(innerNative)).map(r => ({ id: r.id, other: r.other }));
   expect(expectedInner.length).toBe(3); // amounts 2, 3, 5 each match themselves; the amount = 0 row is guarded
   const sortById = (xs: unknown[]) => [...xs].map(x => JSON.stringify(x)).sort();
   expect(sortById(await differential(backends, inner))).toEqual(sortById(expectedInner));
+
   // What PushFilterJoin produced before 4b: the guard inside c; the server copies the division to p (amount = 0 row).
-  expect(await rejects("SELECT c.id FROM (SELECT * FROM differential_components WHERE amount > 0) AS c INNER ALL JOIN differential_components AS p ON c.tenant = p.tenant AND c.amount = p.amount WHERE intDiv(10, c.amount) > 0")).toBe('ILLEGAL_DIVISION');
+  expect(
+    await rejects(
+      'SELECT c.id FROM (SELECT * FROM differential_components WHERE amount > 0) AS c INNER ALL JOIN differential_components AS p ON c.tenant = p.tenant AND c.amount = p.amount WHERE intDiv(10, c.amount) > 0',
+    ),
+  ).toBe('ILLEGAL_DIVISION');
+
   // Left join: the guard p.amount > 0 is null-rejecting, but the Filter above is not total, so the join stays LEFT.
-  const left = leftJoin({ c: components }, { p: components }).on(r => [r.c.tenant.eq(r.p.tenant), r.c.id.eq(r.p.id)])
-    .where(r => r.p.amount.gt(0n)).where(r => intDiv(ten, r.p.amount.ifNull(1n)).gt(0n)).map(r => ({ id: r.c.id }));
+  const left = leftJoin({ c: components }, { p: components })
+    .on(r => [r.c.tenant.eq(r.p.tenant), r.c.id.eq(r.p.id)])
+    .where(r => r.p.amount.gt(0n))
+    .where(r => intDiv(ten, r.p.amount.ifNull(1n)).gt(0n))
+    .map(r => ({ id: r.c.id }));
+
   expect(rewriteRel(left.ir).hits).toMatchObject({ LeftToInner: 0, PushFilterJoin: 0 });
-  for (const backend of backends) expect(backend.compile(left.ir).compiled.sql).toMatch(/LEFT ALL JOIN/);
-  const leftNative = "SELECT id FROM (SELECT * FROM (SELECT c.id AS id, p.amount AS amount FROM differential_components c LEFT ALL JOIN differential_components p ON c.tenant = p.tenant AND c.id = p.id) WHERE amount > 0) WHERE intDiv(10, ifNull(amount, 1)) > 0 SETTINGS join_use_nulls = 1";
+
+  for (const backend of backends)
+    expect(backend.compile(left.ir).compiled.sql).toMatch(/LEFT ALL JOIN/);
+
+  const leftNative =
+    'SELECT id FROM (SELECT * FROM (SELECT c.id AS id, p.amount AS amount FROM differential_components c LEFT ALL JOIN differential_components p ON c.tenant = p.tenant AND c.id = p.id) WHERE amount > 0) WHERE intDiv(10, ifNull(amount, 1)) > 0 SETTINGS join_use_nulls = 1';
+
   const expectedLeft = await rows(leftNative);
   expect(expectedLeft.length).toBe(3);
   expect(sortById(await differential(backends, left))).toEqual(sortById(expectedLeft));
   // The INNER counterpart that fails natively is pinned in outer-join.integration.ts (4b LeftToInner exposure anchor).
 });
+
 it('preserves nested occurrence paths, same-side residuals, swapped names and shared consumers', async () => {
-  const nested = join({ t0: components, '__typedhouse_input': parts }).on(r => r.t0.tenant.eq(r.__typedhouse_input.tenant));
+  const nested = join({ t0: components, '__typedhouse_input': parts }).on(r =>
+    r.t0.tenant.eq(r.__typedhouse_input.tenant),
+  );
+
   const query = crossJoin({ t0: nested, '__typedhouse_input': parts })
-    .where(r => r.t0.t0.tenant.eq('acme')
-      .and(r.t0.t0.id.eq('a').or(r.t0.__typedhouse_input.id.eq('q')))
-      .and(r.__typedhouse_input.tenant.eq('other')))
+    .where(r =>
+      r.t0.t0.tenant
+        .eq('acme')
+        .and(r.t0.t0.id.eq('a').or(r.t0.__typedhouse_input.id.eq('q')))
+        .and(r.__typedhouse_input.tenant.eq('other')),
+    )
     .map(r => ({ tenant: r.t0.t0.id, id: r.t0.t0.tenant }))
     .where(r => r.id.eq('acme').and(r.tenant.eq('b')));
+
   const rewritten = rewriteRel(query.ir);
   expect(rewritten.hits.PushFilterJoin).toBeGreaterThanOrEqual(2);
   expect(rewritten.hits.PushFilterProject).toBeGreaterThan(0);
   expect(await differential(backends, query)).toEqual([{ tenant: 'b', id: 'acme' }]);
-  const direct = await driver.query({ query: "SELECT c.id AS tenant,c.tenant AS id FROM differential_components c INNER ALL JOIN differential_parts p ON c.tenant=p.tenant CROSS JOIN differential_parts x WHERE c.tenant='acme' AND (c.id='a' OR p.id='q') AND x.tenant='other' AND c.id='b'", format: 'JSONEachRow' });
-  try { expect(await direct.json()).toEqual([{ tenant: 'b', id: 'acme' }]); } finally { direct.close(); }
-  const shared = components.map(r => ({ id: r.id, tenant: r.tenant })).where(r => r.tenant.eq('acme'));
-  const branches = unionAll(shared.where(r => r.id.eq('a')), shared.where(r => r.id.eq('b')), shared.where(r => r.id.eq('a'))).orderBy(r => r.id);
-  expect(await differential(backends, branches, true)).toEqual([{ id: 'a', tenant: 'acme' }, { id: 'a', tenant: 'acme' }, { id: 'b', tenant: 'acme' }]);
+
+  const direct = await driver.query({
+    query:
+      "SELECT c.id AS tenant,c.tenant AS id FROM differential_components c INNER ALL JOIN differential_parts p ON c.tenant=p.tenant CROSS JOIN differential_parts x WHERE c.tenant='acme' AND (c.id='a' OR p.id='q') AND x.tenant='other' AND c.id='b'",
+    format: 'JSONEachRow',
+  });
+
+  try {
+    expect(await direct.json()).toEqual([{ tenant: 'b', id: 'acme' }]);
+  } finally {
+    direct.close();
+  }
+
+  const shared = components
+    .map(r => ({ id: r.id, tenant: r.tenant }))
+    .where(r => r.tenant.eq('acme'));
+
+  const branches = unionAll(
+    shared.where(r => r.id.eq('a')),
+    shared.where(r => r.id.eq('b')),
+    shared.where(r => r.id.eq('a')),
+  ).orderBy(r => r.id);
+
+  expect(await differential(backends, branches, true)).toEqual([
+    { id: 'a', tenant: 'acme' },
+    { id: 'a', tenant: 'acme' },
+    { id: 'b', tenant: 'acme' },
+  ]);
 });
+
 it('retains NULL-as-false and element-dependent predicates after left expansion', async () => {
   const expanded = components.leftArrayJoin(r => r.ids, '__typedhouse_element');
-  const query = expanded.where(r => r.category.eq(val(null, col.Nullable(col.String))).or(r.__typedhouse_element.eq('')))
+
+  const query = expanded
+    .where(r =>
+      r.category.eq(val(null, col.Nullable(col.String))).or(r.__typedhouse_element.eq('')),
+    )
     .map(r => ({ id: r.id, part: r.__typedhouse_element }));
+
   expect(rewriteRel(query.ir).hits.PushFilterArrayJoin).toBe(0);
   expect(await differential(backends, query)).toEqual([{ id: 'c', part: '' }]);
-  const independent = expanded.where(r => r.category.isNull()).map(r => ({ id: r.id, part: r.__typedhouse_element }));
+
+  const independent = expanded
+    .where(r => r.category.isNull())
+    .map(r => ({ id: r.id, part: r.__typedhouse_element }));
+
   expect(rewriteRel(independent.ir).hits.PushFilterArrayJoin).toBe(1);
   expect(await differential(backends, independent)).toEqual([{ id: 'c', part: '' }]);
 });
-it('executes 700 bounded shrinkable multi-operator recipes with actual rule/topology coverage', async () => {
-  const hits = new Set<string>(), shapes = new Set<string>();
-  let certain = 0;
-  const outerRuns = { converted: 0, kept: 0 };
-  failedExecutions = 0; for (const v of Object.values(inputCasts)) { v.failed = 0; v.rows = 0; }
-  const start = performance.now();
-  // Slice 4d: `check` (all IO and the differential assertions) runs prefetched, 8 recipes at a time; the accounting below
-  // stays in generation order. A failure is rethrown at its own run, with both texts.
-  const evaluate = async (recipe: Recipe) => {
-    try { return await check(recipe); } catch (cause) {
-      const sqls = backends.map(b => { const p = b.compile(build(recipe).ir).compiled; return { name: b.name, sql: p.sql, params: p.params }; });
-      throw new Error(`${String(cause)}\n${JSON.stringify(sqls)}`, { cause });
+
+it(
+  'executes 700 bounded shrinkable multi-operator recipes with actual rule/topology coverage',
+  async () => {
+    const hits = new Set<string>(),
+      shapes = new Set<string>();
+
+    let certain = 0;
+    const outerRuns = { converted: 0, kept: 0 };
+    failedExecutions = 0;
+
+    for (const v of Object.values(inputCasts)) {
+      v.failed = 0;
+      v.rows = 0;
     }
-  };
-  const { result, prefetched } = await prefetchedCheck(recipeArbitrary, { seed: Number(process.env.TYPEDHOUSE_PUSHDOWN_SEED ?? seed), numRuns: 700, // 4b: 700 runs reach all 132 shapes (500: 129)
-    ...(process.env.TYPEDHOUSE_PUSHDOWN_PATH ? { path: process.env.TYPEDHOUSE_PUSHDOWN_PATH } : {}) }, evaluate, recipe => {
-    const rewritten = rewriteRel(build(recipe).ir);
-    for (const [rule, n] of Object.entries(rewritten.hits)) if (n) hits.add(rule);
-    if (recipe.kind === 'left' || recipe.kind === 'right' || recipe.kind === 'full') {
-      if (rewritten.hits.LeftToInner) outerRuns.converted++;
-      if (/(LEFT|RIGHT|FULL) ALL JOIN/.test(backends[0]!.compile(build(recipe).ir).compiled.sql)) outerRuns.kept++;
-    }
-    shapes.add(shape(recipe));
-    if (fails(recipe)) certain++;
-  });
-  console.info('pushdown differential', { runs: result.numRuns, prefetched, seed: result.seed, milliseconds: Math.round(performance.now() - start), rules: [...hits], topologies: shapes.size, certainFailures: certain, failedExecutions, inputCasts, outer: outerRuns });
-  if (result.failed) throw new Error(`seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`);
-  expect(result.numRuns).toBe(700);
-  expect([...hits].sort()).toEqual(['LeftToInner', 'MergeFilter', 'MergeProject', 'PushFilterArrayJoin', 'PushFilterJoin', 'PushFilterProject']);
-  // Slice 4b: outer recipes both convert and keep their kind; some SQL keeps join_use_nulls, some loses every outer join.
-  expect(outerRuns.converted, 'LeftToInner runs').toBeGreaterThan(40);
-  expect(outerRuns.kept, 'outer joins surviving').toBeGreaterThan(40);
-  expect(shapes.size).toBe(shapeCount);
-  // Both outcomes of the fallible filter are exercised natively: every certain failure failed, and some fallible recipes succeeded.
-  expect(certain).toBeGreaterThan(20);
-  expect(failedExecutions).toBeGreaterThanOrEqual(certain);
-  expect(failedExecutions).toBeLessThan(250);
-  // 4d (m1): the failing cast itself fails in some runs (identically everywhere) and returns rows in others (its bad rows
-  // filtered out below the cast); the passing variant mostly returns rows.
-  expect(inputCasts.failing.failed, 'failing-cast runs that failed').toBeGreaterThan(20);
-  expect(inputCasts.failing.rows, 'failing-cast runs with rows').toBeGreaterThan(0);
-  expect(inputCasts.passing.rows, 'passing-cast runs with rows').toBeGreaterThan(20);
-}, ciLimit(180000));
+
+    const start = performance.now();
+
+    // Slice 4d: `check` (all IO and the differential assertions) runs prefetched, 8 recipes at a time; the accounting below
+    // stays in generation order. A failure is rethrown at its own run, with both texts.
+    const evaluate = async (recipe: Recipe) => {
+      try {
+        return await check(recipe);
+      } catch (cause) {
+        const sqls = backends.map(b => {
+          const p = b.compile(build(recipe).ir).compiled;
+          return { name: b.name, sql: p.sql, params: p.params };
+        });
+
+        throw new Error(`${String(cause)}\n${JSON.stringify(sqls)}`, { cause });
+      }
+    };
+
+    const { result, prefetched } = await prefetchedCheck(
+      recipeArbitrary,
+      {
+        seed: Number(process.env.TYPEDHOUSE_PUSHDOWN_SEED ?? seed),
+        numRuns: 700, // 4b: 700 runs reach all 132 shapes (500: 129)
+        ...(process.env.TYPEDHOUSE_PUSHDOWN_PATH
+          ? { path: process.env.TYPEDHOUSE_PUSHDOWN_PATH }
+          : {}),
+      },
+      evaluate,
+      recipe => {
+        const rewritten = rewriteRel(build(recipe).ir);
+        for (const [rule, n] of Object.entries(rewritten.hits)) if (n) hits.add(rule);
+
+        if (recipe.kind === 'left' || recipe.kind === 'right' || recipe.kind === 'full') {
+          if (rewritten.hits.LeftToInner) outerRuns.converted++;
+
+          if (
+            /(LEFT|RIGHT|FULL) ALL JOIN/.test(backends[0]!.compile(build(recipe).ir).compiled.sql)
+          )
+            outerRuns.kept++;
+        }
+
+        shapes.add(shape(recipe));
+        if (fails(recipe)) certain++;
+      },
+    );
+
+    console.info('pushdown differential', {
+      runs: result.numRuns,
+      prefetched,
+      seed: result.seed,
+      milliseconds: Math.round(performance.now() - start),
+      rules: [...hits],
+      topologies: shapes.size,
+      certainFailures: certain,
+      failedExecutions,
+      inputCasts,
+      outer: outerRuns,
+    });
+
+    if (result.failed)
+      throw new Error(
+        `seed=${result.seed} path=${result.counterexamplePath} shrinks=${result.numShrinks} recipe=${JSON.stringify(result.counterexample)}\n${String(result.errorInstance)}`,
+      );
+
+    expect(result.numRuns).toBe(700);
+
+    expect([...hits].sort()).toEqual([
+      'LeftToInner',
+      'MergeFilter',
+      'MergeProject',
+      'PushFilterArrayJoin',
+      'PushFilterJoin',
+      'PushFilterProject',
+    ]);
+
+    // Slice 4b: outer recipes both convert and keep their kind; some SQL keeps join_use_nulls, some loses every outer join.
+    expect(outerRuns.converted, 'LeftToInner runs').toBeGreaterThan(40);
+    expect(outerRuns.kept, 'outer joins surviving').toBeGreaterThan(40);
+    expect(shapes.size).toBe(shapeCount);
+    // Both outcomes of the fallible filter are exercised natively: every certain failure failed, and some fallible recipes succeeded.
+    expect(certain).toBeGreaterThan(20);
+    expect(failedExecutions).toBeGreaterThanOrEqual(certain);
+    expect(failedExecutions).toBeLessThan(250);
+    // 4d (m1): the failing cast itself fails in some runs (identically everywhere) and returns rows in others (its bad rows
+    // filtered out below the cast); the passing variant mostly returns rows.
+    expect(inputCasts.failing.failed, 'failing-cast runs that failed').toBeGreaterThan(20);
+    expect(inputCasts.failing.rows, 'failing-cast runs with rows').toBeGreaterThan(0);
+    expect(inputCasts.passing.rows, 'passing-cast runs with rows').toBeGreaterThan(20);
+  },
+  ciLimit(180000),
+);
+
 it('detects real decoded duplicate loss, genuinely shrinks and exactly replays', async () => {
   const source = backends[1]!;
-  const faulty: Backend = { name: 'pushdown-duplicate-loss', compile: r => source.compile(r), async *run(plan) {
-    const seen = new Set<string>();
-    for await (const batch of source.run(plan)) yield batch.filter(row => {
-      const key = canonicalKey(decodedRecord(row), Object.entries(plan.compiled.columns));
-      if (seen.has(key)) return false;
-      seen.add(key); return true;
-    });
-  } };
+
+  const faulty: Backend = {
+    name: 'pushdown-duplicate-loss',
+    compile: r => source.compile(r),
+    async *run(plan) {
+      const seen = new Set<string>();
+
+      for await (const batch of source.run(plan))
+        yield batch.filter(row => {
+          const key = canonicalKey(decodedRecord(row), Object.entries(plan.compiled.columns));
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+    },
+  };
+
   // Slice 3b: fallible recipes can fail on the server before any duplicate is lost, so the campaign that must find the
   // injected loss (and shrink to it) runs over the recipes that execute; the 500-run differential above covers the rest.
-  const property = fc.asyncProperty(recipeArbitrary.filter(recipe => !recipe.fallible && recipe.inputCast !== 'failing') /* 4d: a failing input cast fails before IO */, async recipe => { await differential([backends[0]!, faulty], build(recipe), true); });
+  const property = fc.asyncProperty(
+    recipeArbitrary.filter(
+      recipe => !recipe.fallible && recipe.inputCast !== 'failing',
+    ) /* 4d: a failing input cast fails before IO */,
+    async recipe => {
+      await differential([backends[0]!, faulty], build(recipe), true);
+    },
+  );
+
   const result = await fc.check(property, { seed, numRuns: 500 });
   expect(result.failed).toBe(true);
   expect(result.numShrinks).toBeGreaterThan(0);
   expect(String(result.errorInstance)).toContain('multiplicity diff');
   expect(String(result.errorInstance)).toContain('params');
-  const replay = await fc.check(property, { seed: result.seed, path: result.counterexamplePath!, numRuns: 500 });
+
+  const replay = await fc.check(property, {
+    seed: result.seed,
+    path: result.counterexamplePath!,
+    numRuns: 500,
+  });
+
   expect(replay.counterexample).toEqual(result.counterexample);
   expect(String(replay.errorInstance)).toContain('multiplicity diff');
-  console.info('pushdown fault injection', { shrinks: result.numShrinks, path: result.counterexamplePath, seed: result.seed });
+
+  console.info('pushdown fault injection', {
+    shrinks: result.numShrinks,
+    path: result.counterexamplePath,
+    seed: result.seed,
+  });
 }, 120000);

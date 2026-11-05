@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { col, count, from, join, Query, table, TableQuery, type Rel } from '../src/index.js';
 
-const t = table('t', { id: col.UInt32, cat: col.String, n: col.Nullable(col.UInt32) }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] });
+const t = table(
+  't',
+  { id: col.UInt32, cat: col.String, n: col.Nullable(col.UInt32) },
+  { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] },
+);
+
 const q = from(t);
 
 describe('prewhere builder', () => {
@@ -12,7 +17,9 @@ describe('prewhere builder', () => {
     if (filtered.ir.kind !== 'Prewhere') throw new Error('wrong node');
     expect(filtered.ir.input).toBe(q.ir);
     expect(filtered.ir.output).toBe(q.ir.output);
-    for (const name of ['prewhere', 'final', 'sample', 'insertMany']) expect((filtered as unknown as Record<string, unknown>)[name]).toBeUndefined();
+
+    for (const name of ['prewhere', 'final', 'sample', 'insertMany'])
+      expect((filtered as unknown as Record<string, unknown>)[name]).toBeUndefined();
   });
 
   it('keeps final and sample on its scan, in either order', () => {
@@ -37,14 +44,26 @@ describe('prewhere builder', () => {
   });
 
   it('is not live', () => {
-    const live = from(table('s', { id: col.UInt32 }, { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [], source: {} as never }));
+    const live = from(
+      table(
+        's',
+        { id: col.UInt32 },
+        { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [], source: {} as never },
+      ),
+    );
+
     expect(live.caps.live).toBe(true);
     expect(live.prewhere(r => r.id.gt(1)).caps.live).toBe(false);
   });
 
   it('rejects a source that is not a scan, for JavaScript callers', () => {
     const fake = new TableQuery(q.where(r => r.id.gt(1)).ir, { live: false });
-    expect(() => fake.prewhere(() => { throw new Error('predicate ran'); })).toThrow(/invalid_prewhere_source/);
+
+    expect(() =>
+      fake.prewhere(() => {
+        throw new Error('predicate ran');
+      }),
+    ).toThrow(/invalid_prewhere_source/);
   });
 
   it('rejects what is not a row predicate', () => {

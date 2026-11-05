@@ -10,6 +10,7 @@ it('runtime CHType mappings exactly equal descriptor phantoms under the selected
   // Ephemeral source only: acceptance never overwrites snapshots. Use the CLI rather
   // than the removed legacy compiler API so this gate also runs on TypeScript 7+.
   const directory = mkdtempSync(resolve('test/types/.runtime-mapping-'));
+
   try {
     const source = [
       "import { expectTypeOf } from 'expect-type';",
@@ -17,15 +18,36 @@ it('runtime CHType mappings exactly equal descriptor phantoms under the selected
       "import { scalars, structured, fixture } from '../ch-types.js';",
       "import { adversarialMaps } from '../adversarial-maps.js';",
       ...Object.entries({ scalars, structured, fixture, adversarialMaps }).map(([name, table]) => {
-        const shape = `{ ${Object.entries(table.columns).map(([key, type]) => `${JSON.stringify(key)}: ${toTypeScript(type)}`).join('; ')} }`;
+        const shape = `{ ${Object.entries(table.columns)
+          .map(([key, type]) => `${JSON.stringify(key)}: ${toTypeScript(type)}`)
+          .join('; ')} }`;
+
         return `expectTypeOf<Infer<typeof ${name}>>().toEqualTypeOf<${shape}>();`;
       }),
     ].join('\n');
+
     writeFileSync(join(directory, 'mapping.ts'), source);
-    writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ extends: '../../../tsconfig.json', include: ['./mapping.ts'] }));
+
+    writeFileSync(
+      join(directory, 'tsconfig.json'),
+      JSON.stringify({ extends: '../../../tsconfig.json', include: ['./mapping.ts'] }),
+    );
+
     const version = process.env.TYPEDHOUSE_TYPESCRIPT_VERSION;
     const args = version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc'];
-    const result = spawnSync('pnpm', [...args, '--noEmit', '--project', join(directory, 'tsconfig.json')], { encoding: 'utf8', timeout: 60000 });
-    expect({ status: result.status, error: result.error?.message, output: result.stdout }).toEqual({ status: 0, error: undefined, output: '' });
-  } finally { rmSync(directory, { recursive: true, force: true }); }
+
+    const result = spawnSync(
+      'pnpm',
+      [...args, '--noEmit', '--project', join(directory, 'tsconfig.json')],
+      { encoding: 'utf8', timeout: 60000 },
+    );
+
+    expect({ status: result.status, error: result.error?.message, output: result.stdout }).toEqual({
+      status: 0,
+      error: undefined,
+      output: '',
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }, 90000);

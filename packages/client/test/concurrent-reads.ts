@@ -6,6 +6,7 @@ export async function concurrentReads<A, B, C>(
     Promise.resolve().then(tasks[1]),
     Promise.resolve().then(tasks[2]),
   ] as const;
+
   // Drain every read (including iterator cleanup) before propagating the first input-order failure.
   await Promise.allSettled(pending);
   return Promise.all(pending);

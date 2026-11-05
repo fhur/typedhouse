@@ -1,10 +1,20 @@
-import { exprNode as constructExpr, methodCatalog, print, type CHType, type ExprNode, type Rel } from '@typedhouse/core';
+import {
+  exprNode as constructExpr,
+  methodCatalog,
+  print,
+  type CHType,
+  type ExprNode,
+  type Rel,
+} from '@typedhouse/core';
 import { resolveAggregate, resolveCall } from './resolve.js';
 
 type Ref = Extract<ExprNode, { kind: 'ColumnRef' }>;
+
 /** Constructors snapshot unregistered manual graphs. Restore graph edges (not
  * owned containers) after allocation so even manual Params retain identity. */
-export function exprNode<K extends ExprNode['kind']>(fields: Parameters<typeof constructExpr<K>>[0]): Extract<ExprNode, { kind: K }>;
+export function exprNode<K extends ExprNode['kind']>(
+  fields: Parameters<typeof constructExpr<K>>[0],
+): Extract<ExprNode, { kind: K }>;
 export function exprNode(fields: Parameters<typeof constructExpr>[0]): ExprNode {
   const made = constructExpr(fields);
   const edges: Record<string, unknown> = {};
@@ -12,55 +22,129 @@ export function exprNode(fields: Parameters<typeof constructExpr>[0]): ExprNode 
   if ('params' in fields) edges.params = Object.freeze([...fields.params]);
   if ('expr' in fields) edges.expr = fields.expr;
   if ('rel' in fields && fields.kind === 'Subquery') edges.rel = fields.rel;
-  if ('branches' in fields) { edges.branches = Object.freeze(fields.branches.map(b => Object.freeze({ ...b }))); edges.otherwise = fields.otherwise; }
+
+  if ('branches' in fields) {
+    edges.branches = Object.freeze(fields.branches.map(b => Object.freeze({ ...b })));
+    edges.otherwise = fields.otherwise;
+  }
+
   // Normal constructor-built graphs already retain all edges.
   const sameEdges = Object.keys(edges).every(k => {
-    const a = edges[k], b = (made as unknown as Record<string, unknown>)[k];
+    const a = edges[k],
+      b = (made as unknown as Record<string, unknown>)[k];
+
     return Array.isArray(a) && Array.isArray(b) ? a.every((v, i) => v === b[i]) : a === b;
   });
+
   return sameEdges ? made : Object.freeze({ ...made, ...edges });
 }
+
 /** Scope-local substitution. Params are identity-bearing inputs, never copied. */
-export function mapExpression(e: ExprNode, ref: (e: Ref) => ExprNode, subquery: (r: Rel) => Rel = r => r): ExprNode {
+export function mapExpression(
+  e: ExprNode,
+  ref: (e: Ref) => ExprNode,
+  subquery: (r: Rel) => Rel = r => r,
+): ExprNode {
   const visit = (a: ExprNode) => mapExpression(a, ref, subquery);
   const { id: _id, ...fields } = e;
+
   switch (e.kind) {
-    case 'ColumnRef': return ref(e);
-    case 'Param': case 'Literal': return e;
+    case 'ColumnRef':
+      return ref(e);
+    case 'Param':
+    case 'Literal':
+      return e;
+
     case 'Subquery': {
       const rel = subquery(e.rel);
-      return rel === e.rel ? e : exprNode({ ...fields, kind: 'Subquery', usage: e.usage, type: e.type, rel });
+
+      return rel === e.rel
+        ? e
+        : exprNode({ ...fields, kind: 'Subquery', usage: e.usage, type: e.type, rel });
     }
-    case 'Call': case 'Raw': case 'Agg': {
+
+    case 'Call':
+    case 'Raw':
+    case 'Agg': {
       const args = e.args.map(visit);
       const params = e.kind === 'Agg' ? e.params.map(visit) : undefined;
-      if (args.every((a, i) => a === e.args[i]) && (!params || e.kind === 'Agg' && params.every((a, i) => a === e.params[i]))) return e;
+
+      if (
+        args.every((a, i) => a === e.args[i]) &&
+        (!params || (e.kind === 'Agg' && params.every((a, i) => a === e.params[i])))
+      )
+        return e;
+
       const { id: _id, ...callFields } = e;
       return exprNode({ ...callFields, args, ...(params ? { params } : {}) });
     }
+
     case 'Cast': {
       const expr = visit(e.expr);
       return expr === e.expr ? e : exprNode({ kind: 'Cast', expr, to: e.to, type: e.type });
     }
+
     case 'Case': {
       const branches = e.branches.map(b => ({ when: visit(b.when), then: visit(b.then) }));
       const otherwise = visit(e.otherwise);
-      return otherwise === e.otherwise && branches.every((b, i) => b.when === e.branches[i]!.when && b.then === e.branches[i]!.then) ? e : exprNode({ kind: 'Case', branches, otherwise, type: e.type });
+
+      return otherwise === e.otherwise &&
+        branches.every((b, i) => b.when === e.branches[i]!.when && b.then === e.branches[i]!.then)
+        ? e
+        : exprNode({ kind: 'Case', branches, otherwise, type: e.type });
     }
   }
 }
+
 export function rebind(e: ExprNode, from: Rel, to: Rel): ExprNode {
-  return from === to ? e : mapExpression(e, r => r.rel === from.id ? exprNode({ kind: 'ColumnRef', type: r.type, path: r.path, ...(r.mode === undefined ? {} : { mode: r.mode }), rel: to.id }) : r);
+  return from === to
+    ? e
+    : mapExpression(e, r =>
+        r.rel === from.id
+          ? exprNode({
+              kind: 'ColumnRef',
+              type: r.type,
+              path: r.path,
+              ...(r.mode === undefined ? {} : { mode: r.mode }),
+              rel: to.id,
+            })
+          : r,
+      );
 }
-function base(t: CHType): CHType { return t.kind === 'Nullable' || t.kind === 'LowCardinality' ? base(t.inner) : t; }
+
+function base(t: CHType): CHType {
+  return t.kind === 'Nullable' || t.kind === 'LowCardinality' ? base(t.inner) : t;
+}
+
 function family(t: CHType): string | undefined {
   const b = base(t);
   if (b.kind !== 'scalar') return undefined;
-  return b.name === 'String' || b.name === 'Bool' ? b.name : /^U?Int(8|16|32|64|128|256)$/.test(b.name) ? 'integer' : undefined;
+
+  return b.name === 'String' || b.name === 'Bool'
+    ? b.name
+    : /^U?Int(8|16|32|64|128|256)$/.test(b.name)
+      ? 'integer'
+      : undefined;
 }
-const booleanFamily = ['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'and', 'or', 'not', 'isNull', 'isNotNull'];
+
+const booleanFamily = [
+  'eq',
+  'ne',
+  'lt',
+  'le',
+  'gt',
+  'ge',
+  'and',
+  'or',
+  'not',
+  'isNull',
+  'isNotNull',
+];
+
 const comparisons = ['eq', 'ne', 'lt', 'le', 'gt', 'ge'];
+
 const arithmeticFamily = ['plus', 'minus', 'multiply'];
+
 /** Closed total fragment, checked against the authoritative resolver, not flags.
  * `wide` admits integer `plus`/`minus`/`multiply` (ClickHouse wraps), same-family
  * `ifNull` and `element` of a named tuple (or array of tuples) column with a
@@ -70,93 +154,200 @@ function resolveTotal(e: ExprNode, wide: boolean): CHType | undefined {
     if (a.kind === 'ColumnRef' || a.kind === 'Param') {
       const t = a.type ?? expected;
       if (!t || !family(t)) throw new Error('unsafe operand');
-      return a.kind === 'Param' && a.value === null && t.kind !== 'Nullable' ? { kind: 'Nullable', inner: t } : t;
+
+      return a.kind === 'Param' && a.value === null && t.kind !== 'Nullable'
+        ? { kind: 'Nullable', inner: t }
+        : t;
     }
+
     if (a.kind !== 'Call' || a.fn.origin !== 'typed') throw new Error('unsafe expression');
     const name = a.fn.name;
+
     if (wide && name === 'element' && a.args[0]?.kind === 'ColumnRef') {
-      const resolved = resolveCall(a, (x, want) => x.kind === 'ColumnRef' ? x.type : resolve(x, want));
-      if (!methodCatalog.find(d => d.name === name)?.deterministic) throw new Error('unsafe metadata');
+      const resolved = resolveCall(a, (x, want) =>
+        x.kind === 'ColumnRef' ? x.type : resolve(x, want),
+      );
+
+      if (!methodCatalog.find(d => d.name === name)?.deterministic)
+        throw new Error('unsafe metadata');
+
       return resolved.result;
     }
-    const arithmetic = wide && arithmeticFamily.includes(name), fallback = wide && name === 'ifNull';
-    if (!booleanFamily.includes(name) && !arithmetic && !fallback) throw new Error('unsafe function');
+
+    const arithmetic = wide && arithmeticFamily.includes(name),
+      fallback = wide && name === 'ifNull';
+
+    if (!booleanFamily.includes(name) && !arithmetic && !fallback)
+      throw new Error('unsafe function');
+
     const resolved = resolveCall(a, resolve);
-    if ((comparisons.includes(name) || fallback) && print(base(resolved.types[0]!)) !== print(base(resolved.types[1]!))) throw new Error('unsafe comparison coercion');
-    if (arithmetic && ![...resolved.types, resolved.result].every(t => family(t) === 'integer')) throw new Error('unsafe arithmetic');
-    if (!methodCatalog.find(d => d.name === name)?.deterministic) throw new Error('unsafe metadata');
+
+    if (
+      (comparisons.includes(name) || fallback) &&
+      print(base(resolved.types[0]!)) !== print(base(resolved.types[1]!))
+    )
+      throw new Error('unsafe comparison coercion');
+
+    if (arithmetic && ![...resolved.types, resolved.result].every(t => family(t) === 'integer'))
+      throw new Error('unsafe arithmetic');
+
+    if (!methodCatalog.find(d => d.name === name)?.deterministic)
+      throw new Error('unsafe metadata');
+
     return resolved.result;
   }
-  try { return resolve(e); } catch { return undefined; }
+
+  try {
+    return resolve(e);
+  } catch {
+    return undefined;
+  }
 }
+
 export function safePredicate(e: ExprNode): boolean {
   const t = resolveTotal(e, false);
   return t !== undefined && print(base(t)) === 'Bool';
 }
+
 /** Boolean result over the wide fragment: substituted predicates may carry
  * projected arithmetic. `safePredicate` (and every rule gated on it) is unchanged. */
 export function totalPredicate(e: ExprNode): boolean {
   const t = resolveTotal(e, true);
   return t !== undefined && print(base(t)) === 'Bool';
 }
+
 /** Dropping or re-evaluating a total expression can neither suppress nor add a
  * failure: bare column/Param reads of any type, and the wide fragment over families. */
 export function totalExpression(e: ExprNode): boolean {
   return e.kind === 'ColumnRef' || e.kind === 'Param' || resolveTotal(e, true) !== undefined;
 }
+
 /** Whole-computation envelope, not merely determinism: direct non-null
  * String/Bool/integer keys, count(), max and min of those direct columns and integer
  * sum. No casts, combinators,
  * nullable/decimal state, raw calls or hidden fallible outputs may be suppressed.
  * Integer sum has ClickHouse's wrapping semantics, not checked overflow. */
 export function safeAggregate(rel: Extract<Rel, { kind: 'Aggregate' }>): boolean {
-  const direct = (e: ExprNode): boolean => e.kind === 'ColumnRef' && e.rel === rel.input.id && e.type.kind === 'scalar' && family(e.type) !== undefined;
+  const direct = (e: ExprNode): boolean =>
+    e.kind === 'ColumnRef' &&
+    e.rel === rel.input.id &&
+    e.type.kind === 'scalar' &&
+    family(e.type) !== undefined;
+
   if (!Object.getOwnPropertyNames(rel.keys).every(k => direct(rel.keys[k]!))) return false;
+
   return Object.getOwnPropertyNames(rel.aggs).every(k => {
     const e = rel.aggs[k]!;
-    if (e.kind !== 'Agg' || e.fn.origin !== 'typed' || e.params.length || e.combinators.length) return false;
-    if (e.fn.name !== 'count' && e.fn.name !== 'max' && e.fn.name !== 'min' && e.fn.name !== 'sum') return false;
-    if (!e.args.every(a => direct(a) && (e.fn.name !== 'sum' || family(a.type!) === 'integer'))) return false;
-    try { resolveAggregate(e, a => { if (!a.type) throw new Error('untyped'); return a.type; }); return true; } catch { return false; }
+
+    if (e.kind !== 'Agg' || e.fn.origin !== 'typed' || e.params.length || e.combinators.length)
+      return false;
+
+    if (e.fn.name !== 'count' && e.fn.name !== 'max' && e.fn.name !== 'min' && e.fn.name !== 'sum')
+      return false;
+
+    if (!e.args.every(a => direct(a) && (e.fn.name !== 'sum' || family(a.type!) === 'integer')))
+      return false;
+
+    try {
+      resolveAggregate(e, a => {
+        if (!a.type) throw new Error('untyped');
+        return a.type;
+      });
+
+      return true;
+    } catch {
+      return false;
+    }
   });
 }
+
 export function conjuncts(e: ExprNode): ExprNode[] {
-  return e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'and' ? e.args.flatMap(conjuncts) : [e];
+  return e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'and'
+    ? e.args.flatMap(conjuncts)
+    : [e];
 }
+
 export function conjunction(es: readonly ExprNode[]): ExprNode {
   if (!es.length) throw new Error('empty conjunction');
-  return es.slice(1).reduce((a, b) => exprNode({ kind: 'Call', fn: { name: 'and', deterministic: true, origin: 'typed' }, args: [a, b], type: a.type?.kind === 'Nullable' || b.type?.kind === 'Nullable' ? { kind: 'Nullable', inner: { kind: 'scalar', name: 'Bool' } } : { kind: 'scalar', name: 'Bool' } }), es[0]!);
+
+  return es.slice(1).reduce(
+    (a, b) =>
+      exprNode({
+        kind: 'Call',
+        fn: { name: 'and', deterministic: true, origin: 'typed' },
+        args: [a, b],
+        type:
+          a.type?.kind === 'Nullable' || b.type?.kind === 'Nullable'
+            ? { kind: 'Nullable', inner: { kind: 'scalar', name: 'Bool' } }
+            : { kind: 'scalar', name: 'Bool' },
+      }),
+    es[0]!,
+  );
 }
+
 export function references(e: ExprNode): Ref[] {
   const refs: Ref[] = [];
-  mapExpression(e, r => { refs.push(r); return r; });
+
+  mapExpression(e, r => {
+    refs.push(r);
+    return r;
+  });
+
   return refs;
 }
+
 /** No Raw, no Subquery and no call whose catalog entry is not deterministic: evaluating
  * such an expression at another point of the plan could change its value. */
 export function deterministicExpression(e: ExprNode): boolean {
-  return !contains(e, a => a.kind === 'Raw' || a.kind === 'Subquery' || (a.kind === 'Call' || a.kind === 'Agg') && a.fn.deterministic !== true);
+  return !contains(
+    e,
+    a =>
+      a.kind === 'Raw' ||
+      a.kind === 'Subquery' ||
+      ((a.kind === 'Call' || a.kind === 'Agg') && a.fn.deterministic !== true),
+  );
 }
+
 export function contains(e: ExprNode, test: (e: ExprNode) => boolean): boolean {
   if (test(e)) return true;
+
   switch (e.kind) {
-    case 'Call': case 'Raw': case 'Agg': return e.args.some(a => contains(a, test)) || (e.kind === 'Agg' && e.params.some(a => contains(a, test)));
-    case 'Cast': return contains(e.expr, test);
-    case 'Case': return e.branches.some(b => contains(b.when, test) || contains(b.then, test)) || contains(e.otherwise, test);
-    default: return false; // Subquery scopes are opaque here, as in mapExpression.
+    case 'Call':
+    case 'Raw':
+    case 'Agg':
+      return (
+        e.args.some(a => contains(a, test)) ||
+        (e.kind === 'Agg' && e.params.some(a => contains(a, test)))
+      );
+    case 'Cast':
+      return contains(e.expr, test);
+    case 'Case':
+      return (
+        e.branches.some(b => contains(b.when, test) || contains(b.then, test)) ||
+        contains(e.otherwise, test)
+      );
+    default:
+      return false; // Subquery scopes are opaque here, as in mapExpression.
   }
 }
+
 /** Inline a flat Project's outputs: refs bound to it (path length 1) become its
  * expressions, already bound to `project.input`. Shared subtrees keep identity. */
 export function substitute(e: ExprNode, project: Extract<Rel, { kind: 'Project' }>): ExprNode {
-  return mapExpression(e, r => r.rel === project.id && r.path.length === 1 && Object.hasOwn(project.exprs, r.path[0]!) ? project.exprs[r.path[0]!]! : r);
+  return mapExpression(e, r =>
+    r.rel === project.id && r.path.length === 1 && Object.hasOwn(project.exprs, r.path[0]!)
+      ? project.exprs[r.path[0]!]!
+      : r,
+  );
 }
+
 /** A type whose null-extended (join_use_nulls = 1) value is NULL. Array/Tuple/Map sides
  * are not wrapped by an outer join and carry server defaults instead, so a predicate on
  * them can hold on an extended row. */
 function nullCarrying(t: CHType): boolean {
-  return t.kind === 'Nullable' || t.kind === 'LowCardinality' && t.inner.kind === 'Nullable';
+  return t.kind === 'Nullable' || (t.kind === 'LowCardinality' && t.inner.kind === 'Nullable');
 }
+
 /** Null-rejecting on side `alias` of the Join `rel`: false or NULL (both falsy in WHERE) on
  * every row whose `alias` side is null-extended. Within the closed fragment only: a
  * comparison with a bare Nullable column of that side as an operand (any comparison with
@@ -168,7 +359,14 @@ function nullCarrying(t: CHType): boolean {
  * `safePredicate`. */
 export function nullRejecting(e: ExprNode, rel: Rel['id'], alias: string): boolean {
   if (e.kind !== 'Call' || e.fn.origin !== 'typed') return false;
-  const side = (a: ExprNode | undefined) => a?.kind === 'ColumnRef' && a.rel === rel && a.path.length > 1 && a.path[0] === alias && nullCarrying(a.type);
+
+  const side = (a: ExprNode | undefined) =>
+    a?.kind === 'ColumnRef' &&
+    a.rel === rel &&
+    a.path.length > 1 &&
+    a.path[0] === alias &&
+    nullCarrying(a.type);
+
   if (comparisons.includes(e.fn.name)) return e.args.length === 2 && e.args.some(side);
   if (e.fn.name === 'isNotNull') return e.args.length === 1 && side(e.args[0]);
   if (e.fn.name === 'and') return e.args.some(a => nullRejecting(a, rel, alias));

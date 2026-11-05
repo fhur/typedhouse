@@ -10,8 +10,12 @@ vi.mock('node:fs/promises', async importOriginal => {
   return { ...actual, mkdir: vi.fn(actual.mkdir), writeFile: vi.fn(actual.writeFile) };
 });
 
-const source = from(table('offers<&"', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const source = from(
+  table('offers<&"', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }),
+);
+
 const dirs: string[] = [];
+
 afterEach(async () => {
   vi.clearAllMocks();
   await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
@@ -66,10 +70,22 @@ it('lays out SVG producers above consumers', async () => {
 it('shows at most five attributes while retaining all graph columns', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'typedhouse-viz-'));
   dirs.push(dir);
-  const wide = from(table('wide', {
-    first: col.String, second: col.String, third: col.String,
-    fourth: col.String, fifth: col.String, sixth: col.String,
-  }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+
+  const wide = from(
+    table(
+      'wide',
+      {
+        first: col.String,
+        second: col.String,
+        third: col.String,
+        fourth: col.String,
+        fifth: col.String,
+        sixth: col.String,
+      },
+      { engine: 'Memory', sortingKey: [], partitionKey: [] },
+    ),
+  );
+
   const graph = dataflow(wide.ir);
   const path = await graph.viz(join(dir, 'wide.svg'));
   const image = await readFile(path, 'utf8');
@@ -95,7 +111,11 @@ it('renders limits as a label without attributes or a graph ID prefix', async ()
 it('renders filter conditions instead of repeated attributes', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'typedhouse-viz-'));
   dirs.push(dir);
-  const path = await dataflow(source.where(r => r.id.gt(20n).and(r.id.le(50n))).ir).viz(join(dir, 'filter.svg'));
+
+  const path = await dataflow(source.where(r => r.id.gt(20n).and(r.id.le(50n))).ir).viz(
+    join(dir, 'filter.svg'),
+  );
+
   const image = await readFile(path, 'utf8');
   expect(image).toContain('>Filter ((id &gt; 20) AND (id &lt;= 50))</text>');
   expect(image).not.toContain('n0: Filter');
@@ -105,7 +125,15 @@ it('renders filter conditions instead of repeated attributes', async () => {
 it('renders sort keys, directions and null ordering without attributes', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'typedhouse-viz-'));
   dirs.push(dir);
-  const sortable = from(table('sortable', { price: col.Nullable(col.Float64), id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+
+  const sortable = from(
+    table(
+      'sortable',
+      { price: col.Nullable(col.Float64), id: col.UInt64 },
+      { engine: 'Memory', sortingKey: [], partitionKey: [] },
+    ),
+  );
+
   const graph = dataflow(sortable.orderBy(r => r.price.desc().nullsLast()).thenBy(r => r.id).ir);
   const path = await graph.viz(join(dir, 'sort.svg'));
   const image = await readFile(path, 'utf8');

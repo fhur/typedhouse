@@ -1,23 +1,100 @@
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, copyFileSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  symlinkSync,
+  writeFileSync,
+  readFileSync,
+  copyFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { renderSchema } from '../packages/codegen/dist/index.js';
 import { parseCHType } from '../packages/core/dist/index.js';
+
 const directory = mkdtempSync(join(tmpdir(), 'typedhouse-generated-consumer-'));
+
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 90000 });
-  if (result.status !== 0) throw new Error(`${command} failed: ${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
+
+  if (result.status !== 0)
+    throw new Error(`${command} failed: ${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
 }
+
 try {
   mkdirSync(join(directory, 'node_modules/@typedhouse'), { recursive: true });
-  for (const name of ['core', 'codegen']) symlinkSync(resolve(`packages/${name}`), join(directory, `node_modules/@typedhouse/${name}`), 'dir');
+
+  for (const name of ['core', 'codegen'])
+    symlinkSync(
+      resolve(`packages/${name}`),
+      join(directory, `node_modules/@typedhouse/${name}`),
+      'dir',
+    );
+
   writeFileSync(join(directory, 'package.json'), JSON.stringify({ type: 'module' }));
-  for (const name of ['schema.ts', 'functions.ts']) copyFileSync(resolve('packages/codegen/test/snapshots', name), join(directory, name));
-  copyFileSync(resolve('packages/codegen/test/snapshots/schema.skip-alias.ts'), join(directory, 'skipped.ts')); // slice 4f
-  const types = ['Nothing', 'Bool', 'UUID', 'IPv4', 'IPv6', 'JSON', 'Date', 'Date32', "DateTime('UTC')", 'DateTime64(9)', 'Decimal256(10)', "Enum16('__proto__' = 1, '42' = 2)", 'LowCardinality(String)', 'Map(UInt64, String)', 'Tuple(`__proto__` String, `a-b` UInt64)', 'Variant(String, UInt64)', 'Dynamic', 'Future(7)', 'AggregateFunction(sum, UInt64)', 'SimpleAggregateFunction(sum, UInt64)', 'Tuple()', 'FixedString(2)', 'Tuple(`42` String, `0` UInt64, z UInt8)', 'Array(Tuple(`42` String, `0` UInt64, z UInt8))'];
-  writeFileSync(join(directory, 'hostile.ts'), renderSchema({ tables: [{ name: '__proto__', engine: 'Memory', sortingKey: [], partitionKey: [], primaryKey: [], columns: types.map((type, i) => ({ name: i === 0 ? '__proto__' : `c${i}`, type: parseCHType(type), position: i + 1, defaultKind: '', comment: '*/\n" Unicode é' })) }], functions: [] }));
-  writeFileSync(join(directory, 'consumer.ts'), `
+
+  for (const name of ['schema.ts', 'functions.ts'])
+    copyFileSync(resolve('packages/codegen/test/snapshots', name), join(directory, name));
+
+  copyFileSync(
+    resolve('packages/codegen/test/snapshots/schema.skip-alias.ts'),
+    join(directory, 'skipped.ts'),
+  ); // slice 4f
+
+  const types = [
+    'Nothing',
+    'Bool',
+    'UUID',
+    'IPv4',
+    'IPv6',
+    'JSON',
+    'Date',
+    'Date32',
+    "DateTime('UTC')",
+    'DateTime64(9)',
+    'Decimal256(10)',
+    "Enum16('__proto__' = 1, '42' = 2)",
+    'LowCardinality(String)',
+    'Map(UInt64, String)',
+    'Tuple(`__proto__` String, `a-b` UInt64)',
+    'Variant(String, UInt64)',
+    'Dynamic',
+    'Future(7)',
+    'AggregateFunction(sum, UInt64)',
+    'SimpleAggregateFunction(sum, UInt64)',
+    'Tuple()',
+    'FixedString(2)',
+    'Tuple(`42` String, `0` UInt64, z UInt8)',
+    'Array(Tuple(`42` String, `0` UInt64, z UInt8))',
+  ];
+
+  writeFileSync(
+    join(directory, 'hostile.ts'),
+    renderSchema({
+      tables: [
+        {
+          name: '__proto__',
+          engine: 'Memory',
+          sortingKey: [],
+          partitionKey: [],
+          primaryKey: [],
+          columns: types.map((type, i) => ({
+            name: i === 0 ? '__proto__' : `c${i}`,
+            type: parseCHType(type),
+            position: i + 1,
+            defaultKind: '',
+            comment: '*/\n" Unicode é',
+          })),
+        },
+      ],
+      functions: [],
+    }),
+  );
+
+  writeFileSync(
+    join(directory, 'consumer.ts'),
+    `
 import { db, type ComponentRow, type PartRow, type ComponentIndicesRow } from './schema.js';
 import { db as hostile } from './hostile.js';
 import { db as skipped } from './skipped.js';
@@ -56,11 +133,40 @@ const sameOtherwise: Equal<Omit<Coverage, 'alias_id'>, Skipped> = true;
 from(skipped.coverage).map(r => ({ x: r.alias_id }));
 void [hiddenNotRow, materializedRow, sameOtherwise];
 void [component, part, indices, precision, decimal, dotted, enumNames, aggregate, orderedTuple, nestedOrderedTuple, sum];
-`);
-  writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, outDir: 'output', types: [] }, include: ['*.ts'] }));
+`,
+  );
+
+  writeFileSync(
+    join(directory, 'tsconfig.json'),
+    JSON.stringify({
+      compilerOptions: {
+        target: 'ES2022',
+        module: 'NodeNext',
+        moduleResolution: 'NodeNext',
+        strict: true,
+        exactOptionalPropertyTypes: true,
+        outDir: 'output',
+        types: [],
+      },
+      include: ['*.ts'],
+    }),
+  );
+
   const version = process.env.TYPEDHOUSE_TYPESCRIPT_VERSION;
-  run('pnpm', [...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc']), '--project', join(directory, 'tsconfig.json')], process.cwd());
-  writeFileSync(join(directory, 'smoke.mjs'), `
+
+  run(
+    'pnpm',
+    [
+      ...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc']),
+      '--project',
+      join(directory, 'tsconfig.json'),
+    ],
+    process.cwd(),
+  );
+
+  writeFileSync(
+    join(directory, 'smoke.mjs'),
+    `
 import assert from 'node:assert/strict';
 import { db } from './output/schema.js';
 import { db as hostile } from './output/hostile.js';
@@ -92,9 +198,21 @@ assert.deepEqual(hostile.__proto__.columns.c22, { kind: 'Tuple', items: [
   { name: '0', type: { kind: 'scalar', name: 'UInt64' } },
   { name: 'z', type: { kind: 'scalar', name: 'UInt8' } },
 ] });
-`);
+`,
+  );
+
   run(process.execPath, ['smoke.mjs'], directory);
   const metadata = JSON.parse(readFileSync('packages/codegen/package.json', 'utf8'));
-  if (metadata.bin.typedhouse !== './dist/cli.js' || !readFileSync('packages/codegen/dist/cli.js', 'utf8').startsWith('#!/usr/bin/env node')) throw new Error('Missing built CLI bin/shebang');
-  console.log('Built codegen exports, CLI metadata, generated snapshots and hostile-type consumer verified.');
-} finally { rmSync(directory, { recursive: true, force: true }); }
+
+  if (
+    metadata.bin.typedhouse !== './dist/cli.js' ||
+    !readFileSync('packages/codegen/dist/cli.js', 'utf8').startsWith('#!/usr/bin/env node')
+  )
+    throw new Error('Missing built CLI bin/shebang');
+
+  console.log(
+    'Built codegen exports, CLI metadata, generated snapshots and hostile-type consumer verified.',
+  );
+} finally {
+  rmSync(directory, { recursive: true, force: true });
+}

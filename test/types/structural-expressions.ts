@@ -1,9 +1,32 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, sum, val, type Column, type Expr, type NodeId, type Decimal } from '@typedhouse/core';
-const column = <C extends Column>(c: C) => columnExpr(c, 1 as NodeId, ['parts'], 'parts', 'grouped');
+import {
+  col,
+  columnExpr,
+  sum,
+  val,
+  type Column,
+  type Expr,
+  type NodeId,
+  type Decimal,
+} from '@typedhouse/core';
+
+const column = <C extends Column>(c: C) =>
+  columnExpr(c, 1 as NodeId, ['parts'], 'parts', 'grouped');
+
 type Phantoms<E> = E extends Expr<infer T, infer N, infer M> ? Expr<T, N, M> : never;
-const parts = column(col.Array(col.Tuple({ mpn: col.Nullable(col.String), description: col.Nullable(col.String), at: col.DateTime64(9) })));
+
+const parts = column(
+  col.Array(
+    col.Tuple({
+      mpn: col.Nullable(col.String),
+      description: col.Nullable(col.String),
+      at: col.DateTime64(9),
+    }),
+  ),
+);
+
 const mpns = parts.element('mpn');
+
 const desc = parts.arrayElement(1).element('description');
 expectTypeOf<Phantoms<typeof mpns>>().toEqualTypeOf<Expr<(string | null)[], 'parts', 'grouped'>>();
 expectTypeOf<Phantoms<typeof desc>>().toEqualTypeOf<Expr<string | null, 'parts', 'grouped'>>();
@@ -12,8 +35,17 @@ expectTypeOf(mpns).not.toBeAny();
 const decimal = column(col.Array(col.Decimal64(2))).arrayElement(-1);
 expectTypeOf<Phantoms<typeof decimal>>().toEqualTypeOf<Expr<Decimal<18, 2>, 'parts', 'grouped'>>();
 expectTypeOf(decimal.ir.type.scale).toEqualTypeOf<2>();
-const hostile = column(col.NamedTuple([['42', col.UInt64], ['a.b', col.String], ['__proto__', col.DateTime64(9)]]));
+
+const hostile = column(
+  col.NamedTuple([
+    ['42', col.UInt64],
+    ['a.b', col.String],
+    ['__proto__', col.DateTime64(9)],
+  ]),
+);
+
 const dotted = hostile.element('a.b');
+
 const numeric = hostile.element('42');
 expectTypeOf<Phantoms<typeof dotted>>().toEqualTypeOf<Expr<string, 'parts', 'grouped'>>();
 expectTypeOf<Phantoms<typeof numeric>>().toEqualTypeOf<Expr<bigint, 'parts', 'grouped'>>();
@@ -23,15 +55,28 @@ const nullable = column(col.Nullable(col.String)).startsWith(val('a'));
 expectTypeOf<Phantoms<typeof nullable>>().toEqualTypeOf<Expr<boolean | null, 'parts', 'grouped'>>();
 // Prefix descriptors are checked independently of the receiver, including Constants.
 const fixedPrefix = column(col.String).startsWith(column(col.FixedString(2)));
-const lcPrefix = column(col.FixedString(3)).startsWith(column(col.LowCardinality(col.Nullable(col.String))));
+
+const lcPrefix = column(col.FixedString(3)).startsWith(
+  column(col.LowCardinality(col.Nullable(col.String))),
+);
+
 const constantPrefix = column(col.String).startsWith(val('ab', col.FixedString(2)));
+
 const nullPrefix = column(col.String).startsWith(null);
+
 const nullConstantPrefix = column(col.String).startsWith(val(null));
 expectTypeOf<Phantoms<typeof fixedPrefix>>().toEqualTypeOf<Expr<boolean, 'parts', 'grouped'>>();
 expectTypeOf<Phantoms<typeof lcPrefix>>().toEqualTypeOf<Expr<boolean | null, 'parts', 'grouped'>>();
 expectTypeOf<Phantoms<typeof constantPrefix>>().toEqualTypeOf<Expr<boolean, 'parts', 'grouped'>>();
-expectTypeOf<Phantoms<typeof nullPrefix>>().toEqualTypeOf<Expr<boolean | null, 'parts', 'grouped'>>();
-expectTypeOf<Phantoms<typeof nullConstantPrefix>>().toEqualTypeOf<Expr<boolean | null, 'parts', 'grouped'>>();
+
+expectTypeOf<Phantoms<typeof nullPrefix>>().toEqualTypeOf<
+  Expr<boolean | null, 'parts', 'grouped'>
+>();
+
+expectTypeOf<Phantoms<typeof nullConstantPrefix>>().toEqualTypeOf<
+  Expr<boolean | null, 'parts', 'grouped'>
+>();
+
 expectTypeOf(fixedPrefix).not.toBeAny();
 expectTypeOf(lcPrefix).not.toBeAny();
 expectTypeOf(constantPrefix).not.toBeAny();

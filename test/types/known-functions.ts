@@ -1,9 +1,25 @@
 import { expectTypeOf } from 'expect-type';
-import { col, columnExpr, createKnownFunctions, from, table, val, type ExprValue, type Infer, type NodeId } from '@typedhouse/core';
+import {
+  col,
+  columnExpr,
+  createKnownFunctions,
+  from,
+  table,
+  val,
+  type ExprValue,
+  type Infer,
+  type NodeId,
+} from '@typedhouse/core';
 import { fn, agg } from '../../packages/codegen/test/snapshots/functions.js';
-const q = from(table('items', { id: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+
+const q = from(
+  table('items', { id: col.String }, { engine: 'Memory', sortingKey: [], partitionKey: [] }),
+);
+
 const row = columnExpr(col.String, 1 as NodeId, ['id'], 'id', 'row');
+
 const grouped = columnExpr(col.String, 1 as NodeId, ['id'], 'id', 'grouped');
+
 const unknown = fn.cityHash64(row);
 expectTypeOf<ExprValue<typeof unknown>>().toEqualTypeOf<unknown>();
 expectTypeOf<ExprValue<typeof unknown>>().not.toBeAny();
@@ -19,11 +35,17 @@ expectTypeOf(fn.version().name).toEqualTypeOf<'version'>();
 expectTypeOf(fn.cityHash64(grouped).mode).toEqualTypeOf<'grouped'>();
 expectTypeOf(agg.uniqExact(grouped).mode).toEqualTypeOf<'agg'>();
 expectTypeOf(agg.uniqExact(grouped).name).toEqualTypeOf<'id'>();
-expectTypeOf(fn.cityHash64(agg.uniqExact(grouped).as(col.UInt64), val(1n)).mode).toEqualTypeOf<'agg'>();
+
+expectTypeOf(
+  fn.cityHash64(agg.uniqExact(grouped).as(col.UInt64), val(1n)).mode,
+).toEqualTypeOf<'agg'>();
+
 expectTypeOf(agg.count().name).toEqualTypeOf<'count'>();
 expectTypeOf(agg.uniqExact(val('constant')).name).toEqualTypeOf<never>();
 const scalar = q.map(r => fn.cityHash64(r.id).as(col.UInt64));
+
 const aggregate = q.aggregate(g => ({ n: agg.uniqExact(g.id).as(col.UInt64) }));
+
 const intermediate = q.map(r => ({ h: fn.cityHash64(r.id) }));
 expectTypeOf<Infer<typeof scalar>>().toEqualTypeOf<{ id: bigint }>();
 expectTypeOf<Infer<typeof scalar>>().not.toBeAny();
@@ -31,7 +53,12 @@ expectTypeOf<Infer<typeof aggregate>>().toEqualTypeOf<{ n: bigint }>();
 expectTypeOf<Infer<typeof aggregate>>().not.toBeAny();
 expectTypeOf<Infer<typeof intermediate>>().toEqualTypeOf<{ h: unknown }>();
 expectTypeOf<Infer<typeof intermediate>>().not.toBeAny();
-const literal = createKnownFunctions({ hash: { isAggregate: false, deterministic: true, aliasTo: '' }, count: { isAggregate: true, deterministic: null, aliasTo: '' } });
+
+const literal = createKnownFunctions({
+  hash: { isAggregate: false, deterministic: true, aliasTo: '' },
+  count: { isAggregate: true, deterministic: null, aliasTo: '' },
+});
+
 expectTypeOf<keyof typeof literal.fn>().toEqualTypeOf<'hash'>();
 expectTypeOf<keyof typeof literal.agg>().toEqualTypeOf<'count'>();
 expectTypeOf(literal.fn).not.toBeAny();

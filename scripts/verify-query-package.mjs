@@ -2,19 +2,43 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+
 const directory = mkdtempSync(join(tmpdir(), 'typedhouse-query-consumer-'));
+
 function run(command, args, cwd = process.cwd()) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 120000 });
   if (result.status !== 0) throw new Error(`${command}: ${result.stdout}\n${result.stderr}`);
 }
+
 try {
   mkdirSync(join(directory, 'node_modules/@typedhouse'), { recursive: true });
-  for (const name of ['core', 'compiler', 'client']) symlinkSync(resolve(`packages/${name}`), join(directory, `node_modules/@typedhouse/${name}`), 'dir');
-  for (const name of ['expect-type', '@types']) symlinkSync(resolve(`node_modules/${name}`), join(directory, `node_modules/${name}`), 'dir');
+
+  for (const name of ['core', 'compiler', 'client'])
+    symlinkSync(
+      resolve(`packages/${name}`),
+      join(directory, `node_modules/@typedhouse/${name}`),
+      'dir',
+    );
+
+  for (const name of ['expect-type', '@types'])
+    symlinkSync(resolve(`node_modules/${name}`), join(directory, `node_modules/${name}`), 'dir');
+
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
-  writeFileSync(join(directory, 'consumer.ts'), readFileSync('test/types/query.ts', 'utf8') + '\nimport type { AggregationSnapshot } from "./aggregation.d.ts";\nconst snapshotQuery = q.groupBy(r => r.id).aggregate(g => ({ total: sum(g.id), count: count() }));\nexpectTypeOf<Infer<typeof snapshotQuery>>().toEqualTypeOf<AggregationSnapshot>();\nexpectTypeOf<Infer<typeof snapshotQuery>>().not.toBeAny();\n');
-  writeFileSync(join(directory, 'query-proxy.ts'), readFileSync('test/types/query-proxy.ts', 'utf8'));
-  writeFileSync(join(directory, 'expansion.ts'), `import { expectTypeOf } from 'expect-type';
+
+  writeFileSync(
+    join(directory, 'consumer.ts'),
+    readFileSync('test/types/query.ts', 'utf8') +
+      '\nimport type { AggregationSnapshot } from "./aggregation.d.ts";\nconst snapshotQuery = q.groupBy(r => r.id).aggregate(g => ({ total: sum(g.id), count: count() }));\nexpectTypeOf<Infer<typeof snapshotQuery>>().toEqualTypeOf<AggregationSnapshot>();\nexpectTypeOf<Infer<typeof snapshotQuery>>().not.toBeAny();\n',
+  );
+
+  writeFileSync(
+    join(directory, 'query-proxy.ts'),
+    readFileSync('test/types/query-proxy.ts', 'utf8'),
+  );
+
+  writeFileSync(
+    join(directory, 'expansion.ts'),
+    `import { expectTypeOf } from 'expect-type';
 import { from, table, col, join, crossJoin, unionAll, sum, scalar, type Infer } from '@typedhouse/core';
 import type { JoinSnapshot } from './join.d.ts';
 const side = from(table('t', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
@@ -44,15 +68,58 @@ import type { JoinedArrayJoinSnapshot } from './joined-array-join.d.ts';
 const nestedExpanded = join({ a: q, b: side }).on(r => r.a.ids.arrayElement(1).eq(r.b.id)).leftArrayJoin(r => r.a.ids, 'item');
 expectTypeOf<Infer<typeof nestedExpanded>>().toEqualTypeOf<JoinedArrayJoinSnapshot>();
 expectTypeOf<Infer<typeof nestedExpanded>>().not.toBeAny();
-`);
-  writeFileSync(join(directory, 'joined-array-join.d.ts'), readFileSync('test/types/snapshots/joined-array-join.d.ts', 'utf8'));
-  writeFileSync(join(directory, 'membership.d.ts'), readFileSync('test/types/snapshots/membership.d.ts', 'utf8'));
-  writeFileSync(join(directory, 'scalar.d.ts'), readFileSync('test/types/snapshots/scalar.d.ts', 'utf8'));
-  writeFileSync(join(directory, 'join.d.ts'), readFileSync('test/types/snapshots/join.d.ts', 'utf8'));
-  writeFileSync(join(directory, 'array-join.d.ts'), readFileSync('test/types/snapshots/array-join.d.ts', 'utf8'));
-  writeFileSync(join(directory, 'aggregation.d.ts'), readFileSync('test/types/snapshots/aggregation.d.ts', 'utf8'));
-  writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, types: ['node'] }, include: ['consumer.ts', 'expansion.ts', 'query-proxy.ts'] }));
-  writeFileSync(join(directory, 'smoke.mjs'), `
+`,
+  );
+
+  writeFileSync(
+    join(directory, 'joined-array-join.d.ts'),
+    readFileSync('test/types/snapshots/joined-array-join.d.ts', 'utf8'),
+  );
+
+  writeFileSync(
+    join(directory, 'membership.d.ts'),
+    readFileSync('test/types/snapshots/membership.d.ts', 'utf8'),
+  );
+
+  writeFileSync(
+    join(directory, 'scalar.d.ts'),
+    readFileSync('test/types/snapshots/scalar.d.ts', 'utf8'),
+  );
+
+  writeFileSync(
+    join(directory, 'join.d.ts'),
+    readFileSync('test/types/snapshots/join.d.ts', 'utf8'),
+  );
+
+  writeFileSync(
+    join(directory, 'array-join.d.ts'),
+    readFileSync('test/types/snapshots/array-join.d.ts', 'utf8'),
+  );
+
+  writeFileSync(
+    join(directory, 'aggregation.d.ts'),
+    readFileSync('test/types/snapshots/aggregation.d.ts', 'utf8'),
+  );
+
+  writeFileSync(
+    join(directory, 'tsconfig.json'),
+    JSON.stringify({
+      compilerOptions: {
+        target: 'ES2022',
+        module: 'NodeNext',
+        moduleResolution: 'NodeNext',
+        strict: true,
+        exactOptionalPropertyTypes: true,
+        noEmit: true,
+        types: ['node'],
+      },
+      include: ['consumer.ts', 'expansion.ts', 'query-proxy.ts'],
+    }),
+  );
+
+  writeFileSync(
+    join(directory, 'smoke.mjs'),
+    `
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { uniqExact, uniqExactIf, quantile, quantileIf, quantileExact, quantileExactIf, avg, avgIf, argMax, argMaxIf, argMin, argMinIf, min, minIf, maxIf, toTypeScript, count, sum, max, cast, val, col, table, from, registerCompiler, join, crossJoin, unionAll, scalar } from '@typedhouse/core';
@@ -210,12 +277,22 @@ const lazy = streamClient.stream(nestedExpanded);
 assert.equal(typeof lazy[Symbol.asyncIterator], 'function');
 await lazy.return(); // no server required: unused iterators do not execute
 await streamClient.close();
-`);
+`,
+  );
+
   run(process.execPath, ['smoke.mjs'], directory);
   const version = process.env.TYPEDHOUSE_TYPESCRIPT_VERSION;
-  run('pnpm', [...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc']), '--project', join(directory, 'tsconfig.json')]);
+
+  run('pnpm', [
+    ...(version ? ['--package', `typescript@${version}`, 'dlx', 'tsc'] : ['exec', 'tsc']),
+    '--project',
+    join(directory, 'tsconfig.json'),
+  ]);
+
   run(process.execPath, ['scripts/check-type-performance.mjs', '--self-test']);
   run(process.execPath, ['scripts/check-type-performance.mjs']);
   run(process.execPath, ['scripts/check-corpus-types.mjs', '--self-test']);
   console.log('Built Query/compiler/client ESM and exact/not-any consumer types passed.');
-} finally { rmSync(directory, { recursive: true, force: true }); }
+} finally {
+  rmSync(directory, { recursive: true, force: true });
+}

@@ -27,4 +27,5 @@ const input = "electronics' OR 1=1 --";
 export default from(products).where(p => p.category.eq(input));
 `,
 };
+
 export type ExampleName = keyof typeof examples;

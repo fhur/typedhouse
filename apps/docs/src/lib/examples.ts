@@ -27,6 +27,7 @@ export interface CompiledExample extends Omit<ExampleDefinition, 'query'> {
 }
 
 const REGION_START = /^\s*\/\/ #region example\s*$/m;
+
 const REGION_END = /^\s*\/\/ #endregion\s*$/m;
 
 export function exampleSnippet(source: string): string {
@@ -46,6 +47,7 @@ export function rowTypeOf(rel: Rel): string | undefined {
 export async function compileExample(definition: ExampleDefinition): Promise<CompiledExample> {
   const { query, ...rest } = definition;
   const compiled = compile(query.ir);
+
   return {
     ...rest,
     snippet: exampleSnippet(definition.source),

@@ -5,19 +5,27 @@ import { concurrentReads } from './concurrent-reads.js';
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason: unknown) => void;
+
   const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
     reject = rejectPromise;
   });
+
   return { promise, resolve, reject };
 }
 
 function observe(promise: Promise<unknown>) {
   let settled = false;
+
   void promise.then(
-    () => { settled = true; },
-    () => { settled = true; },
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
   );
+
   return async () => {
     // Let all queued promise reactions run without a wall-clock delay.
     await nextTurn();
@@ -30,11 +38,22 @@ it('starts exactly three overlapping reads and preserves heterogeneous input ord
   const second = deferred<string>();
   const third = deferred<boolean>();
   const starts: number[] = [];
+
   const result = concurrentReads([
-    () => { starts.push(0); return first.promise; },
-    () => { starts.push(1); return second.promise; },
-    () => { starts.push(2); return third.promise; },
+    () => {
+      starts.push(0);
+      return first.promise;
+    },
+    () => {
+      starts.push(1);
+      return second.promise;
+    },
+    () => {
+      starts.push(2);
+      return third.promise;
+    },
   ]);
+
   expectTypeOf(result).toEqualTypeOf<Promise<[number, string, boolean]>>();
   const expectPending = observe(result);
   await expectPending();
@@ -55,15 +74,23 @@ it.each(['synchronous', 'asynchronous'] as const)(
     const second = deferred<number>();
     const third = deferred<string>();
     const starts: number[] = [];
+
     const result = concurrentReads([
       () => {
         starts.push(0);
         if (mode === 'synchronous') throw failure;
         return failed.promise;
       },
-      () => { starts.push(1); return second.promise; },
-      () => { starts.push(2); return third.promise; },
+      () => {
+        starts.push(1);
+        return second.promise;
+      },
+      () => {
+        starts.push(2);
+        return third.promise;
+      },
     ]);
+
     const expectPending = observe(result);
     await expectPending();
     expect(starts).toEqual([0, 1, 2]);
@@ -97,6 +124,7 @@ it('fully awaits async iterator cleanup before rejecting', async () => {
   const cleanupStarted = deferred<void>();
   const cleanupAllowed = deferred<void>();
   let cleanedUp = false;
+
   async function* rows() {
     try {
       yield 1;
@@ -106,8 +134,11 @@ it('fully awaits async iterator cleanup before rejecting', async () => {
       cleanedUp = true;
     }
   }
+
   const result = concurrentReads([
-    () => { throw failure; },
+    () => {
+      throw failure;
+    },
     async () => {
       for await (const row of rows()) {
         expect(row).toBe(1);
@@ -116,6 +147,7 @@ it('fully awaits async iterator cleanup before rejecting', async () => {
     },
     async () => 'third',
   ]);
+
   const expectPending = observe(result);
   await cleanupStarted.promise;
   await expectPending();

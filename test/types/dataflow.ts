@@ -2,7 +2,10 @@ import { expectTypeOf } from 'expect-type';
 import { col, from, table } from '@typedhouse/core';
 import { dataflow, toDataflowGraph, type Dataflow, type DataflowGraph } from '@typedhouse/devtools';
 
-const source = from(table('graph_types', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+const source = from(
+  table('graph_types', { id: col.UInt64 }, { engine: 'Memory', sortingKey: [], partitionKey: [] }),
+);
+
 const inspector = dataflow(source.ir);
 expectTypeOf(inspector).toEqualTypeOf<Dataflow>();
 expectTypeOf(inspector.viz()).toEqualTypeOf<Promise<string>>();

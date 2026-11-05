@@ -1,4 +1,7 @@
-import { createClient as createDriver, type ClickHouseClientConfigOptions } from '@clickhouse/client';
+import {
+  createClient as createDriver,
+  type ClickHouseClientConfigOptions,
+} from '@clickhouse/client';
 import { compile, emitNaive, quoteIdentifier } from '@typedhouse/compiler';
 import { unwrap, type CompiledQuery, type Rel } from '@typedhouse/core';
 import { rowDecoder } from './decode.js';
@@ -9,7 +12,10 @@ import type { EncodedInsert } from './encode-insert.js';
  * Plans belong to the exact backend instance that compiled them; do not copy them
  * or pass them to another backend, even one with the same name/mode.
  */
-export interface Plan { readonly compiled: CompiledQuery }
+export interface Plan {
+  readonly compiled: CompiledQuery;
+}
+
 /** Each yielded array is a batch of decoded row objects (not positional cells).
  * Implementations must honor the Rel's output schema and close each execution's
  * cursor on exhaustion, failure or iterator return. Compilation is synchronous;
@@ -47,14 +53,19 @@ export const outputSettings = {
  * need only the three Backend methods. run yields singleton batches so unread
  * driver rows are never eagerly decoded.
  */
-export function createClickHouseBackend(options: ClickHouseClientConfigOptions = {}, mode: 'clickhouse' | 'clickhouse-naive' = 'clickhouse') {
+export function createClickHouseBackend(
+  options: ClickHouseClientConfigOptions = {},
+  mode: 'clickhouse' | 'clickhouse-naive' = 'clickhouse',
+) {
   const driver = createDriver(options);
   const decoders = new WeakMap<Plan, ReturnType<typeof rowDecoder>>();
+
   function prepare(plan: Plan) {
     const decode = decoders.get(plan);
     if (!decode) throw new Error('backend_plan_owner: plan belongs to another backend');
     return decode;
   }
+
   function execute(compiled: CompiledQuery) {
     // The compiler has already serialized typed Arrays per the spec. Passing
     // that literal as a query_params string makes the driver escape its quotes
@@ -62,13 +73,22 @@ export function createClickHouseBackend(options: ClickHouseClientConfigOptions =
     // literals (covered by native-server regression), not a new transport path.
     const params: Record<string, string> = {};
     const containers: Record<string, string> = {};
+
     for (const [name, value] of Object.entries(compiled.params)) {
       const type = compiled.parameterTypes?.[name];
+
       if (type && unwrap(type).kind === 'Array') containers[`param_${name}`] = value;
       else params[name] = value;
     }
-    return driver.query({ query: compiled.sql, query_params: params, format: 'JSONEachRow', clickhouse_settings: { ...containers, ...outputSettings } });
+
+    return driver.query({
+      query: compiled.sql,
+      query_params: params,
+      format: 'JSONEachRow',
+      clickhouse_settings: { ...containers, ...outputSettings },
+    });
   }
+
   return {
     name: mode,
     compile(rel: Rel): Plan {
@@ -81,33 +101,55 @@ export function createClickHouseBackend(options: ClickHouseClientConfigOptions =
     async runBuffered(plan: Plan): Promise<unknown[]> {
       const decode = prepare(plan);
       const { compiled } = plan;
+
       try {
         const result = await execute(compiled);
-        try { return (await result.json<unknown>()).map(decode); }
-        finally { result.close(); }
-      } catch (cause) { throw new QueryError(compiled, cause); }
+
+        try {
+          return (await result.json<unknown>()).map(decode);
+        } finally {
+          result.close();
+        }
+      } catch (cause) {
+        throw new QueryError(compiled, cause);
+      }
     },
     async *run(plan: Plan): AsyncGenerator<unknown[], void> {
       const decode = prepare(plan);
       const { compiled } = plan;
+
       try {
         const result = await execute(compiled);
+
         try {
           const stream = result.stream<unknown>();
+
           try {
             for await (const rows of stream) {
               for (const row of rows) yield [decode(row.json())];
             }
-          } finally { stream.destroy(); }
-        } finally { result.close(); }
-      } catch (cause) { throw new QueryError(compiled, cause); }
+          } finally {
+            stream.destroy();
+          }
+        } finally {
+          result.close();
+        }
+      } catch (cause) {
+        throw new QueryError(compiled, cause);
+      }
     },
     async insert(batch: EncodedInsert): Promise<void> {
       if (batch.rows.length === 0) return;
       const [first, ...rest] = batch.columns;
       if (first === undefined) throw new Error('insert_requires_columns');
       const firstKeys = Object.keys(batch.rows[0]!);
-      const mixedPresence = batch.rows.some(row => Object.keys(row).length !== firstKeys.length || firstKeys.some(key => !Object.hasOwn(row, key)));
+
+      const mixedPresence = batch.rows.some(
+        row =>
+          Object.keys(row).length !== firstKeys.length ||
+          firstKeys.some(key => !Object.hasOwn(row, key)),
+      );
+
       await driver.insert({
         table: quoteIdentifier(batch.table),
         columns: [quoteIdentifier(first), ...rest.map(quoteIdentifier)],
