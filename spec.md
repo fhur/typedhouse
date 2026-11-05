@@ -707,7 +707,7 @@ The v1 typed set:
 | Tuple | `element` (`tupleElement`); on `Array(Tuple)` it is elementwise and returns an array |
 | Map | `get` (`arrayElement`), `contains` (`mapContains`), `mapKeys`, `mapValues` |
 | Hash | `cityHash64`, `sipHash64` |
-| Aggregates | `count`, `countIf`, `sum`, `sumIf`, `avg`, `avgIf`, `min`, `max`, `argMin`, `argMax`, `any`, `anyLast`, `uniq`, `uniqExact`, `groupArray`, `groupUniqArray`, `quantile(level)`; plus `<name>If`, `<name>State`, `<name>Merge` for each |
+| Aggregates | `count`, `countIf`, `sum`, `sumIf`, `avg`, `avgIf`, `min`, `max`, `argMin`, `argMax`, `any`, `anyLast`, `uniq`, `uniqExact`, `groupArray`, `groupUniqArray`, `quantile(level)`, `quantileExact(level)`; plus `<name>If`, `<name>State`, `<name>Merge` for each |
 
 **Tier 2, known.** `typedhouse generate` also reads `system.functions` and writes `functions.ts`: `fn.<name>(...args: Expr<any>[]): Expr<unknown>` for every non-aggregate function and `agg.<name>(...)` returning `AggExpr<unknown>` for every aggregate, each entry carrying `deterministic` and `alias_to` from the table. The `deterministic` column is newer than the 24.3 minimum, so the generator first checks `system.columns` for it and, when it is absent, writes `deterministic: null`, which the live-capability computation treats as non-deterministic. The validator uses this file to reject names ClickHouse does not have and to compute the live capability. `.as(col.X)` declares the result type for inference and decoding and emits no CAST; `cast(x, col.X)` emits one. Nothing in this tier is hand-written, and it regenerates with the schema.
 

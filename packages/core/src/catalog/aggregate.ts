@@ -22,6 +22,9 @@ const argMaxValue = Object.freeze({ match: (t: CHType): boolean => {
   const base = t.kind === 'Nullable' ? t.inner : t;
   return argMaxVersion.match(base) || (base.kind === 'scalar' && (base.name === 'String' || base.name === 'Bool'));
 } });
+const anyVersion = Object.freeze({ match: (t: CHType) => argMaxVersion.match(t) || argMaxTemporalVersion(t) });
+const numericOrNullable = Object.freeze({ match: (t: CHType) => argMaxVersion.match(t.kind === 'Nullable' ? t.inner : t) });
+const maxReturns = (args: readonly CHType[]): CHType => isNullable(args[0]!) ? nullable(unwrap(args[0]!)) : unwrap(args[0]!);
 const exactString = Object.freeze({ match: (t: CHType): boolean => {
   const base = t.kind === 'Nullable' ? t.inner : t;
   return base.kind === 'scalar' && base.name === 'String';
@@ -35,12 +38,17 @@ export const aggregateDefinitions: readonly AggregateDefinition[] = [
     if (t.kind === 'scalar' && /^(U?Int)(128|256)$/.test(t.name)) return t;
     return t.kind === 'scalar' && t.name.startsWith('UInt') ? col.UInt64.type : col.Int64.type;
   }, tsReturns: 'SumResult<T>', nullable: 'propagate', deterministic: true, origin: 'typed', linear: true },
-  { name: 'max', args: [anyType], returns: (args: readonly CHType[]) => isNullable(args[0]!) ? nullable(unwrap(args[0]!)) : unwrap(args[0]!), tsReturns: 'T', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
-  { name: 'argMax', args: [argMaxValue, Object.freeze({ match: (t: CHType) => argMaxVersion.match(t) || argMaxTemporalVersion(t) })], returns: 'arg0', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
-  { name: 'avg', args: [Object.freeze({ match: (t: CHType) => argMaxVersion.match(t.kind === 'Nullable' ? t.inner : t) })], returns: col.Float64, nullable: 'propagate', deterministic: true, origin: 'typed', linear: true },
-  { name: 'quantile', params: [col.Float64], args: [Object.freeze({ match: (t: CHType) => argMaxVersion.match(t.kind === 'Nullable' ? t.inner : t) })], returns: col.Float64, nullable: 'propagate', deterministic: false, origin: 'typed', linear: false },
+  { name: 'max', args: [anyType], returns: maxReturns, tsReturns: 'T', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
+  { name: 'argMax', args: [argMaxValue, anyVersion], returns: 'arg0', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
+  { name: 'avg', args: [numericOrNullable], returns: col.Float64, nullable: 'propagate', deterministic: true, origin: 'typed', linear: true },
+  { name: 'quantile', params: [col.Float64], args: [numericOrNullable], returns: col.Float64, nullable: 'propagate', deterministic: false, origin: 'typed', linear: false },
   { name: 'uniqExact', args: [exactString], returns: col.UInt64, nullable: 'never', deterministic: true, origin: 'typed', linear: false },
   { name: 'uniq', args: [exactString], returns: col.UInt64, nullable: 'never', deterministic: true, origin: 'typed', linear: false },
+  // `derived[n]` and `aggregateDefinitions[5]` below are positional: append here, never insert above.
+  { name: 'min', args: [anyType], returns: maxReturns, tsReturns: 'T', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
+  { name: 'argMin', args: [argMaxValue, anyVersion], returns: 'arg0', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
+  // Picks an input element rather than interpolating, so it returns the input type: Float64 would corrupt UInt64 above 2^53.
+  { name: 'quantileExact', params: [col.Float64], args: [numericOrNullable], returns: 'arg0', nullable: 'never', deterministic: true, origin: 'typed', linear: false },
 ].map(d => Object.freeze(d)) as readonly AggregateDefinition[];
 
 interface Count {
@@ -64,8 +72,12 @@ interface Avg { <E extends AggregateOperand<number | bigint | null>>(value: E & 
 interface AvgIf { <E extends AggregateOperand<number | bigint | null>, P extends AggregateOperand<boolean | null>>(value: E & ArgMaxOperand<E['ir']['type'], AvgInputDescriptor>, predicate: P): ResolvedExpr<number | Extract<OperandValue<E>, null>, OperandName<E, OperandName<P, 'avg'>>, 'agg', AvgDescriptor<E['ir']['type']>> }
 interface Quantile { <E extends AggregateOperand<number | bigint | null>>(value: E & ArgMaxOperand<E['ir']['type'], AvgInputDescriptor>): ResolvedExpr<number | Extract<OperandValue<E>, null>, OperandName<E, 'quantile'>, 'agg', AvgDescriptor<E['ir']['type']>> }
 interface QuantileIf { <E extends AggregateOperand<number | bigint | null>, P extends AggregateOperand<boolean | null>>(value: E & ArgMaxOperand<E['ir']['type'], AvgInputDescriptor>, predicate: P): ResolvedExpr<number | Extract<OperandValue<E>, null>, OperandName<E, 'quantile'>, 'agg', AvgDescriptor<E['ir']['type']>> }
+interface QuantileExact { <E extends AggregateOperand<number | bigint | null>>(value: E & ArgMaxOperand<E['ir']['type'], AvgInputDescriptor>): ResolvedExpr<OperandValue<E>, OperandName<E, 'quantileExact'>, 'agg', ResultDescriptor<E['ir']['type'], 'max'>> }
+interface QuantileExactIf { <E extends AggregateOperand<number | bigint | null>, P extends AggregateOperand<boolean | null>>(value: E & ArgMaxOperand<E['ir']['type'], AvgInputDescriptor>, predicate: P): ResolvedExpr<OperandValue<E>, OperandName<E, 'quantileExact'>, 'agg', ResultDescriptor<E['ir']['type'], 'max'>> }
 interface Max { <E extends AggregateOperand<unknown>>(value: E): ResolvedExpr<OperandValue<E>, OperandName<E, 'max'>, 'agg', ResultDescriptor<E['ir']['type'], 'max'>> }
 interface MaxIf { <E extends AggregateOperand<unknown>, P extends AggregateOperand<boolean | null>>(value: E, predicate: P): ResolvedExpr<OperandValue<E>, OperandName<E, OperandName<P, 'max'>>, 'agg', ResultDescriptor<E['ir']['type'], 'max'>> }
+interface Min { <E extends AggregateOperand<unknown>>(value: E): ResolvedExpr<OperandValue<E>, OperandName<E, 'min'>, 'agg', ResultDescriptor<E['ir']['type'], 'min'>> }
+interface MinIf { <E extends AggregateOperand<unknown>, P extends AggregateOperand<boolean | null>>(value: E, predicate: P): ResolvedExpr<OperandValue<E>, OperandName<E, OperandName<P, 'min'>>, 'agg', ResultDescriptor<E['ir']['type'], 'min'>> }
 type ArgMaxValue = AggregateOperand<number | bigint | string | boolean | null>;
 type ArgMaxVersion = AggregateOperand<number | bigint | Date>;
 interface ArgMax {
@@ -73,6 +85,12 @@ interface ArgMax {
 }
 interface ArgMaxIf {
   <E extends ArgMaxValue, V extends ArgMaxVersion, P extends AggregateOperand<boolean | null>>(value: E & ArgMaxOperand<E['ir']['type'], ArgMaxValueDescriptor>, version: V & ArgMaxOperand<V['ir']['type'], ArgMaxVersionDescriptor>, predicate: P): ResolvedExpr<OperandValue<E>, OperandName<E, 'argMax'>, 'agg', E['ir']['type']>;
+}
+interface ArgMin {
+  <E extends ArgMaxValue, V extends ArgMaxVersion>(value: E & ArgMaxOperand<E['ir']['type'], ArgMaxValueDescriptor>, version: V & ArgMaxOperand<V['ir']['type'], ArgMaxVersionDescriptor>): ResolvedExpr<OperandValue<E>, OperandName<E, 'argMin'>, 'agg', E['ir']['type']>;
+}
+interface ArgMinIf {
+  <E extends ArgMaxValue, V extends ArgMaxVersion, P extends AggregateOperand<boolean | null>>(value: E & ArgMaxOperand<E['ir']['type'], ArgMaxValueDescriptor>, version: V & ArgMaxOperand<V['ir']['type'], ArgMaxVersionDescriptor>, predicate: P): ResolvedExpr<OperandValue<E>, OperandName<E, 'argMin'>, 'agg', E['ir']['type']>;
 }
 type StateResult<E extends { readonly ir: { readonly type: CHType | null } }, F extends string> = CHType extends E['ir']['type'] ? Expr<AggregateState<F>, OperandName<E, F>, 'agg'> : DescribedExpr<AggregateState<F>, OperandName<E, F>, 'agg', { readonly kind: 'AggregateFunction'; readonly fn: F; readonly args: [E['ir']['type'] & CHType] }>;
 interface State<F extends string> { <E extends AggregateOperand<unknown>>(value: E): StateResult<E, F> }
@@ -101,7 +119,7 @@ function deriveAggregate(def: AggregateDefinition, rootName?: 'first') {
   });
 }
 // Selector aggregates name from the value operand, not a later version/predicate.
-const derived = aggregateDefinitions.map(def => deriveAggregate(def, def.name === 'argMax' || def.name === 'uniqExact' || def.name === 'uniq' ? 'first' : undefined));
+const derived = aggregateDefinitions.map(def => deriveAggregate(def, def.name === 'argMax' || def.name === 'argMin' || def.name === 'uniqExact' || def.name === 'uniq' ? 'first' : undefined));
 /** Count all input rows as UInt64 (`bigint`), including rows containing NULL.
  * Empty input returns `0n`. Use inside an `aggregate()` callback, or call the query's `.count()` shortcut.
  * @example
@@ -165,6 +183,8 @@ export const sumState = derived[1]!.State as SumState;
  */
 export const sumMerge = derived[1]!.Merge as Merge<'sum', Numeric | null>;
 /** Return the maximum grouped value, skipping NULL and retaining the value descriptor.
+ * An Enum with no zero member fails on empty input without `groupBy`. Float NaN makes the result depend on block and read order:
+ * a NaN in the first row gives NaN, and without `groupBy` a NaN starting a later data block hides the rest of it.
  * @example
  * ```ts
  * from(components).aggregate(c => ({ mostParts: max(c.matched_part_ids.length()) }));
@@ -172,6 +192,9 @@ export const sumMerge = derived[1]!.Merge as Merge<'sum', Numeric | null>;
  */
 export const max = derived[2]!.base as Max;
 /** Return the maximum among rows whose grouped predicate is true; NULL values are skipped.
+ * False and NULL predicates exclude rows. An Enum with no zero member fails when no row qualifies.
+ * Float NaN makes the result depend on block and read order: a NaN in the first qualifying row gives NaN, and
+ * without `groupBy` a NaN in the first qualifying row of a later data block hides the rest of that block.
  * @example
  * ```ts
  * from(components).aggregate(c => ({ mostParts: maxIf(c.matched_part_ids.length(), c.entityId.notEmpty()) }));
@@ -253,8 +276,56 @@ export const uniq = derived[7]!.base as Uniq;
  */
 export const uniqExactIf = derived[6]!.If as UniqExactIf;
 // Exact distinct State/Merge and non-String operands are deliberately not exposed.
+/** Return the minimum grouped value, skipping NULL and retaining the value descriptor.
+ * Empty non-null input returns the type's default (`0`, `''`, 1970-01-01), not NULL; empty or all-null
+ * nullable input returns NULL. An Enum with no zero member fails on empty input without `groupBy`.
+ * Float NaN makes the result depend on block and read order: a NaN in the first row gives NaN, and without
+ * `groupBy` a NaN starting a later data block hides the rest of that block.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ fewestParts: min(c.matched_part_ids.length()) }));
+ * ```
+ */
+export const min = derived[8]!.base as Min;
+/** Return the minimum among rows whose grouped predicate is true; NULL values are skipped.
+ * False and NULL predicates exclude rows.
+ * With no qualifying rows, a non-null value returns the type's default (`0`, `''`, 1970-01-01), not NULL,
+ * and a nullable value returns NULL. An Enum with no zero member fails when no row qualifies.
+ * Float NaN makes the result depend on block and read order: a NaN in the first qualifying row gives NaN, and
+ * without `groupBy` a NaN in the first qualifying row of a later data block hides the rest of that block.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ fewestParts: minIf(c.matched_part_ids.length(), c.entityId.notEmpty()) }));
+ * ```
+ */
+export const minIf = derived[8]!.If as MinIf;
+/** Select the value associated with the smallest non-null numeric or date/time version.
+ * NULL values are skipped; equal minimal versions have no stable tie breaker.
+ * Values are limited to numeric, String, or Bool scalars, optionally nullable.
+ * Empty non-null input returns the value type's default, not NULL; empty or all-null nullable values return
+ * NULL. If the first version is a float NaN, the result is the value type's default without `groupBy` and the
+ * value from that row with `groupBy`.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ id: argMin(c.entityId, c.matched_part_ids.length()) }));
+ * ```
+ */
+export const argMin = derived[9]!.base as ArgMin;
+/** Select the value at the smallest version among rows where the predicate is true.
+ * As with `argMin()`, NULL values are skipped and tied versions do not pick a stable winner.
+ * False and NULL predicates exclude rows. With no qualifying rows, a non-null value returns its type's
+ * default and a nullable value returns NULL. If the first qualifying version is a float NaN, the result is the
+ * value from that row, with or without `groupBy`.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ id: argMinIf(c.entityId, c.matched_part_ids.length(), c.entityId.notEmpty()) }));
+ * ```
+ */
+export const argMinIf = derived[9]!.If as ArgMinIf;
+// min and argMin State/Merge execution is deliberately not exposed.
 /** Choose a quantile level, then apply the returned aggregate to grouped numeric values.
- * Uses ClickHouse's approximate reservoir quantile, not an exact percentile; NULLs are skipped.
+ * Uses ClickHouse's approximate reservoir quantile, which interpolates and returns Float64; NULLs are skipped.
+ * Use `quantileExact()` for an exact result: an input element in the input type.
  * @param level Quantile fraction from 0 to 1 inclusive, for example 0.5 for the median.
  * @example
  * ```ts
@@ -266,6 +337,7 @@ export function quantile(level: number): Quantile {
 }
 /** Choose a quantile level, then aggregate values only where the predicate is true.
  * Like `quantile()`, the result is approximate and NULL values are skipped.
+ * Use `quantileExactIf()` for an exact result: an input element in the input type.
  * @param level Quantile fraction from 0 to 1 inclusive.
  * @example
  * ```ts
@@ -274,4 +346,31 @@ export function quantile(level: number): Quantile {
  */
 export function quantileIf(level: number): QuantileIf {
   return ((...args: readonly unknown[]) => aggregateCall(aggregateDefinitions[5]!, args, [level], ['If'], 'first')) as QuantileIf;
+}
+/** Choose a quantile level, then return the exact quantile of grouped numeric values.
+ * The result is an input element in the input type, never interpolated: level 0.5 of [1, 2, 3, 4] is 3,
+ * where `quantile()` estimates 2.5. All values are held in memory, unlike `quantile()`'s bounded sample.
+ * NULLs and NaNs are skipped. Empty or all-null nullable input returns NULL; empty non-null input returns
+ * the type's default for integers (`0`) and NaN for floats, as does all-NaN input.
+ * @param level Quantile fraction from 0 to 1 inclusive, for example 0.5 for the median.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ medianParts: quantileExact(0.5)(c.matched_part_ids.length()) }));
+ * ```
+ */
+export function quantileExact(level: number): QuantileExact {
+  return ((...args: readonly unknown[]) => aggregateCall(aggregateDefinitions[10]!, args, [level], [], 'first')) as QuantileExact;
+}
+/** Choose a quantile level, then return the exact quantile only of rows where the predicate is true.
+ * Like `quantileExact()`, the result is an input element in the input type, and NULL and NaN values are skipped.
+ * False and NULL predicates exclude rows. With no qualifying rows, a nullable value returns NULL;
+ * a non-null value returns `0` for integers and NaN for floats.
+ * @param level Quantile fraction from 0 to 1 inclusive.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ medianParts: quantileExactIf(0.5)(c.matched_part_ids.length(), c.entityId.notEmpty()) }));
+ * ```
+ */
+export function quantileExactIf(level: number): QuantileExactIf {
+  return ((...args: readonly unknown[]) => aggregateCall(aggregateDefinitions[10]!, args, [level], ['If'], 'first')) as QuantileExactIf;
 }

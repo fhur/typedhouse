@@ -1,3 +1,53 @@
+## Track A: `min`, `minIf`, `argMin`, `argMinIf`, `quantileExact`, `quantileExactIf` (2026-11-05)
+
+**Status: complete on branch `agg-min-exact`, uncommitted. The final gate at merge is pending.**
+
+**Done.** The six aggregates are typed, exported and documented. `argMin` and `argMinIf` accept the same date and time versions as `argMax`. `min` gets the same filter push-down as `max`.
+
+| Task | Status | Checked in the diff |
+|---|---|---|
+| A1 Catalog and exports | Done | Entries appended at positions 8–10, and existing positions unchanged. `argMin` is on the root-name list. No `State`/`Merge` exports. |
+| A2 Compiler resolution | Done | `resolve.ts` needed no change. The level stays a `Float64` parameter, and invalid levels are rejected in both emitters. |
+| A3 `min` in `safeAggregate` | Done | One-condition change plus its doc comment. |
+| A4 Nullable predicates | Done (Q1 approved) | `emit-naive.ts`, typed `min`/`max` with `If` only, when the predicate is nullable. |
+| A5 Worker tests | Done | New files only: runtime, native, positive and negative types. |
+| A6 Docs | Done | Six pages, `overview.md`, `spec.md:710`, and approximate vs exact in both `quantile` pages. |
+| A7 Tester | Done | Two new test files and additive cases in `verify-query-package.mjs`. No existing test, snapshot, fixture or config changed. |
+| A8 Gates and evidence | Done, except the merge gate | See Evidence. |
+
+**Decided.**
+- **Q1, approved by the owner.** `minIf` and `maxIf` wrap a nullable predicate in `ifNull(pred, false)`. On ClickHouse 24.8, `maxIf(v, n < 10)` returned `100` instead of `2` when `n` was NULL on the row with `v = 100`, for `UInt32`, `UInt64`, `Float64`, `Date` and `DateTime` values. This fixes existing `maxIf` behaviour. Non-nullable predicates keep their exact SQL.
+- **`quantileExact` returns the input type**, not `Float64` like `quantile`, because that is what the server does. It picks an element and never interpolates: on `[1,2,3,4]` at level 0.5 it gives `3`, and `quantile` gives `2.5`. `Float64` would corrupt `UInt64` above 2^53.
+- **New catalog entries are appended only.** `derived[n]` and `aggregateDefinitions[5]` are positional, and `as` casts hide a wrong index. A comment in the catalog now says so.
+
+**Server behaviour, documented on the new pages and pinned by native tests.** Empty non-null input returns the type's default, not NULL, except that empty float `quantileExact` returns NaN. An Enum with no zero member fails through the client on empty input. A float NaN makes `min`, `max` and `argMin` depend on read order.
+
+**Open, for the owner (recorded, not fixed).**
+- A handwritten catalog that declares a literal `maxIf` known function bypasses the wrapper. `typedhouse generate` cannot produce one.
+- A known scalar wrongly declared `.as(col.Bool)` that returns NULL escapes the wrapper. That type is the caller's assertion.
+- `arg-max.md` and `arg-max-if.md` do not describe NaN versions, although `arg-min.md` does and an early probe showed `argMax` behaving the same way. The brief did not require this.
+
+**Evidence.**
+- **Reported to the PM, logs not all seen:** `check:all` on TypeScript 5.5.4 and latest, `docs:verify`, and `check-type-performance.mjs --all` all exited 0 on this code logic, before later prose-only edits. The Tester's rerun after the first prose round: `pnpm test` 1530 passed and 1 skipped, compiler integration 526 passed. The Tester validated the behaviour behind the final prose findings P1 and P2 natively. The Worker's `docs:verify` after those fixes exited 0.
+- **Prose-only check by the PM:** with comments removed, the TypeScript AST of `aggregate.ts` is identical to the Worker's backup from 11:02. `emit-naive.ts` and `rewrite-expressions.ts` are byte-identical to theirs. That backup predates every prose round. The baseline is a backup file, not a commit. The last round touched only `min.md`, `min-if.md`, `max.md`, `max-if.md` and comments in `aggregate.ts`.
+- **Rerun by the PM on the current tree:** the three new unit files pass (88 tests), and the two new native files pass (152 tests).
+- **Negative controls run by the PM on a scratch copy, against those 88 unit tests.** Each one failed tests:
+
+| Mutation | Tests failed |
+|---|---|
+| `min` on the wrong `derived` index | 7 |
+| `argMinIf` routed to `argMax` | 7 |
+| `argMin` off the root-name list | 1 |
+| `quantileExact` returning `Float64` | 3 |
+| `quantileExact` using the `quantile` definition | 11 |
+| `argMin` without date versions | 2 |
+| `min` out of `safeAggregate` | 3 |
+| No `ifNull` wrapper | 5 |
+| Wrapper on `max` only | 5 |
+| Wrapper on non-nullable predicates too | 9 |
+
+**Pending at merge.** A full gate, since test files and `verify-query-package.mjs` changed after the earliest gate logs and the formatter track rewrites these files.
+
 ## Animal table in the "Latest value and average" guide (2026-11-05)
 
 **Done.** The guide now builds a table of every animal, adding pagination, sorting, and filtering one section at a time, and ends with a single `getAnimalTable` endpoint.

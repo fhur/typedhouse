@@ -5,9 +5,13 @@ sidebar:
   order: 55
 ---
 
-`quantile(level)(value)` estimates a quantile using reservoir sampling; `0.5` estimates the median. The curried level must be a finite number from 0 through 1. It is emitted as a function parameter, not a data argument.
+`quantile(level)(value)` estimates a quantile using reservoir sampling, interpolating between sampled values; `0.5` estimates the median. The curried level must be a finite number from 0 through 1. It is emitted as a function parameter, not a data argument.
 
-Integer and float operands return `Float64` (`number`); NULL values are skipped and nullable input retains a nullable result descriptor. Decimal operands are unsupported. Results are approximate and nondeterministic, not exact percentiles. Each application creates a fresh level parameter; reusing the resulting expression shares that parameter. `State`/`Merge` execution is unsupported.
+Integer and float operands return `Float64` (`number`); NULL values are skipped and nullable input retains a nullable result descriptor. Decimal operands are unsupported. Results are approximate and nondeterministic, not exact percentiles.
+
+Use [`quantileExact`](/docs/functions/quantile-exact/) for an exact result. `quantile` interpolates and always returns `Float64`; `quantileExact` returns an input element in the input type and holds all values in memory. Over `[1, 2, 3, 4]`, level `0.5` gives `2.5` from `quantile` and `3` from `quantileExact`.
+
+Each application creates a fresh level parameter; reusing the resulting expression shares that parameter. `State`/`Merge` execution is unsupported.
 
 ## Example
 

@@ -1,0 +1,20 @@
+import { from, table, col, argMin, argMinIf, min, val } from '@typedhouse/core';
+const q = from(table('t', { n: col.UInt32, v: col.Nullable(col.UInt32), text: col.String, lc: col.LowCardinality(col.String), date: col.Date, nullableDate: col.Nullable(col.Date), lcDate: col.LowCardinality(col.Date), nanos: col.DateTime64(9), decimal: col.Decimal64(2), array: col.Array(col.UInt32) }, { engine: 'Memory', sortingKey: [], partitionKey: [] }));
+q.aggregate(g => argMin(g.n)); // expect: TS2554 Expected 2 arguments, but got 1.
+q.aggregate(g => argMin(g.n, g.v)); // expect: TS2345 is not assignable to parameter of type
+q.aggregate(g => argMin(g.n, g.text)); // expect: TS2345 is not assignable to parameter of type
+q.aggregate(g => argMin(g.lc, g.n)); // expect: TS2345 is not assignable to parameter of type 'never'.
+q.aggregate(g => argMin(g.decimal, g.n)); // expect: TS2345 is not assignable to parameter of type 'never'.
+q.aggregate(g => argMin(g.date, g.n)); // expect: TS2345 is not assignable to parameter of type 'ArgMaxValue'.
+q.aggregate(g => argMin(g.n, g.nullableDate)); // expect: TS2345 is not assignable to parameter of type
+q.aggregate(g => argMin(g.n, g.lcDate)); // expect: TS2345 is not assignable to parameter of type 'never'.
+q.aggregate(g => argMin(g.n, g.nanos)); // expect: TS2345 is not assignable to parameter of type
+q.aggregate(g => argMin(g.n, g.decimal)); // expect: TS2345 is not assignable to parameter of type
+q.aggregate(g => argMinIf(g.n, g.nullableDate, g.n.gt(0))); // expect: TS2345 is not assignable to parameter of type
+q.aggregate(g => argMin(g.array, g.n)); // expect: TS2345 is not assignable to parameter of type 'ArgMaxValue'.
+q.aggregate(g => argMin(q.row.n, g.n)); // expect: TS2345 is not assignable to parameter of type 'ArgMaxValue'.
+q.aggregate(g => argMin(g.n, min(g.n))); // expect: TS2345 is not assignable to parameter of type 'ArgMaxVersion'.
+q.aggregate(g => argMinIf(g.n, g.n, g.n)); // expect: TS2345 is not assignable to parameter of type 'AggregateOperand<boolean | null>'.
+q.aggregate(g => argMinIf(g.n, g.n, q.row.n.gt(0))); // expect: TS2345 is not assignable to parameter of type 'AggregateOperand<boolean | null>'.
+q.map(r => argMin(val(1), val(2))); // expect: TS2322 Type '"agg"' is not assignable to type '"row"'.
+q.aggregate(g => argMin(g.n, g.n).plus(g.n)); // expect: TS2769 Type '"grouped"' is not assignable to type '"agg"'. // expect-ts7: TS2769 ExprOperand<number | null, string, "agg">

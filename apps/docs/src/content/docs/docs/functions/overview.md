@@ -37,11 +37,11 @@ Use these expression methods instead of JavaScript `&&`, `||`, and `!` to constr
 
 ## Aggregates
 
-[count](/docs/functions/count/) · [sum](/docs/functions/sum/) · [max](/docs/functions/max/) · [argMax](/docs/functions/arg-max/) · [avg](/docs/functions/avg/) · [quantile](/docs/functions/quantile/) · [uniqExact](/docs/functions/uniq-exact/) · [uniq](/docs/functions/uniq/)
+[count](/docs/functions/count/) · [sum](/docs/functions/sum/) · [min](/docs/functions/min/) · [max](/docs/functions/max/) · [argMin](/docs/functions/arg-min/) · [argMax](/docs/functions/arg-max/) · [avg](/docs/functions/avg/) · [quantile](/docs/functions/quantile/) · [quantileExact](/docs/functions/quantile-exact/) · [uniqExact](/docs/functions/uniq-exact/) · [uniq](/docs/functions/uniq/)
 
 Conditional aggregates apply their aggregate only to rows whose predicate is true:
 
-[countIf](/docs/functions/count-if/) · [sumIf](/docs/functions/sum-if/) · [maxIf](/docs/functions/max-if/) · [argMaxIf](/docs/functions/arg-max-if/) · [avgIf](/docs/functions/avg-if/) · [quantileIf](/docs/functions/quantile-if/) · [uniqExactIf](/docs/functions/uniq-exact-if/)
+[countIf](/docs/functions/count-if/) · [sumIf](/docs/functions/sum-if/) · [minIf](/docs/functions/min-if/) · [maxIf](/docs/functions/max-if/) · [argMinIf](/docs/functions/arg-min-if/) · [argMaxIf](/docs/functions/arg-max-if/) · [avgIf](/docs/functions/avg-if/) · [quantileIf](/docs/functions/quantile-if/) · [quantileExactIf](/docs/functions/quantile-exact-if/) · [uniqExactIf](/docs/functions/uniq-exact-if/)
 
 See [groupBy / aggregate](/docs/query-builder/aggregation/) for constructing aggregate queries.
 
