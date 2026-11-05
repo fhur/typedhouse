@@ -1,6 +1,14 @@
+## Animal table in the "Latest value and average" guide (2026-11-05)
+
+**Done.** The guide now builds a table of every animal, adding pagination, sorting, and filtering one section at a time, and ends with a single `getAnimalTable` endpoint.
+
+**Verified.** The guide's final code, extracted from the page, matched a JavaScript oracle on ClickHouse 24.8: 448 page requests, 0 mismatches, across 16 filter sets, every column and direction, and every page. `pnpm docs:verify` passed.
+
+**Noted, not changed.** Consecutive `.where` calls over a subquery are not merged, so each filter adds a subquery layer to the SQL.
+
 ## `.in()` type/runtime mismatches (2026-11-04)
 
-**Done (uncommitted).** Several `.in()`/`.notIn()` receivers typechecked, then threw `unsupported_membership_type` at compile time. Each now either works or is a type error.
+**Done (96ca25a).** Several `.in()`/`.notIn()` receivers typechecked, then threw `unsupported_membership_type` at compile time. Each now either works or is a type error.
 
 - **Now supported:** `LowCardinality` over String, integers, floats, Bool, UUID and FixedString; `FixedString`; `Enum8`/`Enum16`. All may be nullable, and all work with lists and subqueries. List parameters bind to the unwrapped type, for example `Array(FixedString(3))`.
 - **Now type errors:** `DateTime64(4..9)`, which decodes as a string and has no parameter encoding; `LowCardinality(Enum)`, which ClickHouse 24.8 refuses to create; a String or FixedString receiver with an Enum set (the server throws); a String receiver with a UUID set.
