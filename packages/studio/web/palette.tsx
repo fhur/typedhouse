@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { rank } from './palette-match.js';
 
-export type Group = 'Ask' | 'Actions' | 'Tables' | 'Saved' | 'Models';
+export type Group = 'Ask' | 'Actions' | 'Chats' | 'Tables' | 'Saved' | 'Models';
 /** A palette entry. `run` closes the palette, unless it returns a next step (e.g. the model list). */
 export interface PaletteItem {
   id: string;
@@ -10,14 +10,14 @@ export interface PaletteItem {
   hint?: string | undefined;
   kbd?: string | undefined;
   mono?: boolean;
-  icon?: 'action' | 'table' | 'saved' | 'model' | 'ask';
+  icon?: 'action' | 'table' | 'saved' | 'model' | 'ask' | 'chat';
   /** Shown but inert (e.g. "Ask" while the LLM is unavailable). */
   disabled?: boolean;
   run: () => void | PaletteStep | Promise<void | PaletteStep>;
 }
 export interface PaletteStep { title: string; items: PaletteItem[]; empty?: string }
 
-const ORDER: Group[] = ['Ask', 'Actions', 'Saved', 'Tables', 'Models'];
+const ORDER: Group[] = ['Ask', 'Actions', 'Chats', 'Saved', 'Tables', 'Models'];
 
 function Icon(props: { kind: PaletteItem['icon'] }) {
   const common = { width: 16, height: 16, viewBox: '0 0 24 24', 'aria-hidden': true, fill: 'none', stroke: 'var(--typedhouse-icon)', strokeWidth: 2, strokeLinecap: 'round' as const };
@@ -25,6 +25,7 @@ function Icon(props: { kind: PaletteItem['icon'] }) {
     case 'table': return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M9 10v10" /></svg>;
     case 'saved': return <svg {...common}><path d="M6 3h12v18l-6-4-6 4z" /></svg>;
     case 'ask': return <svg {...common} stroke="var(--typedhouse-accent)" strokeLinejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /></svg>;
+    case 'chat': return <svg {...common}><path d="M4 5h16v11H9l-5 4z" /></svg>;
     case 'model': return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
     default: return <svg {...common}><path d="M4 7h16M4 12h10M4 17h6" /></svg>;
   }
@@ -78,7 +79,7 @@ export function Palette(props: { items: PaletteItem[]; onClose: () => void; ask?
   const onKeyDown = (e: ReactKeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(ranked.length - 1, i + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(0, i - 1)); }
-    else if (e.key === 'Enter') { e.preventDefault(); const hit = ranked[active]; if (hit) void choose(hit.item); }
+    else if (e.key === 'Enter') { e.preventDefault(); const hit = ranked[active]; if (hit && !e.repeat) void choose(hit.item); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); props.onClose(); }
   };
 
@@ -91,7 +92,7 @@ export function Palette(props: { items: PaletteItem[]; onClose: () => void; ask?
           {step && <span className="palette-step">{step.title}</span>}
           <input id="palette-input" ref={input} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={onKeyDown} aria-label="Search commands"
             role="combobox" aria-expanded="true" aria-controls="palette-list" aria-activedescendant={ranked[active] ? `palette-${ranked[active]!.item.id}` : undefined}
-            placeholder={step ? 'Filter…' : 'Commands, tables, saved queries'} autoComplete="off" spellCheck={false} />
+            placeholder={step ? 'Filter…' : 'Commands, chats, tables'} autoComplete="off" spellCheck={false} />
           <span className="kbd">esc</span>
         </label>
         <div id="palette-list" role="listbox" ref={list} className="palette-list">

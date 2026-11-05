@@ -129,7 +129,7 @@ describe('models.select (faux provider with two models)', () => {
     expect(llm.status).toEqual({ available: true, provider: faux.provider.id, modelId: 'faux-b' });
     let used = '';
     faux.setResponses([((_ctx: unknown, _options: unknown, _state: unknown, model: { id: string }) => { used = model.id; return fauxAssistantMessage([fauxToolCall('check_query', { source: 'x' })], { stopReason: 'toolUse' }); }) as never]);
-    expect(await llm.generateQuery({ prompt: 'x' })).toMatchObject({ ok: true });
+    expect(await llm.chat.send({ chatId: null, text: 'x', source: '' })).toMatchObject({ ok: true });
     expect(used).toBe('faux-b');
   });
 });

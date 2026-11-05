@@ -101,7 +101,7 @@ export function connect(config: ConnectionConfig, typeOptions: { core?: CoreMode
     }
     try {
       const prepared = prepare(source, scope, { autoLimit: false });
-      return { ok: true, sql: prepared.compiled.sql, rowType: prepared.rowType };
+      return { ok: true, sql: prepared.compiled.sql, rowType: prepared.rowType, columns: prepared.columns.map(c => ({ name: c.name, type: c.type })) };
     } catch (error) {
       if (error instanceof StudioError) return { ok: false, stage: error.stage, message: error.message };
       return { ok: false, stage: 'evaluate', message: messageOf(error) };

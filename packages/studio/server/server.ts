@@ -9,7 +9,8 @@ import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { Connection } from './clickhouse.js';
 import { savedStore, type SavedStore } from './saved.js';
-import { MAX_SAMPLE_ROWS, unavailableLlm, type ChartInput, type Llm, type ModelStatus } from './llm.js';
+import { MAX_SAMPLE_ROWS, MAX_SOURCE, type ChatSendInput } from './chat.js';
+import { unavailableLlm, type Llm, type ModelStatus } from './llm.js';
 
 const t = initTRPC.create({ transformer: superjson });
 
@@ -17,22 +18,6 @@ function runInput(value: unknown): { source: string; autoLimit: boolean } {
   const v = value as { source?: unknown; autoLimit?: unknown } | null;
   if (!v || typeof v.source !== 'string' || typeof v.autoLimit !== 'boolean') throw new Error('Expected { source: string, autoLimit: boolean }');
   return { source: v.source, autoLimit: v.autoLimit };
-}
-
-function generateInput(value: unknown): { prompt: string; source?: string } {
-  const v = value as { prompt?: unknown; source?: unknown } | null;
-  if (!v || typeof v.prompt !== 'string' || !v.prompt.trim() || (v.source !== undefined && typeof v.source !== 'string')) throw new Error('Expected { prompt: string, source?: string }');
-  return v.source === undefined ? { prompt: v.prompt } : { prompt: v.prompt, source: v.source };
-}
-
-function chartInput(value: unknown): ChartInput {
-  const v = value as { prompt?: unknown; columns?: unknown; sample?: unknown } | null;
-  const columns = Array.isArray(v?.columns) ? v.columns : undefined;
-  if (!v || typeof v.prompt !== 'string' || !v.prompt.trim() || !columns || !Array.isArray(v.sample) ||
-      !columns.every(c => c && typeof (c as { name?: unknown }).name === 'string' && typeof (c as { type?: unknown }).type === 'string')) {
-    throw new Error('Expected { prompt: string, columns: { name, type }[], sample: unknown[] }');
-  }
-  return { prompt: v.prompt, columns: (columns as { name: string; type: string }[]).map(c => ({ name: c.name, type: c.type })), sample: v.sample.slice(0, MAX_SAMPLE_ROWS) };
 }
 
 function savedInput(value: unknown): { name: string; prompt: string; source: string; chart?: Record<string, unknown> | null; overwrite?: boolean } {
@@ -48,7 +33,26 @@ const nameInput = (value: unknown) => {
   if (!v || typeof v.name !== 'string') throw new Error('Expected { name: string }');
   return { name: v.name };
 };
-const MAX_EDITOR_SOURCE = 64_000;
+const MAX_EDITOR_SOURCE = MAX_SOURCE;
+const MAX_MESSAGE = 16_000;
+const chatSendInput = (value: unknown): ChatSendInput => {
+  const v = value as { chatId?: unknown; text?: unknown; source?: unknown; sample?: unknown; replaceFrom?: unknown } | null;
+  if (!v || (v.chatId !== null && typeof v.chatId !== 'string') || typeof v.text !== 'string' || !v.text.trim() || v.text.length > MAX_MESSAGE || typeof v.source !== 'string' || v.source.length > MAX_EDITOR_SOURCE ||
+      (v.sample !== undefined && !Array.isArray(v.sample)) || (v.replaceFrom !== undefined && !Number.isInteger(v.replaceFrom))) {
+    throw new Error('Expected { chatId: string | null, text: string, source: string, sample?: unknown[], replaceFrom?: integer }');
+  }
+  return { chatId: v.chatId, text: v.text, source: v.source, ...(v.sample ? { sample: (v.sample as unknown[]).slice(0, MAX_SAMPLE_ROWS) } : {}), ...(v.replaceFrom === undefined ? {} : { replaceFrom: v.replaceFrom as number }) };
+};
+const chatNoteInput = (value: unknown) => {
+  const v = value as { id?: unknown; text?: unknown } | null;
+  if (!v || typeof v.id !== 'string' || typeof v.text !== 'string' || !v.text.trim() || v.text.length > MAX_MESSAGE) throw new Error('Expected { id: string, text: string }');
+  return { id: v.id, text: v.text };
+};
+const chatIdInput = (value: unknown) => {
+  const v = value as { id?: unknown } | null;
+  if (!v || typeof v.id !== 'string') throw new Error('Expected { id: string }');
+  return { id: v.id };
+};
 const sourceInput = (value: unknown) => {
   const v = value as { source?: unknown } | null;
   if (!v || typeof v.source !== 'string' || v.source.length > MAX_EDITOR_SOURCE) throw new Error('Expected { source: string }');
@@ -110,15 +114,43 @@ export function createRouter(conn: Connection, llm: Llm = unavailableLlm('not co
       list: t.procedure.query(() => llm.listModels()),
       select: t.procedure.input(modelInput).mutation(({ input }) => llm.selectModel(input)),
     }),
-    ai: t.router({
-      generateQuery: t.procedure.input(generateInput).mutation(({ input }) => llm.generateQuery(input)),
-      generateChart: t.procedure.input(chartInput).mutation(({ input }) => llm.generateChart(input)),
+    chat: t.router({
+      list: t.procedure.query(() => llm.chat.list()),
+      get: t.procedure.input(chatIdInput).query(({ input }) => llm.chat.get(input.id)),
+      send: t.procedure.input(chatSendInput).mutation(({ input }) => llm.chat.send(input)),
+      stop: t.procedure.input(chatIdInput).mutation(({ input }) => llm.chat.stop(input.id)),
+      note: t.procedure.input(chatNoteInput).mutation(({ input }) => llm.chat.note(input.id, input.text)),
     }),
   });
 }
 export type AppRouter = ReturnType<typeof createRouter>;
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png' };
+
+/**
+ * A second line behind `checkChartSpec`: whatever a chart spec manages to ask for, the page may only talk to this server.
+ * - `default-src 'self'`, and so `img-src`/`connect-src`/`script-src`: no image, fetch or external SVG paint can carry a row out.
+ * - no `'unsafe-eval'`: charts run with Vega's expression interpreter (`ast` in `web/chart.tsx`).
+ * - `style-src 'unsafe-inline'`: CodeMirror, React `style` and Vite's dev CSS inject styles; CSS can't fetch past `img-src`/`font-src`.
+ * - Google Fonts for the stylesheet and font files of `web/index.html`; `data:`/`blob:` images only.
+ * - dev only: Vite's HMR websocket on this port, which not every browser counts as `'self'`, and the `blob:` worker its client
+ *   starts to ping the server after a restart. The built page has no Vite client, so `dist/web` never gets either.
+ */
+export function contentSecurityPolicy(devPort?: number): string {
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: blob:",
+    `connect-src 'self'${devPort === undefined ? '' : ` ws://127.0.0.1:${devPort}`}`,
+    ...(devPort === undefined ? [] : ["worker-src 'self' blob:"]),
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
 
 /** `ui`: 'dev' mounts Vite middleware over web/, 'static' serves dist/web, 'none' is tRPC only (tests). */
 export async function startServer(options: { conn: Connection; llm?: Llm; dataDir?: string; port: number; ui: 'dev' | 'static' | 'none'; packageRoot: string }) {
@@ -134,7 +166,9 @@ export async function startServer(options: { conn: Connection; llm?: Llm; dataDi
   } else if (options.ui === 'static') {
     const webRoot = join(options.packageRoot, 'dist', 'web');
     fallback = (req, res) => {
-      const path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^([/\\])+/, '');
+      let path: string;
+      try { path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^([/\\])+/, ''); }
+      catch { res.statusCode = 400; res.end('Bad request'); return; }
       const file = join(webRoot, path);
       const target = file.startsWith(webRoot + sep) && extname(file) ? file : join(webRoot, 'index.html');
       readFile(target).then(body => {
@@ -143,13 +177,16 @@ export async function startServer(options: { conn: Connection; llm?: Llm; dataDi
       }, () => { res.statusCode = 404; res.end('Not found'); });
     };
   }
+  let policy = contentSecurityPolicy();
   server.on('request', (req, res) => {
+    res.setHeader('Content-Security-Policy', policy);
     if (req.url?.startsWith('/trpc/')) trpc(req, res);
     else fallback(req, res);
   });
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(options.port, '127.0.0.1', resolve); });
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : options.port;
+  if (options.ui === 'dev') policy = contentSecurityPolicy(port);
   return {
     url: `http://127.0.0.1:${port}`,
     async close() {

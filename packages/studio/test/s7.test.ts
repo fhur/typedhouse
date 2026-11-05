@@ -11,7 +11,7 @@ import { editorSchema, editorScope, prepare, schemaScope } from '../server/eval.
 import { createLlm, type Llm } from '../server/llm.js';
 import { defaultSavedStore } from '../server/server.js';
 import { toChartData } from '../web/chart-data.js';
-import { chartHeading, viewAfterGeneration } from '../web/rules.js';
+import { chartHeading, viewAfterReply } from '../web/rules.js';
 
 const column = (name: string, type: string, position: number) => ({ name, type: parseCHType(type), position, defaultKind: '', comment: '' });
 const table = (name: string, columns = [column('id', 'UInt32', 1)]) => ({ name, engine: 'Memory', sortingKey: [], partitionKey: [], primaryKey: [], columns });
@@ -67,11 +67,13 @@ describe('F15: selecting a model needs credentials', () => {
 });
 
 describe('F11 and the chart heading', () => {
-  it('a generation keeps the current tab, except an empty Chart tab goes to Table', () => {
-    expect(viewAfterGeneration('table', false)).toBe('table');
-    expect(viewAfterGeneration('sql', false)).toBe('sql');
-    expect(viewAfterGeneration('chart', true)).toBe('chart');
-    expect(viewAfterGeneration('chart', false)).toBe('table');
+  // User decision (R13.6, the prototype): query replies always go to Table, so an empty Chart tab is never left showing.
+  it('a query reply goes to Table from every tab, a chart reply to Chart, and any other reply keeps the tab', () => {
+    for (const view of ['table', 'chart', 'sql'] as const) {
+      expect(viewAfterReply(view, 'query')).toBe('table');
+      expect(viewAfterReply(view, 'chart')).toBe('chart');
+      expect(viewAfterReply(view, 'other')).toBe(view);
+    }
   });
 
   it('takes the title out of the spec for the HTML heading', () => {

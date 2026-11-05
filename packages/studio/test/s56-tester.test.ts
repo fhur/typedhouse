@@ -185,12 +185,12 @@ describe('models.select edge cases', () => {
       const gate = new Promise<void>(resolve => { release = resolve; });
       const reply = (_c: unknown, _o: unknown, _s: unknown, model: { id: string }) => { used.push(model.id); return fauxAssistantMessage([fauxToolCall('check_query', { source: 'x' })], { stopReason: 'toolUse' }); };
       faux.setResponses([(async (c: unknown, o: unknown, s: unknown, m: { id: string }) => { await gate; return reply(c, o, s, m); }) as never, reply as never]);
-      const first = llm.generateQuery({ prompt: 'x' });
+      const first = llm.chat.send({ chatId: null, text: 'x', source: '' });
       await new Promise(resolve => setTimeout(resolve, 50));
       expect(await llm.selectModel({ provider: faux.provider.id, modelId: 'faux-b' })).toEqual({ ok: true });
       release();
       expect(await first).toMatchObject({ ok: true });
-      expect(await llm.generateQuery({ prompt: 'y' })).toMatchObject({ ok: true });
+      expect(await llm.chat.send({ chatId: null, text: 'y', source: '' })).toMatchObject({ ok: true });
       expect(used).toEqual(['faux-a', 'faux-b']);
     } finally { await llm.close(); }
   });

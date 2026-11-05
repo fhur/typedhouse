@@ -1,12 +1,6 @@
-// Tester (S4 + F1): chart spec validation (bypasses and false positives), chart data conversion, the abort
-// fallback for providers that ignore the abort signal, and chart/query concurrency. Faux provider only.
+// Tester (S4): chart spec validation (bypasses and false positives) and chart data conversion. The generation half went to chat-ported.test.ts.
 import { describe, expect, it } from 'vitest';
-import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-works/pi-ai';
-import { parseCHType } from '@typedhouse/core';
-import { renderSchema, type DatabaseSchema } from '@typedhouse/codegen';
 import { checkChartSpec } from '../server/chart.js';
-import { editorScope, prepare, schemaScope, StudioError } from '../server/eval.js';
-import { createLlm, type CheckResult } from '../server/llm.js';
 import { toChartData } from '../web/chart-data.js';
 
 const columns = [
@@ -109,85 +103,6 @@ describe('toChartData edge cases', () => {
   });
 });
 
-// ---- generation: F1 abort fallback and concurrency ----
-const column = (name: string, type: string, position: number) => ({ name, type: parseCHType(type), position, defaultKind: '', comment: '' });
-const schema: DatabaseSchema = { functions: [], tables: [{ name: 'events', engine: 'MergeTree', sortingKey: [], partitionKey: [], primaryKey: [], columns: [column('country', 'String', 1), column('revenue', 'Float64', 2)] }] };
-const scope = editorScope(schemaScope(schema));
-function check(source: string): CheckResult {
-  try { const p = prepare(source, scope, { autoLimit: false }); return { ok: true, sql: p.compiled.sql, rowType: p.rowType }; }
-  catch (error) { return error instanceof StudioError ? { ok: false, stage: error.stage, message: error.message } : { ok: false, stage: 'evaluate', message: String(error) }; }
-}
-const goodQuery = 'export default from(events).map(e => ({ country: e.country }))';
-const goodSpec = { mark: 'bar', encoding: { x: { field: 'country', type: 'nominal' }, y: { field: 'revenue', type: 'quantitative' } } };
-const chartInput = { prompt: 'bar of revenue', columns: [{ name: 'country', type: 'String' }, { name: 'revenue', type: 'Float64' }], sample: [{ country: 'DE', revenue: 1 }] };
-/** A provider stuck forever that never looks at the abort signal. */
-const stuck = (() => new Promise(() => {})) as never;
-
-async function setup(options: { timeoutMs?: number; abortGraceMs?: number } = {}) {
-  const faux = fauxProvider();
-  const models = createModels();
-  models.setProvider(faux.provider);
-  const model = faux.getModel();
-  const llm = await createLlm({ models, model: { provider: model.provider, modelId: model.id }, schema: () => renderSchema(schema), check, ...options });
-  return { faux, llm };
-}
-
-describe('F1: providers that ignore abort', () => {
-  it('generateQuery returns within timeout + grace and the next generation is accepted', async () => {
-    const { faux, llm } = await setup({ timeoutMs: 300, abortGraceMs: 300 });
-    faux.setResponses([stuck]);
-    const started = Date.now();
-    expect(await llm.generateQuery({ prompt: 'x' })).toMatchObject({ ok: false, error: expect.stringMatching(/timed out|stopped/) });
-    expect(Date.now() - started).toBeLessThan(3_000);
-    faux.setResponses([fauxAssistantMessage([fauxToolCall('check_query', { source: goodQuery })], { stopReason: 'toolUse' })]);
-    expect(await llm.generateQuery({ prompt: 'x' })).toMatchObject({ ok: true, source: goodQuery });
-  }, 15_000);
-
-  it('generateChart returns within timeout + grace and the next chart and query are accepted', async () => {
-    const { faux, llm } = await setup({ timeoutMs: 300, abortGraceMs: 300 });
-    faux.setResponses([stuck]);
-    const started = Date.now();
-    expect(await llm.generateChart(chartInput)).toMatchObject({ ok: false, spec: null });
-    expect(Date.now() - started).toBeLessThan(3_000);
-    faux.setResponses([fauxAssistantMessage([fauxToolCall('check_chart', { spec: goodSpec } as never)], { stopReason: 'toolUse' })]);
-    expect(await llm.generateChart(chartInput)).toMatchObject({ ok: true });
-    faux.setResponses([fauxAssistantMessage([fauxToolCall('check_query', { source: goodQuery })], { stopReason: 'toolUse' })]);
-    expect(await llm.generateQuery({ prompt: 'x' })).toMatchObject({ ok: true });
-  }, 15_000);
-
-  it('a chart while a query is running is refused, and vice versa, with one model request each', async () => {
-    const { faux, llm } = await setup();
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    faux.setResponses([(async () => { await gate; return fauxAssistantMessage([fauxToolCall('check_query', { source: goodQuery })], { stopReason: 'toolUse' }); }) as never]);
-    const query = llm.generateQuery({ prompt: 'x' });
-    expect(await llm.generateChart(chartInput)).toMatchObject({ ok: false, error: expect.stringMatching(/already running/) });
-    release();
-    expect(await query).toMatchObject({ ok: true });
-    expect(faux.state.callCount).toBe(1);
-    await llm.close();
-  });
-});
-
-describe('generateChart: only a checked spec is ok', () => {
-  it('a spec passed as a JSON string, then prose with another spec: ok is the checked one', async () => {
-    const { faux, llm } = await setup();
-    faux.setResponses([fauxAssistantMessage([fauxToolCall('check_chart', { spec: JSON.stringify(goodSpec) } as never)], { stopReason: 'toolUse' })]);
-    const result = await llm.generateChart(chartInput);
-    if (result.ok) expect(checkChartSpec(result.spec, chartInput.columns).ok).toBe(true);
-    await llm.close();
-  });
-
-  it('columns are taken from the request, so a field valid for another request is refused', async () => {
-    const { faux, llm } = await setup({});
-    const spec = { mark: 'bar', encoding: { x: { field: 'secret_col' } } };
-    faux.setResponses(Array.from({ length: 6 }, () => fauxAssistantMessage([fauxToolCall('check_chart', { spec } as never)], { stopReason: 'toolUse' })));
-    const result = await llm.generateChart(chartInput);
-    expect(result.ok).toBe(false);
-    await llm.close();
-  });
-});
-
 // ---- S4 retest: escaping of dotted/bracketed column names, checked by rendering with vega headless ----
 async function axisText(spec: Record<string, unknown>, values: Record<string, unknown>[]): Promise<string[]> {
   const vl = await import('vega-lite');
@@ -250,15 +165,4 @@ describe('escaping of dotted and bracketed column names (rendered headless)', ()
     expect(labels).toContain('beta');
     expect(labels).not.toContain('alpha');
   });
-});
-
-describe('F1: close() after a timeout with a provider that ignores abort', () => {
-  it('returns within the abort grace period', async () => {
-    const { faux, llm } = await setup({ timeoutMs: 300, abortGraceMs: 300 });
-    faux.setResponses([stuck]);
-    await llm.generateQuery({ prompt: 'x' });
-    const started = Date.now();
-    await llm.close();
-    expect(Date.now() - started).toBeLessThan(2_000);
-  }, 15_000);
 });

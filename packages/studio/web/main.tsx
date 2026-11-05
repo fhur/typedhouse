@@ -1,16 +1,17 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { createTRPCClient, httpBatchLink, httpLink, splitLink } from '@trpc/client';
 import type { inferRouterOutputs } from '@trpc/server';
 import superjson from 'superjson';
 import type { AppRouter } from '../server/server.js';
 import type { EditorView } from '@codemirror/view';
 import { Chart } from './chart.js';
 import { chartSample, toChartData } from './chart-data.js';
-import { Editor, type Language } from './editor.js';
+import { Editor, replaceDocument, type Language } from './editor.js';
 import { Palette, type PaletteItem, type PaletteStep } from './palette.js';
-import { chartHeading, viewAfterGeneration, type View } from './rules.js';
-import { isMac, matchShortcut, type Action } from './keymap.js';
+import { canLoadAttempt, chartHeading, versionInEditor, viewAfterReply, type View } from './rules.js';
+import { Thread, type ChatTurn, type TurnAction, type UserTurn } from './thread.js';
+import { globalKeys, IGNORES_REPEAT, isMac, keyGroups, matchShortcut, zoneHints, type Action, type Zone } from './keymap.js';
 import './styles.css';
 
 /** The editor's TypeScript service (R12), on the server. */
@@ -19,27 +20,83 @@ const language: Language = {
   completions: (source, pos) => api.types.completions.mutate({ source, pos }),
   hover: (source, pos) => api.types.hover.mutate({ source, pos }),
 };
-const api = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: '/trpc', transformer: superjson })] });
+// A batch answers when its slowest call ends: a send lasts minutes and a run can be slow, and neither may hold up type checks or a stop.
+const api = createTRPCClient<AppRouter>({
+  links: [splitLink({
+    condition: op => op.path === 'chat.send' || op.path === 'query.run',
+    true: httpLink({ url: '/trpc', transformer: superjson }),
+    false: httpBatchLink({ url: '/trpc', transformer: superjson }),
+  })],
+});
 type Outputs = inferRouterOutputs<AppRouter>;
 type Meta = Outputs['meta']['get'];
 type RunResult = Outputs['query']['run'];
 type Success = Extract<RunResult, { ok: true }>;
-type Generated = Outputs['ai']['generateQuery'];
-type ChartOutcome = Outputs['ai']['generateChart'];
+type ChatSummary = Outputs['chat']['list'][number];
+type ChatDetail = NonNullable<Outputs['chat']['get']>;
+type Version = Extract<ChatTurn, { kind: 'version' }>;
+type Spec = Record<string, unknown>;
 type Saved = Extract<Outputs['saved']['list'], { ok: true }>['queries'][number];
 
 const MOD = isMac(navigator.platform) ? '⌘' : 'Ctrl+';
 const SOURCE_KEY = 'typedhouse-studio:source';
 const LIMIT_KEY = 'typedhouse-studio:auto-limit';
-const PROMPT_KEY = 'typedhouse-studio:prompt';
-const CHART_PROMPT_KEY = 'typedhouse-studio:chart-prompt';
 const CHART_SPEC_KEY = 'typedhouse-studio:chart-spec';
-const loadSpec = (): Record<string, unknown> | undefined => { try { return JSON.parse(store.get(CHART_SPEC_KEY) ?? 'null') ?? undefined; } catch { return undefined; } };
+const CHAT_KEY = 'typedhouse-studio:chat';
+/** A send in flight, so a reload can apply its reply: `{ chatId, after, at }`. */
+const PENDING_KEY = 'typedhouse-studio:pending';
+const draftKey = (chat: string | null) => `typedhouse-studio:draft:${chat ?? 'new'}`;
+const editorKey = (chat: string) => `typedhouse-studio:editor:${chat}`;
+const chartKey = (chat: string) => `typedhouse-studio:chart:${chat}`;
+const parseSpec = (text: string | null): Spec | undefined => { try { return JSON.parse(text ?? 'null') ?? undefined; } catch { return undefined; } };
+const loadSpec = () => parseSpec(store.get(CHART_SPEC_KEY));
 const store = {
   get(key: string): string | null { try { return localStorage.getItem(key); } catch { return null; } },
   set(key: string, value: string) { try { localStorage.setItem(key, value); } catch { /* private mode */ } },
   remove(key: string) { try { localStorage.removeItem(key); } catch { /* private mode */ } },
 };
+/**
+ * Edits in progress, per chat. The words being written live in that chat's draft and editor keys like any others, so an
+ * edit only needs its turn, what it started from, and what it put aside for an esc. Everything read back is shape-checked.
+ */
+const EDIT_KEY = 'typedhouse-studio:edit';
+type EditState = { turn: number; text: string; source: string; aside: { source: string | null; chart: Spec | null; draft: string } };
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+function isEditState(value: unknown): value is EditState {
+  if (!isRecord(value) || !Number.isInteger(value['turn']) || typeof value['text'] !== 'string' || typeof value['source'] !== 'string' || !isRecord(value['aside'])) return false;
+  const { source, chart, draft } = value['aside'];
+  return (source === null || typeof source === 'string') && (chart === null || isRecord(chart)) && typeof draft === 'string';
+}
+function readEdits(): Record<string, EditState> {
+  let parsed: unknown;
+  try { parsed = JSON.parse(store.get(EDIT_KEY) ?? 'null'); } catch { return {}; }
+  return isRecord(parsed) ? Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, EditState] => isEditState(entry[1]))) : {};
+}
+function writeEdits(edits: Record<string, EditState>) {
+  if (Object.keys(edits).length) store.set(EDIT_KEY, JSON.stringify(edits)); else store.remove(EDIT_KEY);
+}
+function saveEdit(chat: string, edit: EditState | undefined) {
+  const { [chat]: _old, ...others } = readEdits();
+  writeEdits(edit ? { ...others, [chat]: edit } : others);
+}
+/** A reload: an edit with words of its own stays, to be picked up where it was. One with nothing typed goes back as if never started. */
+function settleEdits() {
+  const edits = readEdits();
+  const open = store.get(CHAT_KEY);
+  for (const [chat, edit] of Object.entries(edits)) {
+    if (store.get(draftKey(chat)) !== edit.text || store.get(editorKey(chat)) !== edit.source) continue;
+    delete edits[chat];
+    const { source, chart, draft } = edit.aside;
+    if (source !== null) { store.set(editorKey(chat), source); if (chat === open) store.set(SOURCE_KEY, source); }
+    for (const key of [chartKey(chat), ...(chat === open ? [CHART_SPEC_KEY] : [])]) { if (chart) store.set(key, JSON.stringify(chart)); else store.remove(key); }
+    if (draft) store.set(draftKey(chat), draft); else store.remove(draftKey(chat));
+  }
+  writeEdits(edits);
+}
+settleEdits();
+// The prompt boxes these belonged to are gone.
+store.remove('typedhouse-studio:prompt');
+store.remove('typedhouse-studio:chart-prompt');
 
 function starter(meta: Meta | undefined): string {
   const first = meta?.tables[0]?.name;
@@ -149,6 +206,22 @@ function SqlView(props: { result: Success }) {
   );
 }
 
+const KEYS = globalKeys(MOD);
+const CHAT_MIN = 30, CHAT_MAX = 75;
+/** After the key press that asked for it: the character of that press can't land in what gets focus. */
+const focusSoon = (element: { focus(): void } | null | undefined) => {
+  const from = document.activeElement;
+  setTimeout(() => {
+    // Focus has gone somewhere on purpose meanwhile, such as a palette opened right away: that wins.
+    const now = document.activeElement;
+    if (now === from || now === null || now === document.body) element?.focus();
+  }, 0);
+};
+const isTextField = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.tagName === 'SELECT');
+const newestChart = (turns: readonly ChatTurn[]): Spec | undefined => turns.filter((t): t is Version => t.kind === 'version').at(-1)?.chart;
+const newestVersion = (turns: readonly ChatTurn[]) => turns.filter((t): t is Version => t.kind === 'version').at(-1);
+const lastId = (turns: readonly ChatTurn[]) => turns.at(-1)?.id ?? 0;
+
 function App() {
   const [meta, setMeta] = useState<Meta>();
   const [metaError, setMetaError] = useState<string>();
@@ -157,31 +230,99 @@ function App() {
   const [view, setView] = useState<View>('table');
   const [result, setResult] = useState<RunResult>();
   const [running, setRunning] = useState(false);
-  const [split, setSplit] = useState(45);
+  const [split, setSplit] = useState(44);
   const [dragging, setDragging] = useState(false);
+  const [chatSplit, setChatSplit] = useState(56);
+  const [draggingChat, setDraggingChat] = useState(false);
   const panes = useRef<HTMLElement>(null);
-  const prompt = useRef<HTMLInputElement>(null);
+  const leftPane = useRef<HTMLDivElement>(null);
+  const panesDivider = useRef<HTMLButtonElement>(null);
+  const chatDivider = useRef<HTMLButtonElement>(null);
+  /** Tab leaves the editor instead of indenting (CodeMirror's Ctrl+M), shown because nothing else tells. */
+  const [tabMoves, setTabMoves] = useState(false);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  const threadEl = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
-  const [ask, setAsk] = useState(() => store.get(PROMPT_KEY) ?? '');
-  const [generating, setGenerating] = useState(false);
-  const [generated, setGenerated] = useState<Generated>();
-  const chartPrompt = useRef<HTMLInputElement>(null);
-  const focusChartPrompt = useRef(false);
-  const [chartAsk, setChartAsk] = useState(() => store.get(CHART_PROMPT_KEY) ?? '');
-  const [chartSpec, setChartSpec] = useState<Record<string, unknown> | undefined>(loadSpec);
-  const [charting, setCharting] = useState(false);
-  const [charted, setCharted] = useState<ChartOutcome>();
+
+  // The open chat. `chatId` null is a new chat, which exists on the server from its first send.
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [chatId, setChatIdState] = useState<string | null>(() => store.get(CHAT_KEY));
+  const [detail, setDetail] = useState<ChatDetail>();
+  const [draft, setDraftState] = useState(() => store.get(draftKey(store.get(CHAT_KEY))) ?? '');
+  const [pendingText, setPendingText] = useState<string>();
+  /** The chat a send of this page is waiting on; `null` a new chat whose id isn't known yet, `undefined` none. */
+  const [sendingChat, setSendingChat] = useState<string | null | undefined>();
+  const [stopping, setStopping] = useState(false);
+  const [chatError, setChatError] = useState<string>();
+  /** Edit-and-resend: later turns hide locally until the send. Esc brings them back; a reload or a switch leaves the edit waiting, if anything was typed. */
+  const [editing, setEditing] = useState<EditState | undefined>(() => { const open = store.get(CHAT_KEY); return open ? readEdits()[open] : undefined; });
+  /** The selected turn; a later keyboard map moves this. */
+  const [selected, setSelected] = useState<number>();
+  /** Where focus is; `other` is a button, a divider or nowhere. */
+  const [zone, setZone] = useState<Zone | 'other'>('other');
+  const [helpOpen, setHelpOpen] = useState(false);
+  /**
+   * Keys that are down, and where focus was when each went down. A repeat of one after focus has moved, by whatever moved it, is
+   * swallowed. Only repeats: a real press always goes through, so a keyup lost with the window can't leave a key stuck.
+   */
+  const keysDown = useRef(new Map<string, Element | null>());
+  const helpReturn = useRef<Element | null>(null);
+  const helpDialog = useRef<HTMLDivElement>(null);
+  /** "Copied v2", briefly. */
+  const [copied, setCopied] = useState<string>();
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const [chartSpec, setChartSpec] = useState<Spec | undefined>(loadSpec);
   const [saved, setSaved] = useState<Saved[]>([]);
   const [savedError, setSavedError] = useState<string>();
   const [loaded, setLoaded] = useState<{ name: string; source: string }>();
   const [saving, setSaving] = useState<string>();
   const [saveError, setSaveError] = useState<string>();
   const saveInput = useRef<HTMLInputElement>(null);
+  const saveReturn = useRef<Element | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [typeErrors, setTypeErrors] = useState<number>();
   const paletteReturn = useRef<Element | null>(null);
-  const latest = useRef({ source, autoLimit, running, generating, charting, result, paletteOpen, ask, chartSpec });
-  latest.current = { source, autoLimit, running, generating, charting, result, paletteOpen, ask, chartSpec };
+
+  const chatRef = useRef(chatId);
+  /** The starter text as this page would write it: replacing it untouched is not a change. */
+  const starterText = useRef<string | undefined>(undefined);
+  starterText.current = meta ? starter(meta) : undefined;
+  /** A send is under way: read at the moment of sending, so two quick sends can't both pass. */
+  const sendingRef = useRef(false);
+  const stopWanted = useRef(false);
+  const runningRef = useRef(false);
+  /** Results belong to who asked: a run from before a switch of chat or a loaded query is left to finish unseen. */
+  const runOwner = useRef(0);
+  /** A run that must happen once the current one ends: a reply's auto-run is never dropped. */
+  const queuedRun = useRef<string | undefined>(undefined);
+  /** The source of the last successful run: rows are only ever sent as a sample of that source. */
+  const ranSource = useRef<string | undefined>(undefined);
+  const latest = useRef({ source, autoLimit, result, paletteOpen, helpOpen, chartSpec, draft, detail, editing, selected, generating: false, visible: [] as readonly ChatTurn[] });
+  const openGenerating = sendingChat === chatId && sendingChat !== undefined ? true : detail?.generating === true && detail.id === chatId;
+  latest.current = { source, autoLimit, result, paletteOpen, helpOpen, chartSpec, draft, detail, editing, selected, generating: openGenerating, visible: (detail?.turns ?? []).filter(t => !editing || t.id <= editing.turn) };
+
+  const setChatId = useCallback((id: string | null) => {
+    chatRef.current = id;
+    setChatIdState(id);
+    if (id) store.set(CHAT_KEY, id); else store.remove(CHAT_KEY);
+  }, []);
+  const setDraft = useCallback((text: string) => {
+    setDraftState(text);
+    if (text) store.set(draftKey(chatRef.current), text); else store.remove(draftKey(chatRef.current));
+  }, []);
+  const setChart = useCallback((spec: Spec | undefined) => {
+    setChartSpec(spec);
+    // A chart-less version or saved query also clears the persisted chart, so a reload shows none (F14).
+    if (spec) store.set(CHART_SPEC_KEY, JSON.stringify(spec)); else store.remove(CHART_SPEC_KEY);
+    const chat = chatRef.current;
+    if (chat) { if (spec) store.set(chartKey(chat), JSON.stringify(spec)); else store.remove(chartKey(chat)); }
+  }, []);
+  const rememberSource = useCallback((text: string) => {
+    setSource(text);
+    store.set(SOURCE_KEY, text);
+    if (chatRef.current) store.set(editorKey(chatRef.current), text);
+  }, []);
 
   useEffect(() => {
     api.meta.get.query().then(m => {
@@ -199,110 +340,457 @@ function App() {
   useEffect(() => { void refreshSaved(); }, [refreshSaved]);
 
   const run = useCallback(async (override?: string) => {
-    const { source: current, autoLimit: limit, running: busy } = latest.current;
-    const text = override ?? current;
-    if (busy || text === null) return;
+    if (runningRef.current) {
+      // A manual run while one is in flight is dropped, as the Run button is disabled; a reply's run waits its turn.
+      if (override !== undefined) queuedRun.current = override;
+      return;
+    }
+    let text: string | undefined = override ?? latest.current.source ?? undefined;
+    if (text === undefined) return;
+    const owner = runOwner.current;
+    runningRef.current = true;
     setRunning(true);
-    try { setResult(await api.query.run.mutate({ source: text, autoLimit: limit })); }
-    catch (error) { setResult({ ok: false, error: { stage: 'clickhouse', message: `Request failed: ${String(error)}` } }); }
-    finally { setRunning(false); }
+    while (text !== undefined) {
+      const ran: string = text;
+      let outcome: RunResult;
+      try { outcome = await api.query.run.mutate({ source: ran, autoLimit: latest.current.autoLimit }); }
+      catch (error) { outcome = { ok: false, error: { stage: 'clickhouse', message: `Request failed: ${String(error)}` } }; }
+      if (runOwner.current !== owner) return;
+      ranSource.current = outcome.ok ? ran : undefined;
+      setResult(outcome);
+      text = queuedRun.current as string | undefined;
+      queuedRun.current = undefined;
+    }
+    runningRef.current = false;
+    setRunning(false);
+  }, []);
+  /** Whatever is running or queued no longer counts. */
+  const disownRuns = useCallback(() => {
+    runOwner.current++;
+    queuedRun.current = undefined;
+    runningRef.current = false;
+    setRunning(false);
   }, []);
 
   /** Replace the editor content (undoable in the editor) and keep it as the source of truth. */
-  const replaceSource = useCallback((text: string) => {
-    const view = editor.current;
-    if (view) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: 0 } });
-      // Show line 1, top-left, after a generate / load replaced everything.
-      view.scrollDOM.scrollTop = 0;
-      view.scrollDOM.scrollLeft = 0;
-    }
-    setSource(text);
-    store.set(SOURCE_KEY, text);
+  const replaceSource = useCallback((text: string, added?: readonly number[]) => {
+    if (editor.current) replaceDocument(editor.current, text, added);
+    rememberSource(text);
+  }, [rememberSource]);
+
+  const refreshChats = useCallback(async () => {
+    try { setChats(await api.chat.list.query()); } catch { /* the thread reports a lost server */ }
   }, []);
 
-  const generate = useCallback(async (override?: string) => {
-    const { source: current, generating: busy } = latest.current;
-    const text = (override ?? prompt.current?.value ?? '').trim();
-    if (busy || !text) return;
-    setGenerating(true);
-    setGenerated(undefined);
+  /** Reads the open chat from the server. */
+  const refreshDetail = useCallback(async (id: string | null): Promise<ChatDetail | null> => {
+    if (id === null) { setDetail(undefined); return null; }
+    const found = await api.chat.get.query({ id });
+    if (chatRef.current === id) setDetail(found ?? undefined);
+    return found;
+  }, []);
+
+  /** A reply came in. What the open chat shows follows at once; a chat left meanwhile finds it when reopened. */
+  const applyReply = useCallback((chat: string, turn: ChatTurn | undefined) => {
+    if (turn?.kind !== 'version') return;
+    if (chatRef.current !== chat) {
+      store.set(editorKey(chat), turn.source);
+      if (turn.chart) store.set(chartKey(chat), JSON.stringify(turn.chart)); else store.remove(chartKey(chat));
+      return;
+    }
+    const current = latest.current;
+    const unchanged = current.source === turn.source;
+    const hasRows = current.result?.ok === true && ranSource.current === turn.source;
+    if (!unchanged) replaceSource(turn.source, current.source === starterText.current ? [] : turn.addedLines);
+    setChart(turn.chart);
+    setView(v => viewAfterReply(v, turn.chart ? 'chart' : 'query'));
+    // A chart over what is already showing needs no new rows.
+    if (!turn.chart || !hasRows) void run(turn.source);
+  }, [replaceSource, run, setChart]);
+
+  /** An edit whose message isn't in the chat any more has nothing to resend; its words stay in the box as a plain draft. */
+  const checkEdit = useCallback((found: ChatDetail) => {
+    const edit = readEdits()[found.id];
+    if (!edit || found.turns.some(t => t.id === edit.turn && t.kind === 'user')) return;
+    saveEdit(found.id, undefined);
+    if (chatRef.current === found.id) setEditing(undefined);
+  }, []);
+
+  /** A reply this page never saw arrive, because it reloaded while it was on its way. */
+  const applyPending = useCallback((found: ChatDetail) => {
+    if (found.generating) return;
+    const pending = parsePending(store.get(PENDING_KEY));
+    if (pending?.chatId !== found.id) return;
+    store.remove(PENDING_KEY);
+    // A resend that never arrived: the message it replaces is still there, and the turns after it are old ones, not its reply.
+    if (pending.replaced !== undefined && found.turns.some(t => t.id === pending.replaced)) return;
+    applyReply(found.id, found.turns.filter(t => t.id > pending.after && t.kind !== 'user').at(-1));
+  }, [applyReply]);
+
+  // The chat from before the reload.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const listed = await api.chat.list.query();
+        if (!live) return;
+        setChats(listed);
+        const pending = parsePending(store.get(PENDING_KEY));
+        // Reloaded right after a first send: the chat it made is the one to open.
+        if (pending && pending.chatId === null) {
+          const made = listed.find(c => c.updatedAt >= pending.at);
+          if (made) { store.set(PENDING_KEY, JSON.stringify({ ...pending, chatId: made.id })); setChatId(made.id); }
+          else store.remove(PENDING_KEY);
+        }
+        const found = await refreshDetail(chatRef.current);
+        if (!live) return;
+        // Forgotten only if the server is up and says so; without credentials the list is empty and the chat comes back later (F27).
+        if (chatRef.current && !found && listed.length > 0) {
+          saveEdit(chatRef.current, undefined);
+          setEditing(undefined);
+          setChatId(null);
+        }
+        if (found) { applyPending(found); checkEdit(found); }
+      } catch (error) { if (live) setChatError(`Could not load chats: ${String(error)}`); }
+    })();
+    return () => { live = false; };
+  }, [applyPending, checkEdit, refreshDetail, setChatId]);
+
+  // A generation this page isn't waiting on, as after a reload: follow it until the reply is there.
+  const following = detail?.generating === true && sendingChat === undefined;
+  useEffect(() => {
+    if (!following || !detail) return;
+    const id = detail.id;
+    const timer = setInterval(() => {
+      refreshDetail(id).then(found => { if (found && !found.generating) { applyPending(found); void refreshChats(); } }, () => undefined);
+    }, 500);
+    return () => clearInterval(timer);
+  }, [following, detail?.id, refreshDetail, applyPending, refreshChats]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A generation ended, however it ended: the sidebar's marker goes with it.
+  useEffect(() => { if (!openGenerating) void refreshChats(); }, [openGenerating, refreshChats]);
+
+  // Another chat generating that this page isn't waiting on: watch for the end, so the line by the message box goes away.
+  const otherFollowing = sendingChat === undefined && chats.some(c => c.generating && c.id !== chatId);
+  useEffect(() => {
+    if (!otherFollowing) return;
+    const timer = setInterval(() => void refreshChats(), 1_000);
+    return () => clearInterval(timer);
+  }, [otherFollowing, refreshChats]);
+
+  /** Sends. `options.source` is what goes with it when that isn't the editor text as it is now (a retry). */
+  const send = useCallback(async (text: string, options: { replaceFrom?: number; source?: string } = {}) => {
+    const message = text.trim();
+    const current = latest.current;
+    if (!message || sendingRef.current || current.generating) return;
+    sendingRef.current = true;
+    const chat = chatRef.current;
+    const sent = options.source ?? current.source ?? '';
+    const ok = current.result?.ok ? current.result : undefined;
+    // Rows only as a sample of exactly this query, never from an older one as if they were current.
+    const sample = ok && ranSource.current === sent ? chartSample(ok.rows, ok.columns) : undefined;
+    const edit = current.editing;
+    const replaceFrom = options.replaceFrom ?? edit?.turn;
+    const keptTurns = replaceFrom === undefined ? current.detail?.turns ?? [] : (current.detail?.turns ?? []).filter(t => t.id < replaceFrom);
+    if (chat && current.detail) setDetail({ ...current.detail, turns: keptTurns });
+    setEditing(undefined);
+    if (edit && chat) saveEdit(chat, undefined);
+    setSelected(undefined);
+    setChatError(undefined);
+    setPendingText(message);
+    setSendingChat(chat);
+    stopWanted.current = false;
+    setDraft('');
+    store.set(PENDING_KEY, JSON.stringify({ chatId: chat, after: lastId(keptTurns), at: Date.now(), ...(replaceFrom === undefined ? {} : { replaced: replaceFrom }) }));
+
+    // Read now, not from the sidebar's list, which may not be there yet: this is how the new chat is recognised.
+    const before = new Set(chat === null ? (await api.chat.list.query().catch(() => [] as ChatSummary[])).map(c => c.id) : []);
+    // A new chat: the server names it, and a stop or a reload needs that before the reply is back.
+    const known = { id: chat };
+    const adopt = async () => {
+      while (known.id === null && sendingRef.current) {
+        const listed = await api.chat.list.query().catch(() => [] as ChatSummary[]);
+        const made = listed.find(c => !before.has(c.id));
+        if (made && sendingRef.current) {
+          known.id = made.id;
+          setChats(listed);
+          // Named now, also if the page has left it: the sidebar's dot and the way to stop it need the name.
+          setSendingChat(made.id);
+          store.set(PENDING_KEY, JSON.stringify({ chatId: made.id, after: 0, at: Date.now() }));
+          // Still on this new chat: it is the open one now.
+          if (chatRef.current === null) {
+            setChatId(made.id);
+            store.set(editorKey(made.id), latest.current.source ?? '');
+            store.remove(draftKey(null));
+            if (stopWanted.current) void api.chat.stop.mutate({ id: made.id }).catch(() => undefined);
+          }
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+    };
+    void adopt();
+
+    /** Nothing was recorded as far as this page knows: the words go back in the box of their chat, and a resend stays one. */
+    const giveBack = () => {
+      const home = known.id ?? chat;
+      if (chatRef.current === home) setDraft(latest.current.draft ? `${latest.current.draft}\n${text}` : text);
+      else { const other = store.get(draftKey(home)); store.set(draftKey(home), other ? `${other}\n${text}` : text); }
+      if (!chat) return;
+      if (edit) saveEdit(chat, edit);
+      if (chatRef.current !== chat) return;
+      if (edit) setEditing(edit);
+      if (current.detail) setDetail(current.detail);
+      // What the server has, if it can still say. A stored resend ends the edit; its words stay in the box.
+      void refreshDetail(chat).then(found => { if (found) checkEdit(found); }, () => undefined);
+    };
+
     try {
-      const outcome = await api.ai.generateQuery.mutate({ prompt: text, ...(current ? { source: current } : {}) });
-      setGenerated(outcome);
-      if (outcome.ok) {
-        replaceSource(outcome.source);
-        setView(v => viewAfterGeneration(v, latest.current.chartSpec !== undefined));
-        void run(outcome.source);
+      const outcome = await api.chat.send.mutate({ chatId: chat, text: message, source: sent, ...(sample ? { sample } : {}), ...(replaceFrom === undefined ? {} : { replaceFrom }) });
+      const id = outcome.chatId ?? known.id;
+      const unnamed = chat === null && known.id === null;
+      sendingRef.current = false;
+      // Refused before anything was recorded: nothing happened, so the message goes back in the box.
+      if (!outcome.ok && !outcome.turn) {
+        setChatError(outcome.error);
+        store.remove(PENDING_KEY);
+        giveBack();
+      } else if (id) {
+        // Answered before the list showed it, and still on this new chat.
+        if (unnamed && chatRef.current === null) setChatId(id);
+        store.remove(PENDING_KEY);
+        store.remove(draftKey(null));
+        const reply = outcome.turn as ChatTurn | undefined;
+        if (chatRef.current === id && !store.get(editorKey(id))) store.set(editorKey(id), latest.current.source ?? '');
+        applyReply(id, reply);
+        await refreshDetail(chatRef.current);
       }
     } catch (error) {
-      setGenerated({ ok: false, error: `Request failed: ${String(error)}`, source: null, attempts: 0 });
+      sendingRef.current = false;
+      // No answer. The turn may be stored all the same, and then the words show twice, which beats losing them. The pending
+      // mark stays, so a reply the server still gets to is found by a reload.
+      setChatError(`Lost the server: ${error instanceof Error ? error.message : String(error)}`);
+      giveBack();
     } finally {
-      setGenerating(false);
+      sendingRef.current = false;
+      setPendingText(undefined);
+      setSendingChat(undefined);
+      setStopping(false);
+      void refreshChats();
     }
-  }, [replaceSource, run]);
+  }, [applyReply, checkEdit, refreshChats, refreshDetail, setChatId, setDraft]);
 
-  const generateChart = useCallback(async () => {
-    const { charting: busy, result: current } = latest.current;
-    const text = chartPrompt.current?.value.trim() ?? '';
-    if (busy || !text || !current?.ok) return;
-    setCharting(true);
-    setCharted(undefined);
+  const stop = useCallback(async () => {
+    if (!latest.current.generating) return;
+    setStopping(true);
+    const id = chatRef.current;
+    if (id === null) { stopWanted.current = true; return; }
     try {
-      const outcome = await api.ai.generateChart.mutate({
-        prompt: text,
-        columns: current.columns.map(c => ({ name: c.name, type: c.type })),
-        sample: chartSample(current.rows, current.columns),
-      });
-      setCharted(outcome);
-      if (outcome.ok) { setChartSpec(outcome.spec); store.set(CHART_SPEC_KEY, JSON.stringify(outcome.spec)); }
-    } catch (error) {
-      setCharted({ ok: false, error: `Request failed: ${String(error)}`, spec: null, attempts: 0 });
-    } finally {
-      setCharting(false);
-    }
+      await api.chat.stop.mutate({ id });
+      // A send of this page finishes by itself; following one, the next read shows the note.
+      if (!sendingRef.current) await refreshDetail(id);
+    } catch (error) { setChatError(`Could not stop: ${String(error)}`); }
+    finally { if (!sendingRef.current) setStopping(false); }
+  }, [refreshDetail]);
+
+  /** Puts the editor and chart back from before an edit-and-resend that won't happen. */
+  const cancelEdit = useCallback(() => {
+    const { editing: edit } = latest.current;
+    if (!edit) return;
+    setEditing(undefined);
+    if (chatRef.current) saveEdit(chatRef.current, undefined);
+    if (edit.aside.source !== null) replaceSource(edit.aside.source);
+    setChart(edit.aside.chart ?? undefined);
+    setDraft(edit.aside.draft);
+  }, [replaceSource, setChart, setDraft]);
+
+  /** Leaving the chat: an edit with words of its own waits there, stored; one with nothing typed is simply cancelled. */
+  const leaveEdit = useCallback(() => {
+    const { editing: edit, draft: box, source: text } = latest.current;
+    if (!edit) return;
+    if (box === edit.text && text === edit.source) cancelEdit(); else setEditing(undefined);
+  }, [cancelEdit]);
+
+  /** The chat's editor text and chart: its draft in this browser, else its newest version. Doesn't run anything. */
+  const openChat = useCallback(async (id: string) => {
+    if (id === chatRef.current) return;
+    leaveEdit();
+    setChatId(id);
+    setEditing(readEdits()[id]);
+    setDetail(undefined);
+    setSelected(undefined);
+    setChatError(undefined);
+    setDraftState(store.get(draftKey(id)) ?? '');
+    setLoaded(undefined);
+    disownRuns();
+    setResult(undefined);
+    ranSource.current = undefined;
+    const found = await refreshDetail(id).catch(() => null);
+    if (chatRef.current !== id) return;
+    const turns = found?.turns ?? [];
+    const text = store.get(editorKey(id)) ?? newestVersion(turns)?.source;
+    if (text !== undefined) replaceSource(text);
+    setChart(parseSpec(store.get(chartKey(id))) ?? newestChart(turns));
+    if (found) { applyPending(found); checkEdit(found); }
+  }, [applyPending, checkEdit, disownRuns, leaveEdit, refreshDetail, replaceSource, setChart, setChatId]);
+
+  /** A new chat keeps the editor and the results as they are. */
+  const newChat = useCallback(() => {
+    leaveEdit();
+    setChatId(null);
+    setDetail(undefined);
+    setSelected(undefined);
+    setChatError(undefined);
+    setDraftState(store.get(draftKey(null)) ?? '');
+    focusSoon(composer.current);
+  }, [leaveEdit, setChatId]);
+
+  const userTurnOf = useCallback((turn: ChatTurn): UserTurn | undefined => {
+    const turns = latest.current.detail?.turns ?? [];
+    return turns.slice(0, turns.findIndex(t => t.id === turn.id) + 1).reverse().find((t): t is UserTurn => t.kind === 'user');
   }, []);
 
-  /** ⌘S: open the inline name field, prefilled from the loaded name, the prompt, or "Untitled". */
+  /** Edit a message: later turns hide, the box has its text, and the editor goes back to the source sent with it (R13.3). */
+  const editTurn = useCallback((turn: ChatTurn) => {
+    const user = userTurnOf(turn);
+    if (!user || latest.current.generating) return;
+    const { source: currentSource, chartSpec: currentChart, editing: edit, detail: open, draft: currentDraft } = latest.current;
+    const aside = edit?.aside ?? { source: currentSource, chart: currentChart ?? null, draft: currentDraft };
+    const started: EditState = { turn: user.id, text: user.text, source: user.source, aside };
+    setEditing(started);
+    if (chatRef.current) saveEdit(chatRef.current, started);
+    setDraft(user.text);
+    setSelected(undefined);
+    replaceSource(user.source);
+    setChart(newestChart((open?.turns ?? []).filter(t => t.id < user.id)));
+    focusSoon(composer.current);
+  }, [replaceSource, setChart, setDraft, userTurnOf]);
+
+  const retryTurn = useCallback((turn: ChatTurn) => {
+    const user = userTurnOf(turn);
+    // Checked before anything changes: a retry that can't go must leave the editor alone.
+    if (!user || latest.current.generating || sendingRef.current) return;
+    replaceSource(user.source);
+    setChart(newestChart((latest.current.detail?.turns ?? []).filter(t => t.id < user.id)));
+    void send(user.text, { replaceFrom: user.id, source: user.source });
+    focusSoon(composer.current);
+  }, [replaceSource, send, setChart, userTurnOf]);
+
+  const restoreVersion = useCallback(async (turn: Version) => {
+    if (latest.current.source !== turn.source) replaceSource(turn.source);
+    setChart(turn.chart);
+    setView(v => viewAfterReply(v, turn.chart ? 'chart' : 'query'));
+    void run(turn.source);
+    const id = chatRef.current;
+    if (id) {
+      const noted = await api.chat.note.mutate({ id, text: `Restored v${turn.n} to the editor and ran it. Your next message continues from here.` }).catch(() => undefined);
+      await refreshDetail(id).catch(() => null);
+      if (noted?.ok) setSelected(noted.turn.id);
+    }
+  }, [refreshDetail, replaceSource, run, setChart]);
+
+  /** A failed attempt goes into the editor by hand only, and doesn't run. */
+  const loadAttempt = useCallback((text: string) => { replaceSource(text); }, [replaceSource]);
+
+  const copy = useCallback((text: string, done: string) => {
+    const say = (message: string) => {
+      setCopied(message);
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(undefined), 1_400);
+    };
+    (navigator.clipboard?.writeText(text) ?? Promise.reject(new Error('no clipboard'))).then(() => say(done), () => say('The browser refused the clipboard'));
+  }, []);
+
+  /** What a selected turn offers, and the only table its keys read: a key does what its hint shows, and nothing otherwise. */
+  const actionsFor = (turn: ChatTurn): readonly TurnAction[] => {
+    if (turn.kind === 'note') return [];
+    const copyAction: TurnAction = turn.kind === 'version' ? { key: 'y', label: 'copy query', run: () => copy(turn.source, `Copied v${turn.n}`) }
+      : turn.kind === 'error' ? { key: 'y', label: turn.source === null ? 'copy error' : 'copy last attempt', run: () => copy(turn.source ?? turn.error, turn.source === null ? 'Copied error' : 'Copied last attempt') }
+      : { key: 'y', label: 'copy', run: () => copy(turn.text, 'Copied message') };
+    if (openGenerating) return [copyAction];
+    if (editing?.turn === turn.id) return [{ key: '↵', label: 'back to message', run: () => focusSoon(composer.current) }, copyAction];
+    const edit: TurnAction = { key: 'e', label: 'edit prompt', run: () => editTurn(turn) };
+    // A retry would throw an open rewrite away: esc first. While another chat generates it can't go, as the line by the box says.
+    const retry: TurnAction[] = editing || elsewhere ? [] : [{ key: 'r', label: 'retry', run: () => retryTurn(turn) }];
+    if (turn.kind === 'user') return [{ key: '↵', also: 'e', label: 'edit & resend', run: () => editTurn(turn) }, ...retry, copyAction];
+    if (turn.kind === 'version') return [{ key: '↵', label: 'restore & run', run: () => void restoreVersion(turn) }, edit, ...retry, copyAction];
+    if (turn.kind === 'error' && canLoadAttempt(turn.source)) return [{ key: '↵', label: 'load last attempt', run: () => loadAttempt(turn.source as string) }, edit, ...retry, copyAction];
+    return [edit, ...retry, copyAction];
+  };
+  const actionsRef = useRef(actionsFor);
+  actionsRef.current = actionsFor;
+
+  const visibleTurns = useMemo(() => {
+    const turns = detail?.turns ?? [];
+    return editing ? turns.filter(t => t.id <= editing.turn) : turns;
+  }, [detail, editing]);
+  // A selected turn that went away: the last one takes over, if the thread has focus.
+  useEffect(() => {
+    if (selected === undefined || visibleTurns.some(t => t.id === selected)) return;
+    setSelected(threadEl.current?.contains(document.activeElement) ? visibleTurns.at(-1)?.id : undefined);
+  }, [selected, visibleTurns]);
+  const lastUserText = useCallback(() => latest.current.detail?.turns.filter((t): t is UserTurn => t.kind === 'user').at(-1)?.text ?? '', []);
+
+  // The newest turn stays in view.
+  const lastVisible = visibleTurns.at(-1);
+  const pendingShown = sendingChat === chatId && !(lastVisible?.kind === 'user' && lastVisible.text === pendingText) ? pendingText : undefined;
+  // Keyed on what is at the end, not on a count: a reply swaps pending + generating for user + reply.
+  const threadEnd = `${lastVisible?.id}:${pendingShown ?? ''}:${openGenerating}`;
+  useEffect(() => {
+    const el = threadEl.current;
+    // Someone reading the thread with the keyboard keeps their place.
+    if (el && !el.contains(document.activeElement)) el.scrollTop = el.scrollHeight;
+  }, [threadEnd]);
+
+  useEffect(() => {
+    if (selected !== undefined) threadEl.current?.querySelector('[data-sel="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
+
+  /** ⌘S: open the inline name field, prefilled from the loaded name, the last message, or "Untitled". */
+  const closeSave = useCallback(() => {
+    setSaving(undefined);
+    // At once, while the field is still there: no moment with focus nowhere.
+    const back = saveReturn.current;
+    (back instanceof HTMLElement && document.contains(back) ? back : composer.current)?.focus();
+  }, []);
   const startSave = useCallback(() => {
+    if (document.activeElement !== saveInput.current) saveReturn.current = document.activeElement;
     setSaveError(undefined);
-    setSaving(loaded?.name ?? (latest.current.ask.trim().slice(0, 100) || 'Untitled'));
+    setSaving(loaded?.name ?? ((lastUserText() || latest.current.draft).trim().slice(0, 100) || 'Untitled'));
     // Already open: just refocus (a fresh field focuses itself on mount).
     saveInput.current?.focus();
-  }, [loaded]);
+  }, [lastUserText, loaded]);
 
   const doSave = useCallback(async (name: string) => {
-    const { source: text, ask: promptText, chartSpec: chart } = latest.current;
-    const entry = { name, prompt: promptText, source: text ?? '', chart: chart ?? null };
+    const { source: text, draft: box, chartSpec: chart } = latest.current;
+    const entry = { name, prompt: lastUserText() || box, source: text ?? '', chart: chart ?? null };
     let outcome = await api.saved.save.mutate(entry);
     if (!outcome.ok && 'exists' in outcome) {
       if (!window.confirm(`A saved query named "${name.trim()}" exists. Overwrite it?`)) return;
       outcome = await api.saved.save.mutate({ ...entry, overwrite: true });
     }
     if (!outcome.ok) { setSaveError('error' in outcome ? outcome.error : 'Not saved.'); return; }
-    setSaving(undefined);
+    closeSave();
     setLoaded({ name: name.trim(), source: text ?? '' });
     await refreshSaved();
-  }, [refreshSaved]);
+  }, [closeSave, lastUserText, refreshSaved]);
 
+  /** Changes the editor and chart only; the open chat is left alone (R13.10). */
   const loadSaved = useCallback((query: Saved) => {
+    disownRuns();
     replaceSource(query.source);
-    setAsk(query.prompt);
-    store.set(PROMPT_KEY, query.prompt);
-    const chart = query.chart ?? undefined;
-    setChartSpec(chart);
-    // A saved query without a chart also clears the persisted chart, so a reload shows none (F14).
-    if (chart) store.set(CHART_SPEC_KEY, JSON.stringify(chart)); else store.remove(CHART_SPEC_KEY);
-    setCharted(undefined);
+    setChart(query.chart ?? undefined);
     setLoaded({ name: query.name, source: query.source });
-    setGenerated(undefined);
-  }, [replaceSource]);
+  }, [disownRuns, replaceSource, setChart]);
 
   const deleteSaved = useCallback(async (query: Saved) => {
     if (!window.confirm(`Delete the saved query "${query.name}"?`)) return;
     const outcome = await api.saved.delete.mutate({ name: query.name });
     if (!outcome.ok) { setSavedError(outcome.error); return; }
     setLoaded(current => (current?.name === query.name ? undefined : current));
+    // Its row, which may have focus, is about to go.
+    const active = document.activeElement;
+    if (active === document.body || active?.closest('.saved-row')) composer.current?.focus();
     await refreshSaved();
   }, [refreshSaved]);
 
@@ -322,42 +810,123 @@ function App() {
   const closePalette = useCallback(() => {
     setPaletteOpen(false);
     const back = paletteReturn.current;
-    requestAnimationFrame(() => { if (back instanceof HTMLElement && document.contains(back)) back.focus(); });
+    requestAnimationFrame(() => {
+      const now = document.activeElement;
+      if (back instanceof HTMLElement && document.contains(back) && (now === null || now === document.body)) back.focus();
+    });
   }, []);
 
   const toggleLimit = useCallback(() => setAutoLimit(on => { store.set(LIMIT_KEY, on ? 'off' : 'on'); return !on; }), []);
+
+  const openHelp = useCallback(() => {
+    helpReturn.current = document.activeElement;
+    setHelpOpen(true);
+  }, []);
+  const closeHelp = useCallback(() => {
+    setHelpOpen(false);
+    const back = helpReturn.current;
+    focusSoon(back instanceof HTMLElement && document.contains(back) ? back : composer.current);
+  }, []);
+  useEffect(() => { if (helpOpen) helpDialog.current?.focus(); }, [helpOpen]);
+
+  // Where focus is, from focus itself. Leaving the thread drops the selection, as in the prototype.
+  useEffect(() => {
+    const update = () => setTimeout(() => {
+      const active = document.activeElement;
+      setZone(active === composer.current ? 'box' : threadEl.current?.contains(active) ? 'thread' : editor.current?.dom.contains(active) ? 'editor' : 'other');
+    }, 0);
+    window.addEventListener('focusin', update);
+    window.addEventListener('focusout', update);
+    return () => { window.removeEventListener('focusin', update); window.removeEventListener('focusout', update); };
+  }, []);
+  const previousZone = useRef(zone);
+  useEffect(() => {
+    if (previousZone.current === 'thread' && zone !== 'thread') setSelected(undefined);
+    previousZone.current = zone;
+  }, [zone]);
+
+  /** To the thread, on its last turn. */
+  const enterThread = useCallback(() => {
+    const last = latest.current.visible.at(-1);
+    if (!last) return false;
+    setSelected(last.id);
+    focusSoon(threadEl.current);
+    return true;
+  }, []);
+  /** Esc anywhere but the box: stop what generates here, or go to the box. An open edit stays open. */
+  const escapeToBox = useCallback(() => {
+    if (latest.current.generating) void stop(); else focusSoon(composer.current);
+  }, [stop]);
 
   useEffect(() => {
     const actions: Record<Action, () => void> = {
       run: () => void run(),
       toggleLimit,
-      focusPrompt: () => prompt.current?.focus(),
-      // The chart prompt lives in the Chart tab: show it, then focus once it is rendered.
-      chartPrompt: () => { if (chartPrompt.current) chartPrompt.current.focus(); else { focusChartPrompt.current = true; setView('chart'); } },
+      focusPrompt: () => focusSoon(composer.current),
+      newChat,
+      focusEditor: () => focusSoon(editor.current),
       tabTable: () => setView('table'),
       tabChart: () => setView('chart'),
       tabSql: () => setView('sql'),
       palette: openPalette,
       save: startSave,
     };
+    const onThreadKey = (event: KeyboardEvent): boolean => {
+      const { visible, selected: current } = latest.current;
+      const at = visible.findIndex(t => t.id === current);
+      if (event.key === 'ArrowUp' || event.key === 'k') { if (visible.length) setSelected(visible[Math.max(0, at === -1 ? visible.length - 1 : at - 1)]!.id); return true; }
+      if (event.key === 'ArrowDown' || event.key === 'j') {
+        if (at === -1 || at >= visible.length - 1) focusSoon(composer.current); else setSelected(visible[at + 1]!.id);
+        return true;
+      }
+      if (event.key === 'i') { focusSoon(composer.current); return true; }
+      const pressed = event.key === 'Enter' ? '↵' : event.key.toLowerCase();
+      if (pressed !== '↵' && !/^[a-z]$/.test(pressed)) return false;
+      // On a button inside the thread, Enter is that button's.
+      if (pressed === '↵' && event.target instanceof HTMLButtonElement) return false;
+      const turn = visible[at];
+      const action = turn && actionsRef.current(turn).find(a => a.key === pressed || a.also === pressed);
+      if (action && !event.repeat) action.run();
+      return action !== undefined;
+    };
     // Capture phase: shortcuts win over CodeMirror and browser defaults (⌘S save dialog, ⌘K, ⌘L address bar...).
     const onKey = (event: KeyboardEvent) => {
+      const claim = () => { event.preventDefault(); event.stopPropagation(); };
+      const pressed = event.key.toLowerCase();
+      const down = keysDown.current;
+      if (!event.repeat) { if (!down.has(pressed)) down.set(pressed, document.activeElement); }
+      // A held key can't act where it didn't start (letters in the box, a send, lines in the editor), and esc never acts twice:
+      // its next step is a different thing, such as cancelling an edit.
+      else if (event.key === 'Escape' || (down.has(pressed) && down.get(pressed) !== document.activeElement)) { claim(); return; }
+      // A dialog takes everything that would act behind it.
+      if (latest.current.paletteOpen) { if (matchShortcut(event)) claim(); return; }
+      if (latest.current.helpOpen) {
+        if (event.key === 'Escape' || event.key === '?') closeHelp();
+        if (event.key !== 'Shift') claim();
+        return;
+      }
       const action = matchShortcut(event);
-      if (!action) return;
-      event.preventDefault();
-      event.stopPropagation();
-      // While the palette is open only its own keys work (Esc closes it there).
-      if (latest.current.paletteOpen) return;
-      actions[action]();
+      if (action) { claim(); if (!event.repeat || !IGNORES_REPEAT.has(action)) actions[action](); return; }
+      // From here on: keys of no text field, with no modifier, so typing is never taken.
+      if (isTextField(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
+      // Focus in one of CodeMirror's panels: its keys are CodeMirror's, and esc closes the panel before anything else.
+      if (event.target instanceof Node && editor.current?.dom.contains(event.target)) return;
+      if (event.key === '?') { claim(); openHelp(); return; }
+      if (event.key === 'Escape') { claim(); escapeToBox(); return; }
+      if (event.shiftKey) return;
+      if (event.target instanceof Node && threadEl.current?.contains(event.target) && onThreadKey(event)) claim();
     };
+    const release = (event: KeyboardEvent) => { keysDown.current.delete(event.key.toLowerCase()); };
+    const releaseAll = () => { keysDown.current.clear(); };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [run, toggleLimit, openPalette, startSave]);
-
-  // ⌘G from another tab: focus the chart prompt once the Chart tab has rendered it.
-  useEffect(() => {
-    if (view === 'chart' && focusChartPrompt.current) { focusChartPrompt.current = false; chartPrompt.current?.focus(); }
-  }, [view]);
+    window.addEventListener('keyup', release, true);
+    window.addEventListener('blur', releaseAll);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', release, true);
+      window.removeEventListener('blur', releaseAll);
+    };
+  }, [run, toggleLimit, openPalette, startSave, newChat, openHelp, closeHelp, escapeToBox]);
 
   const paletteItems = (): PaletteItem[] => {
     const shortcut = (key: string) => `${MOD}${key}`;
@@ -384,27 +953,32 @@ function App() {
       action('table', 'Show Table', () => setView('table'), shortcut('1')),
       action('chart', 'Show Chart', () => setView('chart'), shortcut('2')),
       action('sql', 'Show SQL', () => setView('sql'), shortcut('3')),
-      action('ask', 'Ask in English (focus prompt)', () => { paletteReturn.current = prompt.current; }, shortcut('L')),
-      action('describe', 'Describe a chart', () => { focusChartPrompt.current = true; paletteReturn.current = null; setView('chart'); if (chartPrompt.current) requestAnimationFrame(() => chartPrompt.current?.focus()); }, shortcut('G')),
+      action('ask', 'Message box', () => { paletteReturn.current = composer.current; }, shortcut('L')),
+      action('new-chat', 'New chat', () => { paletteReturn.current = null; newChat(); }, KEYS.newChat),
+      action('editor', 'Editor', () => { paletteReturn.current = editor.current?.contentDOM ?? null; }, KEYS.editor),
+      action('resize-panes', 'Resize panes', () => { paletteReturn.current = panesDivider.current; }),
+      action('resize-chat', 'Resize chat and editor', () => { paletteReturn.current = chatDivider.current; }),
+      action('shortcuts', 'Keyboard shortcuts', () => { paletteReturn.current = null; openHelp(); }, '?'),
       action('save', 'Save query', () => { paletteReturn.current = null; startSave(); }, shortcut('S')),
       action('refresh', 'Refresh schema', async () => { setMeta(await api.schema.refresh.mutate()); }),
       action('model', 'Switch model…', switchModel, undefined, meta?.model.available ? `${meta.model.provider}/${meta.model.modelId}` : 'from pi'),
+      ...chats.map(c => ({ id: `chat:${c.id}`, group: 'Chats' as const, icon: 'chat' as const, label: c.title, hint: c.id === chatId ? 'open' : undefined, run: () => { paletteReturn.current = composer.current; void openChat(c.id); } })),
       ...saved.map(q => ({ id: `saved:${q.name}`, group: 'Saved' as const, icon: 'saved' as const, label: q.name, hint: q.chart ? 'with chart' : undefined, run: () => { paletteReturn.current = editor.current?.contentDOM ?? null; loadSaved(q); } })),
       ...(meta?.tables ?? []).map(t => ({ id: `table:${t.name}`, group: 'Tables' as const, icon: 'table' as const, mono: true, label: t.name, hint: `${t.columns.length} cols`,
         run: () => { paletteReturn.current = null; insertAtCursor(`from(${t.binding})`); } })),
     ];
   };
 
-  /** The palette's first row with typed text: generate from it, or say why the LLM is off (inert). */
+  /** The palette's first row with typed text: sends it in the open chat, or says why the LLM is off (inert). */
   const askItem = (text: string): PaletteItem => {
     const off = meta && !meta.model.available ? meta.model.reason : undefined;
     return off
       ? { id: 'ask', group: 'Ask', icon: 'ask', label: `Ask: LLM unavailable (${off})`, disabled: true, run: () => undefined }
       : { id: 'ask', group: 'Ask', icon: 'ask', label: `Ask: ${text}`, kbd: '↵', run: () => {
-          paletteReturn.current = null;
-          setAsk(text);
-          store.set(PROMPT_KEY, text);
-          void generate(text);
+          paletteReturn.current = composer.current;
+          // The palette closes either way: while something generates, the words wait in the box, like a send that can't go yet.
+          if (sendingRef.current || latest.current.generating) setDraft(latest.current.draft ? `${latest.current.draft}\n${text}` : text);
+          else void send(text);
         } };
   };
 
@@ -413,7 +987,7 @@ function App() {
 
   const modified = loaded !== undefined && source !== loaded.source;
 
-  const onSourceChange = useCallback((value: string) => { setSource(value); store.set(SOURCE_KEY, value); }, []);
+  const onSourceChange = useCallback((value: string) => { rememberSource(value); }, [rememberSource]);
 
   const clamp = (p: number) => Math.min(68, Math.max(28, p));
   const onDrag = (e: ReactPointerEvent) => {
@@ -425,12 +999,50 @@ function App() {
     if (e.key === 'ArrowLeft') { e.preventDefault(); setSplit(s => clamp(s - 2)); }
     if (e.key === 'ArrowRight') { e.preventDefault(); setSplit(s => clamp(s + 2)); }
   };
+  const clampChat = (p: number) => Math.min(CHAT_MAX, Math.max(CHAT_MIN, p));
+  const onDragChat = (e: ReactPointerEvent) => {
+    if (!draggingChat || !leftPane.current) return;
+    const r = leftPane.current.getBoundingClientRect();
+    setChatSplit(clampChat(((e.clientY - r.top) / r.height) * 100));
+  };
+  const onChatSplitKey = (e: ReactKeyboardEvent) => {
+    if (e.key === 'ArrowUp') { e.preventDefault(); setChatSplit(s => clampChat(s - 2)); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setChatSplit(s => clampChat(s + 2)); }
+  };
+
+  const onComposerKey = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      if (!e.repeat && draft.trim() && !llmOff) void send(draft);
+    } else if (e.key === 'Escape') {
+      // First match wins. Only this chat's generation counts; another chat's has its own way to be stopped.
+      e.preventDefault();
+      if (openGenerating) void stop();
+      else if (editing) cancelEdit();
+      else enterThread();
+    } else if (e.key === 'ArrowUp' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const { selectionStart, selectionEnd } = e.currentTarget;
+      if ((draft === '' || (selectionStart === 0 && selectionEnd === 0)) && enterThread()) e.preventDefault();
+    }
+  };
 
   const ok = result?.ok ? result : undefined;
   const chartHead = useMemo(() => (chartSpec ? chartHeading(chartSpec) : undefined), [chartSpec]);
   const chartData = useMemo(() => (ok ? toChartData(ok.rows, ok.columns) : []), [ok]);
   const status = running ? 'Running…' : ok ? `${ok.rowCount.toLocaleString()} ${ok.rowCount === 1 ? 'row' : 'rows'}${ok.limited ? ' (limited)' : ''} · ${ok.elapsedMs} ms` : '';
   const tabs: [View, string, string][] = [['table', 'Table', `${MOD}1`], ['chart', 'Chart', `${MOD}2`], ['sql', 'SQL', `${MOD}3`]];
+  const llmOff = meta && !meta.model.available ? meta.model.reason : undefined;
+  const inEditor = versionInEditor(visibleTurns, source);
+  const hasTurns = visibleTurns.length > 0 || pendingShown !== undefined;
+  const placeholder = llmOff ? `The chat is off: ${llmOff}` : hasTurns ? 'Refine it…' : 'Describe the data you want';
+  const composerRows = Math.min(5, Math.max(1, draft.split('\n').length));
+  const footerZone: Zone = zone === 'other' ? 'box' : zone;
+  const hints = zoneHints(footerZone, MOD, { generating: openGenerating, editing: editing !== undefined });
+  // One generation at a time, across chats: this says where it is, so it can be found and stopped.
+  const busyChat = sendingChat !== undefined ? sendingChat : chats.find(c => c.generating)?.id;
+  const elsewhere = busyChat !== undefined && busyChat !== chatId;
+  const elsewhereTitle = chats.find(c => c.id === busyChat)?.title ?? pendingText ?? 'a new chat';
 
   return (
     <div className="app">
@@ -445,13 +1057,20 @@ function App() {
         </div>
         <div className="spacer" />
         <button className="btn palette-btn" type="button" title="Command palette" onClick={openPalette}>
-          <span className="palette-label"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>Commands, tables, queries</span>
+          <span className="palette-label"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>Commands, chats, tables</span>
           <Kbd>{MOD}K</Kbd>
         </button>
       </header>
 
       <div className="shell-row">
         <aside className="shell-side">
+          <nav aria-label="Chats" className="side-nav">
+            <div className="eyebrow side-title"><span>Chats</span><button type="button" className="side-new" onClick={newChat}><Kbd>{KEYS.newChat} new</Kbd></button></div>
+            {chatId === null && <div className="side-row chat-row on" aria-current="true">New chat</div>}
+            {chats.map(c => (
+              <button key={c.id} type="button" className={`row side-row chat-row${c.id === chatId ? ' on' : ''}`} aria-current={c.id === chatId ? 'true' : undefined} title={c.id === busyChat ? `${c.title} (generating)` : c.title} data-generating={c.id === busyChat} onClick={() => void openChat(c.id)}>{c.id === busyChat && <span className="chat-busy-dot" role="img" aria-label="generating" />}{c.title}</button>
+            ))}
+          </nav>
           <nav aria-label="Schema" className="side-nav">
             <div className="eyebrow side-title"><span>Tables</span><span>{meta?.tables.length ?? ''}</span></div>
             {meta?.schemaError && <div className="side-error">{meta.schemaError}</div>}
@@ -475,75 +1094,83 @@ function App() {
               </div>
             ))}
           </nav>
-          <div className="spacer" />
-          <div className="hints">
-            <div><span>Run</span><Kbd>{MOD}↵</Kbd></div>
-            <div><span>Ask in English</span><Kbd>{MOD}L</Kbd></div>
-            <div><span>Toggle limit</span><Kbd>{MOD}/</Kbd></div>
-            <div><span>Table · Chart · SQL</span><Kbd>{MOD}1–3</Kbd></div>
-            <div><span>Save</span><Kbd>{MOD}S</Kbd></div>
-            <div><span>Commands</span><Kbd>{MOD}K</Kbd></div>
-          </div>
         </aside>
 
         <main className="panes" ref={panes}>
-          <div className="pane-left" style={{ flex: `0 0 ${split}%` }}>
-            <label htmlFor="ask" className="ask">
-              <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="var(--typedhouse-accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /></svg>
-              <input id="ask" ref={prompt} value={ask} placeholder="Describe the data you want" aria-label="Describe the data you want" aria-busy={generating}
-                onChange={e => { setAsk(e.target.value); store.set(PROMPT_KEY, e.target.value); }}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); void generate(); }
-                  if (e.key === 'Escape') { e.preventDefault(); e.currentTarget.blur(); }
-                }} />
-              {generating ? <span className="muted small generating">Generating…</span> : <><span className="muted small">Generate</span><Kbd>↵</Kbd></>}
-            </label>
-            {saving !== undefined && (
-              <form className="save-bar" onSubmit={e => { e.preventDefault(); void doSave(saving); }}>
-                <label htmlFor="save-name" className="small muted">Save as</label>
-                <input id="save-name" ref={saveInput} value={saving} maxLength={100} autoFocus onFocus={e => e.currentTarget.select()} onChange={e => setSaving(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); setSaving(undefined); } }} />
-                <button type="submit" className="btn run-btn small-btn">Save</button>
-                <button type="button" className="btn link-btn" onClick={() => setSaving(undefined)}>Cancel</button>
-                {saveError && <div className="save-error" role="alert">{saveError}</div>}
-              </form>
-            )}
-            {/* A successful generation shows no notice (user request); only failures are reported. */}
-            {generated && !generated.ok && (
-              <div className="notice notice-error" role="alert">
-                  <div><strong>Could not generate a query.</strong> {generated.error}</div>
-                  {generated.source && <button type="button" className="btn link-btn" onClick={() => { replaceSource(generated.source!); setGenerated(undefined); }}>Load the last attempt (it does not compile)</button>}
+          <div className="pane-left" ref={leftPane} style={{ flex: `0 0 ${split}%` }}>
+            <section aria-label="Chat" className="chat-card" style={{ flex: `0 0 ${chatSplit}%` }}>
+              <Thread ref={threadEl} turns={visibleTurns} pending={pendingShown} generating={openGenerating} stopping={stopping} selected={selected} inEditor={inEditor} isStarter={text => text === starterText.current} editingTurn={editing?.turn}
+                onSelect={id => { setSelected(id); if (!threadEl.current?.contains(document.activeElement)) threadEl.current?.focus({ preventScroll: true }); }}
+                onFocusThread={() => setSelected(current => current ?? visibleTurns.at(-1)?.id)} onStop={() => void stop()} onLoadAttempt={loadAttempt} actionsFor={actionsFor} />
+              {elsewhere && (
+                <div className="chat-busy" role="status" data-testid="generating-elsewhere">
+                  <span>Another chat is generating, so this one has to wait.</span>
+                  {busyChat !== null && <button type="button" className="btn link-btn" title={elsewhereTitle} onClick={() => void openChat(busyChat)}>Open it to stop it</button>}
                 </div>
-            )}
-
-            <section aria-label="Query editor" className="on-night editor-card">
-              <div className="editor-head">
-                <span className="mono editor-name">{loaded ? loaded.name : 'query.ts'}{modified && <span className="modified" title="Edited since loading" aria-label="modified"> ●</span>}</span>
-                {ok && <span className="mono row-type" title={ok.rowType}>→ <RowType text={ok.rowType} /></span>}
-                <div className="spacer" />
-                {typeErrors !== undefined && (typeErrors === 0
-                  ? <span className="typechecks" title="TypeScript: 0 errors"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12l5 5L20 7" /></svg>Typechecks</span>
-                  : <span className="type-errors">{typeErrors} type {typeErrors === 1 ? 'error' : 'errors'}</span>)}
-                {result && (result.ok
-                  ? <span className="compiles"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12l5 5L20 7" /></svg>Compiles</span>
-                  : <span className="fails">{result.error.stage} error</span>)}
-              </div>
-              <div className="editor-body">
-                {source !== null && <Editor value={source} onChange={onSourceChange} viewRef={editor} language={language} onDiagnostics={setTypeErrors} />}
-              </div>
-              <div className="editor-foot">
-                <button className="btn run-btn" type="button" onClick={() => void run()} disabled={running}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg>
-                  Run <span className="mono run-key">{MOD}↵</span>
-                </button>
+              )}
+              {chatError && <div className="chat-error" role="alert">{chatError}</div>}
+              {editing && <div className="chat-editing">Editing an earlier message. Sending drops the turns after it. <button type="button" className="btn link-btn" onClick={cancelEdit}><Kbd>esc</Kbd> cancel</button></div>}
+              <div className="composer-row">
+                <label htmlFor="composer" className="composer-label">
+                  <textarea id="composer" ref={composer} className="composer" rows={composerRows} value={draft} placeholder={placeholder} aria-label="Message" aria-busy={openGenerating} readOnly={llmOff !== undefined}
+                    onChange={e => setDraft(e.target.value)} onKeyDown={onComposerKey} />
+                </label>
+                <span className="composer-send">{openGenerating ? 'Generating' : elsewhere ? 'Waiting' : 'Send'} <Kbd>↵</Kbd></span>
               </div>
             </section>
+
+            <button ref={chatDivider} className="split-h" type="button" data-dragging={draggingChat} aria-label="Resize chat and editor (arrow keys)" aria-valuenow={Math.round(chatSplit)}
+              onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); setDraggingChat(true); }}
+              onPointerMove={onDragChat} onPointerUp={() => setDraggingChat(false)} onPointerCancel={() => setDraggingChat(false)} onKeyDown={onChatSplitKey}>
+              <span className="split-h-grip" />
+            </button>
+
+            <div className="pane-lower">
+              {saving !== undefined && (
+                <form className="save-bar" onSubmit={e => { e.preventDefault(); void doSave(saving); }}>
+                  <label htmlFor="save-name" className="small muted">Save as</label>
+                  <input id="save-name" ref={saveInput} value={saving} maxLength={100} autoFocus onFocus={e => e.currentTarget.select()} onChange={e => setSaving(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') { e.preventDefault(); closeSave(); }
+                      // Held: one save, not a second one asking to overwrite the first.
+                      if (e.key === 'Enter' && e.repeat) e.preventDefault();
+                    }} />
+                  <button type="submit" className="btn run-btn small-btn">Save</button>
+                  <button type="button" className="btn link-btn" onClick={closeSave}>Cancel</button>
+                  {saveError && <div className="save-error" role="alert">{saveError}</div>}
+                </form>
+              )}
+              <section aria-label="Query editor" className="on-night editor-card">
+                <div className="editor-head">
+                  <span className="mono editor-name">{loaded ? loaded.name : 'query.ts'}{modified && <span className="modified" title="Edited since loading" aria-label="modified"> ●</span>}</span>
+                  {inEditor !== undefined && <span className="mono editor-version">v{inEditor}</span>}
+                  {ok && <span className="mono row-type" title={ok.rowType}>→ <RowType text={ok.rowType} /></span>}
+                  <div className="spacer" />
+                  {tabMoves && <span className="tab-moves" role="status">Tab moves focus · <Kbd>{KEYS.tabFocus}</Kbd> to indent</span>}
+                  {typeErrors !== undefined && (typeErrors === 0
+                    ? <span className="typechecks" title="TypeScript: 0 errors"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12l5 5L20 7" /></svg>Typechecks</span>
+                    : <span className="type-errors">{typeErrors} type {typeErrors === 1 ? 'error' : 'errors'}</span>)}
+                  {result && (result.ok
+                    ? <span className="compiles"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12l5 5L20 7" /></svg>Compiles</span>
+                    : <span className="fails">{result.error.stage} error</span>)}
+                </div>
+                <div className="editor-body">
+                  {source !== null && <Editor value={source} onChange={onSourceChange} viewRef={editor} language={language} onDiagnostics={setTypeErrors} onEscape={escapeToBox} onTabMoves={setTabMoves} />}
+                </div>
+                <div className="editor-foot">
+                  <button className="btn run-btn" type="button" onClick={() => void run()} disabled={running}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M6 4l14 8-14 8z" /></svg>
+                    Run <span className="mono run-key">{MOD}↵</span>
+                  </button>
+                </div>
+              </section>
+            </div>
           </div>
 
-          <button className="splitter" type="button" data-dragging={dragging} aria-label="Resize panes (arrow keys, double-click to reset)" aria-valuenow={Math.round(split)}
+          <button ref={panesDivider} className="splitter" type="button" data-dragging={dragging} aria-label="Resize panes (arrow keys, double-click to reset)" aria-valuenow={Math.round(split)}
             onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); setDragging(true); }}
             onPointerMove={onDrag} onPointerUp={() => setDragging(false)} onPointerCancel={() => setDragging(false)}
-            onKeyDown={onSplitKey} onDoubleClick={() => setSplit(45)}>
+            onKeyDown={onSplitKey} onDoubleClick={() => setSplit(44)}>
             <span className="splitter-line" /><span className="splitter-grip" />
           </button>
 
@@ -560,34 +1187,21 @@ function App() {
             )}
             {!result && <div className="empty">Press <Kbd>{MOD}↵</Kbd> to run the query.</div>}
             {ok && view === 'table' && <ResultsTable result={ok} />}
-            {view === 'chart' && (
+            {view === 'chart' && !chartSpec && result?.ok !== false && <div className="chart-empty">No chart yet. Ask for one in the chat, e.g. “bar chart of revenue”.</div>}
+            {view === 'chart' && ok && chartHead && (
               <div className="chart-pane">
-                <label htmlFor="chart-ask" className="ask chart-ask">
-                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="var(--typedhouse-accent)" strokeWidth="2" strokeLinecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>
-                  <input id="chart-ask" ref={chartPrompt} value={chartAsk} placeholder={ok ? 'Describe a chart of this result' : 'Run a query first, then describe a chart'} aria-label="Describe a chart" aria-busy={charting}
-                    onChange={e => { setChartAsk(e.target.value); store.set(CHART_PROMPT_KEY, e.target.value); }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); void generateChart(); }
-                      if (e.key === 'Escape') { e.preventDefault(); e.currentTarget.blur(); }
-                    }} />
-                  {charting ? <span className="muted small generating">Generating…</span> : <><span className="muted small">Chart</span><Kbd>↵</Kbd></>}
-                </label>
-                {charted && !charted.ok && <div className="notice notice-error" role="alert"><div><strong>Could not generate a chart.</strong> {charted.error}</div></div>}
-                {ok && chartHead && (
-                  <div className="chart-card">
-                    <div className="chart-title">
-                      <span className="eyebrow">{chartHead.eyebrow}</span>
-                      {chartHead.title && <h2 className="display">{chartHead.title}</h2>}
-                      {(chartHead.subtitle ?? chartAsk) && <span className="muted small">{chartHead.subtitle ?? chartAsk}</span>}
-                    </div>
-                    <Chart spec={chartHead.spec} data={chartData} />
-                    <details className="chart-spec">
-                      <summary>Vega-Lite spec · validated against result columns</summary>
-                      <pre className="mono on-night">{JSON.stringify(chartSpec, null, 2)}</pre>
-                    </details>
+                <div className="chart-card">
+                  <div className="chart-title">
+                    <span className="eyebrow">{chartHead.eyebrow}</span>
+                    {chartHead.title && <h2 className="display">{chartHead.title}</h2>}
+                    {chartHead.subtitle && <span className="muted small">{chartHead.subtitle}</span>}
                   </div>
-                )}
-                {ok && !chartSpec && <div className="empty">Describe a chart above (<Kbd>{MOD}G</Kbd>); the table stays the default view.</div>}
+                  <Chart spec={chartHead.spec} data={chartData} />
+                  <details className="chart-spec">
+                    <summary>Vega-Lite spec · validated against result columns</summary>
+                    <pre className="mono on-night">{JSON.stringify(chartSpec, null, 2)}</pre>
+                  </details>
+                </div>
               </div>
             )}
             {ok && view === 'sql' && <SqlView result={ok} />}
@@ -596,17 +1210,31 @@ function App() {
       </div>
 
       <footer className="footer">
-        <span className="ready"><span className="dot" />{running ? 'Running' : 'Ready'}</span>
+        <span className="ready"><span className="dot" />{openGenerating ? 'Generating' : running ? 'Running' : 'Ready'}</span>
         <span>{autoLimit ? 'Auto-limit 100 rows' : 'Auto-limit off'}</span>
+        <span className="mono zone-label" role="status" data-testid="zone">{copied ?? (footerZone === 'thread' ? 'Conversation' : footerZone === 'editor' ? 'Editor' : 'Message')}</span>
         <div className="spacer" />
-        <span className="hint"><Kbd>{MOD}/</Kbd> toggle limit</span>
-        <span className="hint"><Kbd>{MOD}G</Kbd> visualize</span>
-        <span className="hint"><Kbd>{MOD}S</Kbd> save</span>
-        <span className="hint"><Kbd>{MOD}K</Kbd> commands</span>
+        {hints.map(hint => <span key={hint.key + hint.label} className="hint"><Kbd>{hint.key}</Kbd> {hint.label}</span>)}
       </footer>
       {paletteOpen && <Palette items={paletteItems()} onClose={closePalette} ask={askItem} />}
+      {helpOpen && (
+        <div className="palette-scrim help-scrim" onMouseDown={event => { if (event.target === event.currentTarget) closeHelp(); }}>
+          <div ref={helpDialog} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" className="help" tabIndex={-1}>
+            {keyGroups(MOD).map(group => (
+              <div key={group.title} className="help-group">
+                <div className="eyebrow">{group.title}</div>
+                {group.items.map(item => <div key={item.label + item.key} className="help-item"><span>{item.label}</span><Kbd>{item.key}</Kbd></div>)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function parsePending(text: string | null): { chatId: string | null; after: number; at: number; replaced?: number } | undefined {
+  try { return JSON.parse(text ?? 'null') ?? undefined; } catch { return undefined; }
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

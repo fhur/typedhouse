@@ -2,11 +2,10 @@
 import { parseArgs } from 'node:util';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { connect } from './clickhouse.js';
-import { createLlm, unavailableLlm, type Llm } from './llm.js';
+import { createLlm, openStorage, unavailableLlm, type Llm } from './llm.js';
 import { defaultPiDir, setupModels } from './pi.js';
 import { startServer } from './server.js';
 
@@ -67,13 +66,10 @@ else process.stdout.write(`Connected to ${conn.label}: ${conn.tables().length} t
 const piDir = values['pi-dir'] ?? defaultPiDir();
 const dataDir = values['data-dir'] ?? env['TYPEDHOUSE_STUDIO_DATA_DIR'] ?? join(homedir(), '.typedhouse', 'studio');
 const setup = await setupModels({ piDir, override: values.model ?? env['TYPEDHOUSE_STUDIO_MODEL'] });
-// Loaded only when needed: node:sqlite prints an ExperimentalWarning on import.
-const openStorage = async (path: string) => (await import('@earendil-works/pi-durable/storage/sqlite/node')).openNodeSqliteStorage(path);
 let llm: Llm;
 if (setup.ok) {
   try {
-    await mkdir(dataDir, { recursive: true, mode: 0o700 });
-    llm = await createLlm({ models: setup.models, model: setup.model, schema: conn.schemaSource, check: conn.checkAsync, storage: await openStorage(join(dataDir, 'pi.sqlite')) });
+    llm = await createLlm({ models: setup.models, model: setup.model, schema: conn.schemaSource, check: conn.checkAsync, storage: await openStorage(dataDir) });
     process.stdout.write(`LLM: ${setup.model.provider}/${setup.model.modelId}${(values.model ?? env['TYPEDHOUSE_STUDIO_MODEL'])?.trim() ? '' : ' (default)'}, credentials from ${join(piDir, 'auth.json')}\n`);
   } catch (error) {
     llm = unavailableLlm(error instanceof Error ? error.message : String(error));
@@ -87,7 +83,6 @@ const server = await startServer({ conn, llm, dataDir, port, ui: values.dev ? 'd
   process.stderr.write(`Could not start on 127.0.0.1:${port}: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(1);
 });
-process.stdout.write(`TypedHouse Studio: ${server.url}\n`);
 
 let stopping = false;
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -97,3 +92,5 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     void Promise.all([server.close(), conn.close(), llm.close()]).finally(() => process.exit(0));
   });
 }
+// Last: whoever reads this may signal right away.
+process.stdout.write(`TypedHouse Studio: ${server.url}\n`);

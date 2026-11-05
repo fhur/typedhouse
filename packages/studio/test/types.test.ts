@@ -140,7 +140,7 @@ describe('check_query requires 0 type errors (faux provider)', () => {
     const { faux, llm } = await setup();
     let feedback = '';
     faux.setResponses([call(runtimeOk), ((ctx: { messages: unknown[] }) => { feedback = JSON.stringify(ctx.messages.at(-1)); return call(typed); }) as never]);
-    expect(await llm.generateQuery({ prompt: 'x' })).toMatchObject({ ok: true, source: typed, attempts: 2 });
+    expect(await llm.chat.send({ chatId: null, text: 'x', source: '' })).toMatchObject({ ok: true, turn: { source: typed, attempts: 2 } });
     expect(feedback).toMatch(/types error: 1:7 Type 'string' is not assignable to type 'number'/);
   });
 
@@ -148,6 +148,6 @@ describe('check_query requires 0 type errors (faux provider)', () => {
     const { faux, llm } = await setup();
     const good = 'export default from(entity_ots_component).groupBy(c => ({ category: c.category })).aggregate(g => ({ parts: sum(g.countOfParts) }))';
     faux.setResponses([call(good)]);
-    expect(await llm.generateQuery({ prompt: 'x' })).toMatchObject({ ok: true, source: good, attempts: 1 });
+    expect(await llm.chat.send({ chatId: null, text: 'x', source: '' })).toMatchObject({ ok: true, turn: { source: good, attempts: 1 } });
   });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { withoutPageTargets } from './chart-data.js';
 
 // Brand theme (tokens.css / Chart.dc.html): lavender series palette, Inter text, JetBrains Mono axis labels.
 const light = {
@@ -33,6 +34,10 @@ export function chartConfig(isDark: boolean) {
   };
 }
 
+const refuse = () => Promise.reject(new Error('A chart may not load anything.'));
+/** Nothing a chart asks to load or link to gets through, also for a spec that never saw the validator (a hand-edited saved query). */
+const blockingLoader = { load: refuse, sanitize: refuse, http: refuse, file: refuse, fileAccess: false, options: {} };
+
 /** Renders a checked Vega-Lite spec over `data`. vega-embed is imported on first use, so it is a separate chunk. */
 export function Chart(props: { spec: Record<string, unknown>; data: Record<string, unknown>[] }) {
   const host = useRef<HTMLDivElement>(null);
@@ -44,8 +49,9 @@ export function Chart(props: { spec: Record<string, unknown>; data: Record<strin
     setError(undefined);
     import('vega-embed').then(async ({ default: embed }) => {
       if (cancelled || !host.current) return;
-      const spec = { width: 'container', autosize: { type: 'fit-x', contains: 'padding' }, ...props.spec, data: { values: props.data } };
-      const result = await embed(host.current, spec as never, { actions: false, renderer: 'svg', config: chartConfig(isDark) as never });
+      const spec = { width: 'container', autosize: { type: 'fit-x', contains: 'padding' }, ...withoutPageTargets(props.spec), data: { values: props.data } };
+      // `ast`: Vega's expression interpreter, so the page needs no 'unsafe-eval'. `mode`: $schema can't switch this to raw Vega.
+      const result = await embed(host.current, spec as never, { actions: false, renderer: 'svg', mode: 'vega-lite', ast: true, loader: blockingLoader as never, config: chartConfig(isDark) as never });
       if (cancelled) result.finalize(); else finalize = () => result.finalize();
     }).catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; finalize?.(); };

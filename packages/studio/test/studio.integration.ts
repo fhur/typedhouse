@@ -108,7 +108,7 @@ describe('studio server against ClickHouse 24.8', () => {
 });
 
 describe('text to query (faux model) against the fixture schema', () => {
-  it('ai.generateQuery returns checked source that query.run executes', async () => {
+  it('a chat message returns checked source that query.run executes', async () => {
     const faux = fauxProvider();
     const models = createModels();
     models.setProvider(faux.provider);
@@ -123,8 +123,8 @@ describe('text to query (faux model) against the fixture schema', () => {
       const call = (source: string) => fauxAssistantMessage([fauxToolCall('check_query', { source })], { stopReason: 'toolUse' });
       let systemPrompt = '';
       faux.setResponses([(ctx: { systemPrompt?: string }) => { systemPrompt = JSON.stringify(ctx); return call(wrong); }, call(right)] as never);
-      const generated = await client.ai.generateQuery.mutate({ prompt: 'parts per state' });
-      expect(generated).toMatchObject({ ok: true, source: right, attempts: 2, rowType: '{ state: string; components: bigint; parts: bigint }' });
+      const generated = await client.chat.send.mutate({ chatId: null, text: 'parts per state', source: '' });
+      expect(generated).toMatchObject({ ok: true, turn: { kind: 'version', source: right, attempts: 2, rowType: '{ state: string; components: bigint; parts: bigint }' } });
       // The model saw the introspected fixture tables.
       expect(systemPrompt).toContain('entity_ots_component');
       const ran = await client.query.run.mutate({ source: right, autoLimit: true });
@@ -141,7 +141,7 @@ describe('text to query (faux model) against the fixture schema', () => {
 });
 
 describe('prompt to chart (faux model) over a fixture result', () => {
-  it('ai.generateChart returns a spec whose fields are the result columns', async () => {
+  it('a chart turn returns a spec whose fields are the result columns', async () => {
     const faux = fauxProvider();
     const models = createModels();
     models.setProvider(faux.provider);
@@ -150,7 +150,8 @@ describe('prompt to chart (faux model) over a fixture result', () => {
     const ai = await startServer({ conn, llm, port: 0, ui: 'none', packageRoot: '.' });
     try {
       const client = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: `${ai.url}/trpc`, transformer: superjson })] });
-      const ran = await client.query.run.mutate({ source: 'export default from(entity_ots_component).groupBy(c => ({ state: c.state })).aggregate(g => ({ parts: sum(g.countOfParts) }))', autoLimit: true });
+      const source = 'export default from(entity_ots_component).groupBy(c => ({ state: c.state })).aggregate(g => ({ parts: sum(g.countOfParts) }))';
+      const ran = await client.query.run.mutate({ source, autoLimit: true });
       if (!ran.ok) throw new Error(JSON.stringify(ran.error));
       const columns = ran.columns.map(c => ({ name: c.name, type: c.type }));
       const sample = toChartData(ran.rows, ran.columns);
@@ -159,10 +160,10 @@ describe('prompt to chart (faux model) over a fixture result', () => {
         call({ mark: 'bar', encoding: { x: { field: 'status', type: 'nominal' }, y: { field: 'parts', type: 'quantitative' } } }),
         call({ mark: 'bar', encoding: { x: { field: 'state', type: 'nominal' }, y: { field: 'parts', type: 'quantitative' } } }),
       ]);
-      const chart = await client.ai.generateChart.mutate({ prompt: 'parts per state', columns, sample });
-      expect(chart).toMatchObject({ ok: true, attempts: 2, spec: { data: { name: 'table' } } });
-      if (!chart.ok) return;
-      const encoding = chart.spec['encoding'] as Record<string, { field: string }>;
+      const chart = await client.chat.send.mutate({ chatId: null, text: 'parts per state', source, sample });
+      expect(chart).toMatchObject({ ok: true, turn: { kind: 'version', attempts: 2, source, chart: { data: { name: 'table' } } } });
+      if (!chart.ok || chart.turn.kind !== 'version') return;
+      const encoding = chart.turn.chart!['encoding'] as Record<string, { field: string }>;
       expect(Object.values(encoding).map(e => e.field).sort()).toEqual(columns.map(c => c.name).sort());
       expect(sample.every(row => typeof row['parts'] === 'number')).toBe(true);
     } finally {
