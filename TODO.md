@@ -354,7 +354,7 @@ Evidence: `/tmp/claude-1000/-home-fernandohur-repos-typedhouse/d79703c8-d017-4f4
 
 **Verified.** The guide's final code, extracted from the page, matched a JavaScript oracle on ClickHouse 24.8: 448 page requests, 0 mismatches, across 16 filter sets, every column and direction, and every page. `pnpm docs:verify` passed.
 
-**Noted, not changed.** Consecutive `.where` calls over a subquery are not merged, so each filter adds a subquery layer to the SQL.
+**Noted, not changed.** In this query each `.where` keeps its own SELECT scope, so each filter adds a subquery layer. That is deliberate: per `compiler/select-blocks.md`, filters share a `WHERE` only when both predicates are in the compiler's total fragment and nothing fallible sits below them.
 
 ## `.in()` type/runtime mismatches (2026-11-04)
 
