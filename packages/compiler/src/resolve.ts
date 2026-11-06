@@ -3,6 +3,8 @@ import {
   setDescriptor,
   membershipBase,
   aggregateDefinitions,
+  aggregateMergeType,
+  aggregateStateType,
   functionCatalog,
   isNullable,
   nullable,
@@ -63,6 +65,15 @@ export function resolveCast(
   return target;
 }
 
+/** Merged results that are UInt64 whatever the state stores, with the argument counts 24.8 allows such a state:
+ * measured for numeric, Nullable, multi-argument, LowCardinality, Tuple, temporal, Decimal and Array arguments.
+ * Merging `AggregateFunction(uniq, UInt64)` reads no value, so the base function's narrower operands do not apply. */
+const anyStoredArguments: Readonly<Record<string, readonly [number, number]>> = {
+  count: [0, 1],
+  uniq: [1, Infinity],
+  uniqExact: [1, Infinity],
+};
+
 export function resolveAggregate(
   e: Extract<ExprNode, { kind: 'Agg' }>,
   resolve: (e: ExprNode, expected?: CHType) => CHType,
@@ -85,7 +96,7 @@ export function resolveAggregate(
   if (
     (!def.params && e.params.length) ||
     e.combinators.length > 1 ||
-    e.combinators.some(c => c !== 'If')
+    e.combinators.some(c => c !== 'If' && c !== 'State' && c !== 'Merge')
   )
     throw new Error('unsupported_aggregate_combinator');
 
@@ -109,38 +120,93 @@ export function resolveAggregate(
     resolve(param);
   }
 
-  const conditional = e.combinators[0] === 'If';
+  const combinator = e.combinators[0];
+  const conditional = combinator === 'If';
+  const sqlName = (def.sqlName ?? def.name) + (combinator ?? '');
 
-  if (e.args.length !== def.args.length + Number(conditional))
+  if (e.args.length !== (combinator === 'Merge' ? 1 : def.args.length + Number(conditional)))
     throw new Error('invalid_argument_arity');
 
   const types = e.args.map(a => resolve(a));
 
-  for (let i = 0; i < def.args.length; i++) {
-    const matcher = def.args[i]!;
+  const accepts = (operands: readonly CHType[]) =>
+    def.args.every((matcher, i) =>
+      'match' in matcher
+        ? matcher.match(operands[i]!)
+        : print(matcher.type) === print(operands[i]!),
+    );
 
-    if (!('match' in matcher ? matcher.match(types[i]!) : print(matcher.type) === print(types[i]!)))
-      throw new Error('incompatible_operands');
+  let result: CHType;
+
+  if (combinator === 'Merge') {
+    const state = types[0]!;
+
+    if (
+      state.kind !== 'AggregateFunction' ||
+      !(Object.hasOwn(anyStoredArguments, def.name)
+        ? state.args.length >= anyStoredArguments[def.name]![0] &&
+          state.args.length <= anyStoredArguments[def.name]![1]
+        : state.args.length === def.args.length && accepts(state.args))
+    )
+      throw new Error('invalid_merge_state');
+
+    const stored = storedLevel(def.name, state.fn, def.params !== undefined);
+    if (stored === undefined) throw new Error('invalid_merge_state');
+
+    // A nullable state wraps its function, and the server then compares parameters: only the stored level merges (code 43).
+    // The comparison includes the field's type. The merge level is a Float64 parameter, so a stored `quantile(1)` never
+    // equals it, while `quantile(1.)` does.
+    if (
+      e.params.length &&
+      state.args.some(isNullable) &&
+      ((e.params[0] as Extract<ExprNode, { kind: 'Param' }>).value !== stored ||
+        /\(\s*\d+\s*\)$/.test(state.fn))
+    )
+      throw new Error('invalid_merge_state');
+
+    result = aggregateMergeType(def, state.args);
+  } else {
+    if (!accepts(types)) throw new Error('incompatible_operands');
+
+    if (conditional) {
+      const t = unwrap(types[types.length - 1]!);
+      if (t.kind !== 'scalar' || t.name !== 'Bool') throw new Error('invalid_predicate');
+    }
+
+    const args = types.slice(0, def.args.length);
+
+    if (combinator === 'State')
+      result = aggregateStateType(
+        def,
+        args,
+        e.params.map(p => (p as Extract<ExprNode, { kind: 'Param' }>).value),
+      );
+    else {
+      const returns = def.returns;
+
+      result =
+        typeof returns === 'function'
+          ? returns(args, [])
+          : returns === 'arg0'
+            ? args[0]!
+            : returns.type;
+
+      if (def.nullable !== 'never' && args.some(isNullable)) result = nullable(result);
+    }
   }
 
-  if (conditional) {
-    const t = unwrap(types[types.length - 1]!);
-    if (t.kind !== 'scalar' || t.name !== 'Bool') throw new Error('invalid_predicate');
-  }
-
-  const args = types.slice(0, def.args.length);
-  const returns = def.returns;
-
-  let result =
-    typeof returns === 'function'
-      ? returns(args, [])
-      : returns === 'arg0'
-        ? args[0]!
-        : returns.type;
-
-  if (def.nullable !== 'never' && args.some(isNullable)) result = nullable(result);
   if (print(result) !== print(e.type)) throw new Error('invalid_expression_type');
-  return { result, sqlName: (def.sqlName ?? def.name) + (conditional ? 'If' : '') };
+  return { result, sqlName };
+}
+
+/** The level a state's function name stores: `null` for none, `undefined` when the name is another function's. */
+function storedLevel(name: string, fn: string, parametric: boolean): number | null | undefined {
+  if (fn === name) return null;
+  if (!parametric || !fn.startsWith(`${name}(`) || !fn.endsWith(')')) return undefined;
+  const text = fn.slice(name.length + 1, -1).trim();
+  if (!/^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(text)) return undefined;
+  const level = Number(text);
+  return level >= 0 && level <= 1 ? level : undefined;
 }
 
 function compatible(a: CHType, b: CHType): boolean {

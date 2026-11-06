@@ -30,11 +30,11 @@ Every column descriptor (`col.UInt64`, `col.Nullable(col.String)`, …) carries 
 | `Tuple(a T1, b T2)` | `{ a: T1; b: T2 }` | Requires an object with exactly the declared keys and adapts each item |
 | `Map(K, V)` | `Record<string, unknown>` | Passes through the same object; stringified keys and nested wire values are not converted |
 | `SimpleAggregateFunction(f, T)` | same as `T` | Adapts `T` |
-| `AggregateFunction(f, …)` | `AggregateState<'f'>` (opaque) | Unsupported raw; use the `-Merge` function |
+| `AggregateFunction(f, …)` | `AggregateState<'f'>` (opaque) | Unsupported raw; use the [`-Merge` function](/docs/functions/state-merge/) |
 | `Nothing` | `never` | Unsupported |
-| `JSON`, `Variant`, `Dynamic`, unknown types | `unknown` | Pass-through |
+| `JSON`, `Variant`, `Dynamic`, unknown types | `unknown` | Pass-through, except a state in `Variant` or in an unknown type |
 
-Adapter preparation rejects raw `AggregateFunction` states and `Nothing` with `decode_unsupported: <type>`, including inside wrappers, arrays and tuples. This happens before execution and is not a `QueryError`. Maps are not traversed: even Int64 and Date values inside a Map remain wire values, not `bigint` or `Date`. Columns omitted from the output are not decoded.
+Adapter preparation rejects raw `AggregateFunction` states and `Nothing` with `decode_unsupported: <type>`, including inside wrappers, arrays and tuples, and a state inside a Map or Variant. An unknown type counts as a state when its text names `AggregateFunction(`, ignoring Enum labels and quoted column names but not a quoted type name such as `"AggregateFunction"(sum, UInt64)`: `AggregateFunction(uniq, Point)` and `Nested(a AggregateFunction(uniq, String))` are refused, while `Point` and `Nested(AggregateFunction String)` pass through. A `Dynamic` column is the exception to all of this: its type says nothing about its contents, so no static check catches a state stored in one, and it returns binary. This happens before execution and is not a `QueryError`. Maps are not traversed: even Int64 and Date values inside a Map remain wire values, not `bigint` or `Date`. Columns omitted from the output are not decoded.
 
 Malformed rows, missing output columns, invalid container shapes and invalid inputs to the conversions above still fail; execution/conversion failures carry `QueryError` context. Pass-through types are supported results, not promises of runtime validation.
 
@@ -55,7 +55,7 @@ This section applies to any HTTP client, including the official `@clickhouse/cli
 
 Checked against ClickHouse 24.8.14.39; defaults may differ in other versions.
 
-`@typedhouse/client` sends `date_time_output_format = 'iso'`, `output_format_json_quote_64bit_integers = 1`, `output_format_json_quote_denormals = 1` and `output_format_json_quote_decimals = 1` with every query through its built-in backends. These settings preserve the wire representations needed by the adapter; they do not recursively convert Map values or validate pass-through types. Custom backends must honor the same wire contract. If you use `@clickhouse/client` directly, pass the same values in `clickhouse_settings` and apply the conversions you need; overriding these settings can reintroduce precision or representation problems.
+`@typedhouse/client` sends `date_time_output_format = 'iso'`, `output_format_json_quote_64bit_integers = 1`, `output_format_json_quote_denormals = 1`, `output_format_json_quote_decimals = 1` and `http_write_exception_in_output_format = 0` with every query through its built-in backends. These settings preserve the wire representations needed by the adapter; they do not recursively convert Map values or validate pass-through types. Custom backends must honor the same wire contract. If you use `@clickhouse/client` directly, pass the same values in `clickhouse_settings` and apply the conversions you need; overriding these settings can reintroduce precision or representation problems.
 
 ## Nullable columns and outer joins
 

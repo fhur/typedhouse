@@ -1,4 +1,4 @@
-import type { CHType } from '../ch-type.js';
+import { containsAggregateState, type CHType } from '../ch-type.js';
 import { col } from '../columns.js';
 import type { Constant, DescribedExpr, Expr } from '../expr.js';
 import type { AggregateState, Decimal, Grouped } from '../types.js';
@@ -14,8 +14,10 @@ import type {
   SumDescriptor,
   SumPrecision,
 } from './descriptor-types.js';
-import { aggregateCall, type AggregateDefinition } from './define.js';
+import { aggregateCall, aggregateMergeType, type AggregateDefinition } from './define.js';
 import { anyType, isNullable, nullable, numeric, unwrap } from './matchers.js';
+
+export { aggregateMergeType, aggregateStateType, stateArgument } from './define.js';
 
 export type Numeric = number | bigint | Decimal;
 
@@ -163,7 +165,7 @@ export const aggregateDefinitions: readonly AggregateDefinition[] = [
     origin: 'typed',
     linear: false,
   },
-  // `derived[n]` and `aggregateDefinitions[5]` below are positional: append here, never insert above.
+  // `derived[n]` and `aggregateDefinitions[n]` below are positional: append here, never insert above.
   {
     name: 'min',
     args: [anyType],
@@ -439,19 +441,49 @@ interface ArgMinIf {
   ): ResolvedExpr<OperandValue<E>, OperandName<E, 'argMin'>, 'agg', E['ir']['type']>;
 }
 
+/** Type-level twin of `stateArgument`. */
+type StateArgument<D> = CHType extends D
+  ? CHType
+  : D extends { kind: 'LowCardinality'; inner: infer I }
+    ? StateArgument<I>
+    : D extends { kind: 'Nullable' | 'Array'; inner: infer I }
+      ? { readonly kind: D['kind']; readonly inner: StateArgument<I> }
+      : D extends { kind: 'Map'; key: infer K; value: infer V }
+        ? { readonly kind: 'Map'; readonly key: StateArgument<K>; readonly value: StateArgument<V> }
+        : D extends { kind: 'Tuple'; items: infer I }
+          ? {
+              readonly kind: 'Tuple';
+              readonly items: {
+                [K in keyof I]: I[K] extends { readonly name: infer N; readonly type: infer T }
+                  ? { readonly name: N; readonly type: StateArgument<T> }
+                  : I[K] extends { readonly type: infer T }
+                    ? { readonly type: StateArgument<T> }
+                    : I[K];
+              };
+            }
+          : D extends {
+                kind: 'SimpleAggregateFunction';
+                inner: infer I extends { kind: 'LowCardinality' };
+              }
+            ? StateArgument<I>
+            : D;
+
+type Typed = { readonly ir: { readonly type: CHType | null } };
+
 type StateResult<
-  E extends { readonly ir: { readonly type: CHType | null } },
+  E extends Typed,
   F extends string,
+  S extends string = F,
 > = CHType extends E['ir']['type']
-  ? Expr<AggregateState<F>, OperandName<E, F>, 'agg'>
+  ? Expr<AggregateState<S>, OperandName<E, F>, 'agg'>
   : DescribedExpr<
-      AggregateState<F>,
+      AggregateState<S>,
       OperandName<E, F>,
       'agg',
       {
         readonly kind: 'AggregateFunction';
-        readonly fn: F;
-        readonly args: [E['ir']['type'] & CHType];
+        readonly fn: S;
+        readonly args: [StateArgument<E['ir']['type']> & CHType];
       }
     >;
 
@@ -463,30 +495,114 @@ interface SumState {
   <E extends AggregateOperand<Numeric | null>>(value: E): StateResult<E, 'sum'>;
 }
 
-type MergeResult<E extends AggregateOperand<unknown>, F, R> = E['ir']['type'] extends {
-  kind: 'AggregateFunction';
-  args: readonly [infer D extends CHType, ...CHType[]];
+interface AvgState {
+  <E extends AggregateOperand<number | bigint | null>>(
+    value: E & ArgMaxOperand<E['ir']['type'], AvgInputDescriptor>,
+  ): StateResult<E, 'avg'>;
 }
-  ? F extends 'sum'
-    ? DescriptorSum<D, DescriptorValue<D>>
-    : F extends 'max'
-      ? DescriptorValue<D>
-      : R
-  : R;
 
-type MergeDescriptor<E extends AggregateOperand<unknown>, F> = F extends 'sum' | 'max'
-  ? E['ir']['type'] extends {
-      kind: 'AggregateFunction';
-      args: readonly [infer D extends CHType, ...CHType[]];
-    }
-    ? ResultDescriptor<D, F>
-    : CHType
-  : CHType;
+interface ExactState<F extends string> {
+  <E extends AggregateOperand<string | null>>(
+    value: E & ExactOperand<E['ir']['type'], 'String'>,
+  ): StateResult<E, F>;
+}
 
-interface Merge<F extends string, R> {
-  <E extends AggregateOperand<AggregateState<F>>>(
+/** The server spells a Float64 parameter of 0 or 1 as `0.` or `1.`; see `aggregateStateType`. */
+type LevelName<F extends string, L extends number> = number extends L
+  ? `${F}(${number})`
+  : L extends 0 | 1
+    ? `${F}(${L}.)`
+    : `${F}(${L})`;
+
+interface QuantileState<F extends string, L extends number> {
+  <E extends AggregateOperand<number | bigint | null>>(
+    value: E & ArgMaxOperand<E['ir']['type'], AvgInputDescriptor>,
+  ): StateResult<E, F, LevelName<F, L>>;
+}
+
+interface ArgState<F extends string> {
+  <E extends ArgMaxValue, V extends ArgMaxVersion>(
+    value: E & ArgMaxOperand<E['ir']['type'], ArgMaxValueDescriptor>,
+    version: V & ArgMaxOperand<V['ir']['type'], ArgMaxVersionDescriptor>,
+  ): CHType extends E['ir']['type'] | V['ir']['type']
+    ? Expr<AggregateState<F>, OperandName<E, F>, 'agg'>
+    : DescribedExpr<
+        AggregateState<F>,
+        OperandName<E, F>,
+        'agg',
+        {
+          readonly kind: 'AggregateFunction';
+          readonly fn: F;
+          readonly args: [E['ir']['type'] & CHType, V['ir']['type'] & CHType];
+        }
+      >;
+}
+
+type StoredArgument<E extends AggregateOperand<unknown>> = E['ir']['type'] extends {
+  kind: 'AggregateFunction';
+  args: infer A extends readonly [CHType, ...CHType[]];
+}
+  ? A[0]
+  : never;
+
+type MergeResult<E extends AggregateOperand<unknown>, F, R> = [StoredArgument<E>] extends [never]
+  ? R
+  : F extends 'sum'
+    ? DescriptorSum<StoredArgument<E>, DescriptorValue<StoredArgument<E>>>
+    : F extends 'max' | 'min' | 'argMax' | 'argMin' | 'quantileExact'
+      ? DescriptorValue<StoredArgument<E>>
+      : F extends 'avg' | 'quantile'
+        ? number | Extract<DescriptorValue<StoredArgument<E>>, null>
+        : R;
+
+type MergeDescriptor<E extends AggregateOperand<unknown>, F> = F extends 'uniq' | 'uniqExact'
+  ? { readonly kind: 'scalar'; readonly name: 'UInt64' }
+  : [StoredArgument<E>] extends [never]
+    ? CHType
+    : F extends 'sum' | 'max' | 'min' | 'quantileExact'
+      ? ResultDescriptor<StateArgument<StoredArgument<E>>, F>
+      : F extends 'avg' | 'quantile'
+        ? AvgDescriptor<StoredArgument<E>>
+        : F extends 'argMax' | 'argMin'
+          ? StateArgument<StoredArgument<E>>
+          : CHType;
+
+interface Merge<F extends string, R, A extends string = F> {
+  <E extends AggregateOperand<AggregateState<A>>>(
     state: E,
   ): ResolvedExpr<MergeResult<E, F, R>, OperandName<E, F>, 'agg', MergeDescriptor<E, F>>;
+}
+
+/** A parametric state's type names its level, or none in `AggregateFunction(quantile, Float64)`. */
+type Leveled<F extends string> = F | `${F}(${number})`;
+
+function mergeCall(
+  def: AggregateDefinition,
+  args: readonly unknown[],
+  params: readonly unknown[],
+  rootName?: 'first',
+) {
+  const first = args[0];
+
+  const state =
+    first && typeof first === 'object' && 'ir' in first ? (first as Expr<unknown>).ir.type : null;
+
+  const result = aggregateCall(def, args, params, ['Merge'], rootName);
+
+  // A state the compiler will refuse (`invalid_merge_state`): a fixed result stands, but a result computed from the
+  // operand would itself be a state, and report the selection rule instead.
+  if (
+    state &&
+    (state.kind === 'AggregateFunction'
+      ? state.args.length !== def.args.length
+      : containsAggregateState(state))
+  )
+    return typeof def.returns === 'object' ? result : result.as(col.Unknown('invalid state'));
+
+  if (state?.kind !== 'AggregateFunction') return result;
+
+  // Return resolution consumes the state's argument descriptors, not the opaque state descriptor.
+  return result.as({ type: aggregateMergeType(def, state.args) });
 }
 
 /** Combinators are constructed from each base definition, not separate catalog entries. */
@@ -495,29 +611,7 @@ function deriveAggregate(def: AggregateDefinition, rootName?: 'first') {
     base: (...args: readonly unknown[]) => aggregateCall(def, args, [], [], rootName),
     If: (...args: readonly unknown[]) => aggregateCall(def, args, [], ['If'], rootName),
     State: (...args: readonly unknown[]) => aggregateCall(def, args, [], ['State'], rootName),
-    Merge: (...args: readonly unknown[]) => {
-      const first = args[0];
-
-      const state =
-        first && typeof first === 'object' && 'ir' in first
-          ? (first as Expr<unknown>).ir.type
-          : null;
-
-      const result = aggregateCall(def, args, [], ['Merge'], rootName);
-      if (state?.kind !== 'AggregateFunction') return result;
-      // Return resolution consumes the state's argument descriptors, not the opaque state descriptor.
-      const returns = def.returns;
-
-      let type =
-        typeof returns === 'function'
-          ? returns(state.args, [])
-          : returns === 'arg0'
-            ? state.args[0]!
-            : returns.type;
-
-      if (def.nullable !== 'never' && state.args.some(isNullable)) type = nullable(type);
-      return result.as({ type });
-    },
+    Merge: (...args: readonly unknown[]) => mergeCall(def, args, [], rootName),
   });
 }
 
@@ -561,7 +655,7 @@ export const countIf = derived[0]!.If as CountIf;
 export const countState = derived[0]!.State as () => Expr<AggregateState<'count'>, 'count', 'agg'>;
 
 /** Merge count aggregate states and finalize their total as UInt64 (`bigint`).
- * The argument must be a grouped AggregateFunction(count) state, not a numeric count.
+ * The argument must be a grouped AggregateFunction(count) state, with or without a stored argument, not a numeric count.
  * @example
  * ```ts
  * from(components).aggregate(() => ({ state: countState() })).aggregate(r => ({ total: countMerge(r.state) }));
@@ -661,7 +755,26 @@ export const argMax = derived[3]!.base as ArgMax;
  */
 export const argMaxIf = derived[3]!.If as ArgMaxIf;
 
-// Binary State/Merge signatures and execution are deliberately not exposed.
+/** Build an opaque `argMax` state; consume it with `argMaxMerge()`. Raw states cannot reach a query result.
+ * @example
+ * ```ts
+ * from(components).groupBy(c => c.entityId).aggregate(c => ({ state: argMaxState(c.category, c.updatedAt) }))
+ *   .aggregate(r => ({ latest: argMaxMerge(r.state) }));
+ * ```
+ */
+export const argMaxState = derived[3]!.State as ArgState<'argMax'>;
+
+/** Merge `argMax` states and finalize the value at the greatest version, in the value's descriptor.
+ * @example
+ * ```ts
+ * from(rollup).groupBy(r => r.entityId).aggregate(r => ({ latest: argMaxMerge(r.state) }));
+ * ```
+ */
+export const argMaxMerge = derived[3]!.Merge as Merge<
+  'argMax',
+  number | bigint | string | boolean | null
+>;
+
 /** Compute the Float64 mean of grouped integer or floating-point values (not Decimal).
  * NULL inputs are skipped; empty non-null inputs produce NaN.
  * @example
@@ -680,7 +793,22 @@ export const avg = derived[4]!.base as Avg;
  */
 export const avgIf = derived[4]!.If as AvgIf;
 
-// avg State/Merge execution is deliberately not exposed.
+/** Build an opaque mean state, not a Float64; consume it with `avgMerge()`.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: avgState(c.matched_part_ids.length()) }));
+ * ```
+ */
+export const avgState = derived[4]!.State as AvgState;
+
+/** Merge mean states into Float64, or Nullable(Float64) for a nullable input. Empty non-null input gives NaN.
+ * @example
+ * ```ts
+ * from(rollup).aggregate(r => ({ mean: avgMerge(r.state) }));
+ * ```
+ */
+export const avgMerge = derived[4]!.Merge as Merge<'avg', number | null>;
+
 /** Count distinct String values exactly as UInt64 (`bigint`), skipping NULL.
  * Empty or all-null input returns `0n`; other descriptor families are not supported here.
  * @example
@@ -708,7 +836,42 @@ export const uniq = derived[7]!.base as Uniq;
  */
 export const uniqExactIf = derived[6]!.If as UniqExactIf;
 
-// Exact distinct State/Merge and non-String operands are deliberately not exposed.
+/** Build an opaque exact-distinct state over Strings; consume it with `uniqExactMerge()`.
+ * Non-String operands are not supported.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: uniqExactState(c.entityId) }));
+ * ```
+ */
+export const uniqExactState = derived[6]!.State as ExactState<'uniqExact'>;
+
+/** Merge exact-distinct states into a UInt64 (`bigint`) count, whatever arguments the state stores,
+ * including a rollup's `AggregateFunction(uniqExact, UInt64)` or `AggregateFunction(uniqExact, String, UInt64)`.
+ * @example
+ * ```ts
+ * from(rollup).aggregate(r => ({ ids: uniqExactMerge(r.state) }));
+ * ```
+ */
+export const uniqExactMerge = derived[6]!.Merge as Merge<'uniqExact', bigint>;
+
+/** Build an opaque approximate-distinct state over Strings; consume it with `uniqMerge()`.
+ * Non-String operands are not supported.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: uniqState(c.entityId) }));
+ * ```
+ */
+export const uniqState = derived[7]!.State as ExactState<'uniq'>;
+
+/** Merge approximate-distinct states into a UInt64 (`bigint`) estimate, whatever arguments the state stores,
+ * including a rollup's `AggregateFunction(uniq, UInt64)` or `AggregateFunction(uniq, String, UInt64)`.
+ * @example
+ * ```ts
+ * from(rollup).aggregate(r => ({ estimatedIds: uniqMerge(r.state) }));
+ * ```
+ */
+export const uniqMerge = derived[7]!.Merge as Merge<'uniq', bigint>;
+
 /** Return the minimum grouped value, skipping NULL and retaining the value descriptor.
  * Empty non-null input returns the type's default (`0`, `''`, 1970-01-01), not NULL; empty or all-null
  * nullable input returns NULL. An Enum with no zero member fails on empty input without `groupBy`.
@@ -759,7 +922,41 @@ export const argMin = derived[9]!.base as ArgMin;
  */
 export const argMinIf = derived[9]!.If as ArgMinIf;
 
-// min and argMin State/Merge execution is deliberately not exposed.
+/** Build an opaque minimum state rather than a finalized value; consume it with `minMerge()`.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: minState(c.matched_part_ids.length()) }));
+ * ```
+ */
+export const minState = derived[8]!.State as State<'min'>;
+
+/** Merge minimum states and finalize the smallest value using the state's value descriptor.
+ * @example
+ * ```ts
+ * from(rollup).aggregate(r => ({ fewestParts: minMerge(r.state) }));
+ * ```
+ */
+export const minMerge = derived[8]!.Merge as Merge<'min', unknown>;
+
+/** Build an opaque `argMin` state; consume it with `argMinMerge()`. Raw states cannot reach a query result.
+ * @example
+ * ```ts
+ * from(components).groupBy(c => c.entityId).aggregate(c => ({ state: argMinState(c.category, c.updatedAt) }));
+ * ```
+ */
+export const argMinState = derived[9]!.State as ArgState<'argMin'>;
+
+/** Merge `argMin` states and finalize the value at the smallest version, in the value's descriptor.
+ * @example
+ * ```ts
+ * from(rollup).groupBy(r => r.entityId).aggregate(r => ({ first: argMinMerge(r.state) }));
+ * ```
+ */
+export const argMinMerge = derived[9]!.Merge as Merge<
+  'argMin',
+  number | bigint | string | boolean | null
+>;
+
 /** Choose a quantile level, then apply the returned aggregate to grouped numeric values.
  * Uses ClickHouse's approximate reservoir quantile, which interpolates and returns Float64; NULLs are skipped.
  * Use `quantileExact()` for an exact result: an input element in the input type.
@@ -817,4 +1014,77 @@ export function quantileExact(level: number): QuantileExact {
 export function quantileExactIf(level: number): QuantileExactIf {
   return ((...args: readonly unknown[]) =>
     aggregateCall(aggregateDefinitions[10]!, args, [level], ['If'], 'first')) as QuantileExactIf;
+}
+
+/** Choose a level, then build an opaque quantile state; consume it with `quantileMerge()`.
+ * The state's type carries this level, for example `AggregateFunction(quantile(0.9), Float64)`.
+ * @param level Quantile fraction from 0 to 1 inclusive.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: quantileState(0.9)(c.matched_part_ids.length()) }));
+ * ```
+ */
+export function quantileState<L extends number>(level: L): QuantileState<'quantile', L> {
+  return ((...args: readonly unknown[]) =>
+    aggregateCall(aggregateDefinitions[5]!, args, [level], ['State'], 'first')) as QuantileState<
+    'quantile',
+    L
+  >;
+}
+
+/** Choose a level, then merge quantile states into Float64, or Nullable(Float64) for a nullable input.
+ * The merge level decides the result, not the level stored in the state: a state built at 0.9 merged at 0.1
+ * gives the 0.1 quantile. A nullable state is the exception: the server accepts only its stored level, and the
+ * compiler raises `invalid_merge_state` for any other.
+ * @param level Quantile fraction from 0 to 1 inclusive.
+ * @example
+ * ```ts
+ * from(rollup).aggregate(r => ({ p90: quantileMerge(0.9)(r.state) }));
+ * ```
+ */
+export function quantileMerge(
+  level: number,
+): Merge<'quantile', number | null, Leveled<'quantile'>> {
+  return ((...args: readonly unknown[]) =>
+    mergeCall(aggregateDefinitions[5]!, args, [level], 'first')) as Merge<
+    'quantile',
+    number | null,
+    Leveled<'quantile'>
+  >;
+}
+
+/** Choose a level, then build an opaque exact-quantile state; consume it with `quantileExactMerge()`.
+ * The state's type carries this level, and it holds every value in memory.
+ * @param level Quantile fraction from 0 to 1 inclusive.
+ * @example
+ * ```ts
+ * from(components).aggregate(c => ({ state: quantileExactState(0.9)(c.matched_part_ids.length()) }));
+ * ```
+ */
+export function quantileExactState<L extends number>(level: L): QuantileState<'quantileExact', L> {
+  return ((...args: readonly unknown[]) =>
+    aggregateCall(aggregateDefinitions[10]!, args, [level], ['State'], 'first')) as QuantileState<
+    'quantileExact',
+    L
+  >;
+}
+
+/** Choose a level, then merge exact-quantile states into an input element, in the input type.
+ * The merge level decides the result, not the level stored in the state; a nullable state accepts only its
+ * stored level, and the compiler raises `invalid_merge_state` for any other.
+ * @param level Quantile fraction from 0 to 1 inclusive.
+ * @example
+ * ```ts
+ * from(rollup).aggregate(r => ({ p90: quantileExactMerge(0.9)(r.state) }));
+ * ```
+ */
+export function quantileExactMerge(
+  level: number,
+): Merge<'quantileExact', number | bigint | null, Leveled<'quantileExact'>> {
+  return ((...args: readonly unknown[]) =>
+    mergeCall(aggregateDefinitions[10]!, args, [level], 'first')) as Merge<
+    'quantileExact',
+    number | bigint | null,
+    Leveled<'quantileExact'>
+  >;
 }

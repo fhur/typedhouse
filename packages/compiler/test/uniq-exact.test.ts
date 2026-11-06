@@ -108,8 +108,9 @@ it('authoritatively rejects unsupported descriptors, forged metadata/results, mo
   check({ fn: { ...agg.fn, deterministic: false } }, /invalid_function_metadata/);
   check({ fn: { ...agg.fn, sqlName: 'unsafe' } }, /invalid_function_metadata/);
 
-  for (const combinators of [['State'], ['Merge'], ['If', 'If']] as const)
-    check({ combinators }, /unsupported_aggregate_combinator/);
+  check({ combinators: ['State'] }, /invalid_expression_type/);
+  check({ combinators: ['Merge'] }, /invalid_merge_state/);
+  check({ combinators: ['If', 'If'] }, /unsupported_aggregate_combinator/);
 
   check({ args: [q.row.value.ir] }, /invalid_expression_mode/);
   check({ args: [root.aggs.x] }, /incompatible_operands|invalid_aggregate_placement/);

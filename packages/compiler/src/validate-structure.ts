@@ -191,6 +191,7 @@ export function validateStructure(root: Rel): void {
               field('on', array('expr'));
               field('joinKind', 'string');
               field('scope', 'number', true);
+              field('strictness', 'string', true);
               break;
             case 'ArrayJoin':
               field('input', 'rel');
@@ -213,6 +214,14 @@ export function validateStructure(root: Rel): void {
             case 'Union':
               field('inputs', array('rel'));
               break;
+            case 'Settings':
+              // peelSettings removes the root one, so this one is below the root.
+              throw new ValidationError(
+                'invalid_settings_placement',
+                value,
+                path,
+                'settings() applies to the whole query and must be its last step',
+              );
             default:
               choice('kind', [
                 'Scan',

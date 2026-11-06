@@ -1,3 +1,451 @@
+## Track D: `-State`/`-Merge`, `SETTINGS`, `ASOF JOIN`, `WITH FILL`, `OVER` (2026-11-05, PM)
+
+**Status.** D1 to D7 are accepted by the PM, uncommitted; see the acceptance sections at the end of this track. D8 is ready for the Worker. D9 to D15, then D16 to D19, follow in order. Q1 to Q7 are recorded under Decisions; orchestrator rulings stay open to the owner's objection. Build order is the owner's. Line numbers are at master `cd59ba9`.
+
+Facts below were measured on `clickhouse/clickhouse-server:24.8` (24.8.14.39) unless stated. The minimum-version checks ran on 24.3.18.7 and cover only what the 24.3 notes name. The SQL in the API proposals was run on 24.8 by hand; a compiler does not emit it yet, so the exact text is a target.
+
+**Confirmed on master, through the built packages.** A descriptor with an `AggregateFunction` column fails `from(s).count()`, `from(s).map(...)` and `agg.uniqMerge(...)` with `aggregate_state_selection at root.input`. `sumMerge` and `sumState` fail with `unsupported_aggregate_combinator`. The cause of the first is `emit-naive.ts:840`, which checks every node's output instead of the query's result.
+
+### Design note: `-State` and `-Merge`
+
+**Server behaviour.**
+- A raw state returned to the client is binary in a JSON string, and invalid UTF-8 is lost: `uniqState` output contained U+FFFD. Raw selection at the result stays rejected.
+- States pass through subqueries, CTEs, `UNION ALL` and join inputs. An unmatched row of an ordinary `LEFT` join keeps the default state and merges to 0; `ASOF LEFT` was not measured with a state, so D10 covers it.
+- The `-Merge` result matches the base function: `sum(UInt32)` gives `UInt64`, `sum(Nullable(UInt32))` gives `Nullable(UInt64)`, `sum(Decimal(18, 2))` gives `Decimal(38, 2)`, `avg` gives `Float64`.
+- On empty input: `sumMerge` 0, `countMerge` 0, `maxMerge(Nullable)` NULL, `avgMerge` NaN, `uniqMerge` 0.
+- A state's type drops `LowCardinality`: `maxState(LowCardinality(String))` is `AggregateFunction(max, String)`, and `LowCardinality(Nullable(String))` gives `AggregateFunction(max, Nullable(String))`. `aggregateCall` copies the argument type unchanged, so it disagrees with the server. Fix this in both runtime and types.
+- Parametric states carry the level in the type: `AggregateFunction(quantile(0.9), Float64)`. **`-Merge` ignores the stored level.** A state built at 0.9 gave 90 from `quantileMerge(0.9)`, 10 from `quantileMerge(0.1)`, and 50 from `quantileMerge` with no level. So `quantileMerge` must take a level, like `quantile`, and the docs must say the merge level decides.
+- `sumStateIf` gives `AggregateFunction(sum, UInt64)`, which `sumMerge` accepts. `sumIfState` gives `AggregateFunction(sumIf, UInt64, UInt8)`, which `sumMerge` rejects with code 42. Any later `If` combination must use the `StateIf` order.
+- The server accepts things the row model should not: `WHERE total = total`, `ORDER BY total`, `GROUP BY total`, `DISTINCT` over a state and `uniqExact(total)`. Their results depend on binary state contents. `max(total)` and `sum(total)` raise code 43.
+- Reading a materialized view's `TO` table, the view itself, `FINAL` and `PREWHERE` over a rollup all merge correctly. `finalizeAggregation(total)` returns per-row values before merging; the rollup had 3 rows for 2 days.
+- `sumMerge(total) AS total ... HAVING total > 0` raises code 43 under `prefer_column_name_to_alias = 1`. The existing alias guard in the Aggregate arm fences this; D3 pins it, because this name collision is the normal case for rollups.
+
+**Corrections, reported by the Worker. Confirmed: Tester's native tests pass in the PM's run, and the PM reproduced each by hand on 24.8.14.** Where these differ from the bullets above, these take precedence.
+- "`-Merge` ignores the stored level" holds only for non-Nullable states. `quantileState(0.9)(Nullable(UInt32))` merged at another level or none raises code 43. A mismatch now raises `invalid_merge_state`.
+- `LowCardinality` is dropped at every depth, and from `SimpleAggregateFunction(max, LowCardinality(String))`.
+- Parameterized level 1 renders as `quantile(1.)`, so a union of a `quantile(1)` column with a fresh state at level 1 fails closed with `union_descriptor_mismatch`.
+- `agg.uniqMerge` is not in generated catalogs, because `system.functions` has no combinator names. It works only through a handwritten catalog entry.
+
+**Rule.** `aggregate_state_selection` applies only to the query result and to a `Subquery` result. Intermediate nodes may carry states. A typed expression, sort key, `LIMIT BY` key, group key or nested `Distinct` that reads a state raises a new `aggregate_state_operand`, except a `-Merge` of the same function. Known-tier calls stay exempt: their result is the caller's declaration.
+
+**Passes.** `rewrite-rel`: no change. `totalAggregate` and `safeAggregate` already refuse combinators, so `HAVING` key push-down and join rules are fenced conservatively. `prune-columns`: no change, and pruning already removes unread states. `plan-selects`: no change. `emit-naive`: move the check, and add `State`/`Merge` to the aggregate name. `resolve.ts`: accept `['State']` and `['Merge']`, and recompute the result from `state.args`. Client: `decoder` keeps refusing `AggregateFunction` (`decode.test.ts:116`). Codegen: renders states already; add a parametric test.
+
+### Design note: `SETTINGS`
+
+**Server behaviour.**
+- A tail `SETTINGS` applies to subqueries, CTEs and every `UNION ALL` branch in the shape the compiler emits. Only a parenthesized union ignores it (`(SELECT) UNION ALL (SELECT) SETTINGS` kept the default); the compiler does not emit that. `UNION DISTINCT` holds too, from a hand-built node (`settings-native.integration.ts`).
+- SQL `SETTINGS` overrides HTTP parameters: `?join_use_nulls=0` with `SETTINGS join_use_nulls=1` reads true. A repeated key takes the last value.
+- `SETTINGS x = {p:UInt32}` is a syntax error, so values must be literals, like `LIMIT`. `log_comment = 'x''y'` round-trips, so strings need the existing escaper.
+- `readonly = 1` rejects any change with code 164, as it already does for the emitted `join_use_nulls`. `readonly = 2` accepts it.
+- Open settings break the row contract, all measured: `limit=2` and `offset=2` drop rows; `final=1` changes a count from 4 to 2; `aggregate_functions_null_for_empty=1` changes `sum` to `Nullable`; `group_by_use_nulls=1` changes a key type; `date_time_output_format` and `output_format_json_quote_64bit_integers=0` break the decoder, and win over the client's `outputSettings`; `result_overflow_mode`, `read_overflow_mode` and `timeout_overflow_mode` set to `break` return partial results with no error.
+- Resource limits raise codes 158, 159, 307 and 396. The optimized path reads a different amount than the naive path, so a limit can fail on one and not the other (Q2).
+
+**Passes.** None. `compile` and `emitNaive` peel a root `Settings` node before validation and append its settings to the tail. Anywhere below the root raises `invalid_settings_placement`. `Backend.compile(rel)` takes only a `Rel`, and plans are cached by `Rel` identity; a node keeps both true with no `Backend` change. Correction after D6: the client did change, for a general defect that `settings()` exposed; see "D5 to D7 acceptance".
+
+### Design note: `ASOF JOIN`
+
+**Server behaviour.**
+- Only `ASOF INNER` and `ASOF LEFT` exist (`RIGHT`/`FULL` code 48). At least one equality is required (code 62) and exactly one inequality (code 403, also when missing). `>=`, `>`, `<=`, `<` all work, on either side and in either position.
+- Expressions and parameters work in both: `t.ts - {sec:UInt32} >= q.ts`, `lower(t.sym) = lower(q.sym)`.
+- A single-side condition in `ON` is accepted (`q.flag = 1`), and it filters before matching. The builder must not accept it, and must not move a residual above the join as inner joins do, because the two mean different things.
+- Inequality types: integers, floats, `Decimal`, `Date`, `Date32`, `DateTime`, `DateTime64`, also `LowCardinality`; mixed temporal pairs compare correctly (`Date`, `Date32`, `DateTime` across zones, `DateTime64` across precisions, all distinguishing values, on 24.3, 24.8 and 26.10). Mixed numeric is partial: `Int32` vs `UInt8` and `Decimal` across scales compare correctly, `UInt32` vs `Float64` worked on one row, and `UInt64` vs `Int64`, `UInt64` vs `Float64`, `Decimal` vs `Float64` and a temporal vs a number raise code 386. `String` raises code 169. **NaN does not behave as a comparison:** `1 >= NaN` and `NaN >= 1` each matched a row, on all three versions.
+- `Nullable` works on the inequality and the equality, on both sides; a NULL on either side never matches. It was accepted on 24.3 too. `ASOF LEFT` keeps that left row, with NULLs under `join_use_nulls = 1` and defaults without it. Null-extended types match ordinary `LEFT`, so `joinOutput('left', ...)` applies. CTE and self-join inputs work.
+- **A right-side filter does not commute, even for `ASOF INNER`.** `WHERE q.flag = 1` above returned one row; filtering `quotes` first returned two, and matched a different quote. A left-side filter does commute. `EXPLAIN` shows the server pushes neither side below `ASOF`.
+- `LeftToInner` is valid on the probed case (same rows), but it adds risk for little gain.
+- Ties on `(equalities, inequality)` are unspecified and **not repeatable**. The earlier "first row in the right stream wins" (four equal rows gave 1, `ORDER BY v DESC` on the right gave 4) was a single-part result. Correction, PM measured on 3 parts with 3 tied rows per key, 200 left rows: the same SQL run twice returned different rows on 24.8, 24.3 and 26.10, and changing the right input's columns, nesting, or `max_threads` changes them too. `max_threads = 1` gave the same rows on all three versions in this probe, once each. The count is always 200. So docs must say so, differential tests must use unique right keys, and tie tests can assert only the count and that the chosen row is one of the tied rows.
+- `join_algorithm`, correction from the Worker's and Tester's measurements, reproduced by the PM on each version: `partial_merge`, `grace_hash` and `direct` raise code 48 on `ASOF` on 24.3, 24.8 and 26.10. `full_sorting_merge` raises 48 on 24.3 and works on 24.8 and 26.10. `hash`, `parallel_hash` and `auto` work on all three. "`full_sorting_merge` agrees with the default" holds only without ties: with duplicate right `(k, t)` it returned different rows with the same count of 200, which no longer separates it from the default, since the default differs from itself. The default on 26.10 is `direct,parallel_hash,hash,ie_join`. `join_algorithm` stays out of the settings allowlist, but a client or profile can set it: a code 48 then surfaces as `QueryError`, on both paths, with no compiler check, as for engines in Track C.
+
+**IR.** `Join` gains `strictness?: 'asof'`, with the inequality as the last element of `on`. Every walker (`edges`, `references`, prune, `plan-ctes`, rebinding, `visit`) then works unchanged, and `nullExtended` keeps working on `joinKind`.
+
+**Passes.** `rewrite-rel`: `LeftToInner` skips `asof`, and `PushFilterJoin` admits only the left input. `prune-columns`: none, since keys are in `on`. `plan-selects`: none. `emit-naive`: keywords `ASOF INNER JOIN`/`ASOF LEFT JOIN`, the inequality in the ON text, and `validate` (`inner`/`left` only, binary, last `on` element an inequality with one alias on each side, `invalid_asof_condition`, `invalid_asof_type`).
+
+### Design note: `WITH FILL`
+
+**Server behaviour.**
+- Order of operations: `WHERE`, then fill, then `LIMIT BY`, then `LIMIT`. Filled rows count toward both limits. An outer filter sees them: `(... WITH FILL) WHERE d >= x` kept a filled row that the folded `WHERE d >= x ... WITH FILL` lost. The server does not push across it (also with `query_plan_filter_push_down = 0`), and an outer `ORDER BY`, `count()` or `GROUP BY` keeps the filled rows. So nothing folds above a fill except `LIMIT BY` and `LIMIT`.
+- Parameters work in `FROM`, `TO`, `STEP` and `INTERVAL {p:Int32} DAY`. 24.3 accepts them too. `FROM '2024-01-01'` is rejected (475), so a typed parameter is required, and `FROM 19000` on a `Date` silently means a day number.
+- Key types: integers, floats, `Date`, `Date32`, `DateTime`, `DateTime64`, also `Nullable`. `String`, `LowCardinality(String)` and `Decimal` raise 475, in every form tried for `Decimal`. Bounds must match the key's kind: a `DateTime` bound on a `Date` key, or a fractional step or bound on an integer key, raises 475. A negative bound on an unsigned key raises 475.
+- Integer step on a temporal key is unsafe: `DateTime64(3)` `STEP 86400` is 86400 seconds, not milliseconds. `INTERVAL` works on all temporal keys, including `MONTH`. `Date` with `INTERVAL 12 HOUR` raises 475.
+- Sign: `ASC` needs a positive step and `FROM <= TO`; `DESC` a negative step and `FROM >= TO`. `STEP 0` raises 475. `DESC` with no step fills downward.
+- **`NULLS FIRST` silently disables the fill**, with `ASC` and `DESC`: `ORDER BY nd NULLS FIRST WITH FILL` returned no filled row. `NULLS LAST` and the default fill, with NULLs last.
+- Filled rows get type defaults in every non-key column, not a re-evaluation: `v + 1 AS w` is 0, not 1. `Nullable` is NULL, an array `[]`, a `Date` `1970-01-01`. With `sumMerge`, the filled total is 0. **An `Enum` with no zero member fails with code 36** as soon as a filled row reaches output.
+- Keys before the fill key form a group (`use_with_fill_by_sorting_prefix = 1` is the default): `ORDER BY k, n WITH FILL` fills per `k` and keeps `k`. A key after it gets the type default. An unselected fill key still produces filled rows. Fill runs on `DISTINCT` output in the same SELECT, and an empty input with `FROM`/`TO` still produces rows.
+- There is no upper bound: `TO 2000000000` produced 1999999999 rows under a 100 MB memory limit. Docs must warn.
+- `INTERPOLATE (v AS v)` carries the last value; see Q5.
+
+**IR.** `SortKey.fill?: { from?, to?, step? }`, where `from`/`to` are typed `Param`s and `step` is a `Param` plus an optional interval unit. No rewrite rule crosses `Sort` (only Aggregate, Project, Union, ArrayJoin and Join have push rules), the planner's rank opens a new block for a Filter above it, and the Aggregate and Distinct arms already refuse a block with a `Sort` clause. A fill key must be a bare `ColumnRef` (`invalid_fill_key`); computed keys go through `map` first. This avoids the `n + 10 AS n ... ORDER BY n` alias problem, and the probe showed the base column's filled value is a default anyway.
+
+**Passes.** `rewrite-rel`: `edges` and the `Sort` arm of `visit` must include fill parameters. `prune-columns`: fill key demand as for `Sort`; no fill-specific change. `plan-ctes`: `expressions`. `plan-selects`: a `Project` above a fill folds only if it is an identity selection (already the rule); D13 pins that with a test. `emit-naive`: three block renderers plus the naive `ORDER BY`, printing `FROM`, `TO`, `STEP` in that order, and negating the step for `DESC`.
+
+### Design note: `OVER`
+
+**Server behaviour.**
+- **A parameter inside the window definition fails with code 456, "Query parameter was not set"**, in `PARTITION BY`, `ORDER BY`, frame offsets and named `WINDOW`, confirmed over HTTP. Parameters in the function's own arguments work (`sum(n + {o})`, `lagInFrame(u, {o}, {d})`, `ntile({o})`, `quantile({l})`). So keys cannot hold JS values, and frame offsets must be inlined like `LIMIT`.
+- Placement: `WHERE`, `HAVING`, inside an aggregate and inside another window all raise 184. Folding changes results: `(... row_number() ...) WHERE id > 1` gave ranks 2, 3 where the folded form gave 1, 2. The server does not push even a partition-key filter below the `Window` step (`EXPLAIN`). `LIMIT`, `LIMIT BY`, `ORDER BY` and `DISTINCT` run after windows.
+- **A SELECT alias captures names inside `OVER`.** `id AS k, row_number() OVER (PARTITION BY k ...)` partitions by the alias. So items must be qualified.
+- Functions: `row_number`, `rank`, `dense_rank`, `ntile` return `UInt64`. `lagInFrame`, `leadInFrame`, `first_value`, `last_value`, `nth_value` return the argument's type. All catalog aggregates and `sumMerge` work, and `sumIf` too. `lag`/`lead` do not exist (code 63). `percent_rank` is absent on 24.3, the declared minimum; `cume_dist` is absent on 24.8.
+- Defaults, not NULL: `lagInFrame(u)` on a first row is 0, and over an empty frame `sum` is 0, `max` 0, `avg` NaN, `sum(Nullable)` NULL. `leadInFrame` under the default frame only reaches peers: it returned 0 on every row with a unique order, and the correct value only with an explicit `UNBOUNDED FOLLOWING` frame. Docs must warn.
+- `first_value` and `last_value` skip NULLs. `RESPECT NULLS` exists.
+- Frames: `ROWS` works with `n PRECEDING/FOLLOWING`. `RANGE` offsets need exactly one numeric or `Date` key (codes 36 and 48); `INTERVAL` offsets raise 36 on `Date`. `1 FOLLOWING AND 1 PRECEDING` raises 36.
+- A constant key is not positional (`ORDER BY 1` gave one frame), but it is meaningless. Use the `LIMIT BY` rule: every key reads a column.
+- With no total order, `row_number` is unspecified: differential tests must order by a unique key.
+
+**Measured for `.over()` on 24.8.**
+- **`sum` with a constant in its argument breaks under `OVER`.** `sum(u + 1) OVER (ORDER BY id)` raises code 10, and where no other column is read it silently returns the wrong row count: `count()` over it gave 1, not 5, and `SELECT sum(number + 1) OVER (ORDER BY number) FROM numbers(3)` returned one row, on 24.3 too. The error names the rewrite to `sum(u) + 1 * count(u)`; `optimize_arithmetic_operations_in_aggregate_functions = 0` removes it. Parameters behave like literals. `u + 1`, `u - 1`, `f + 1` and `dc + 1` failed; `u * 2`, `u / 2`, `(u + 1) * t`, `ifNull(v, 0) + 1`, and column-only arguments did not; nor did `avg`, `min`, `max`, `count`, `sumIf`, `argMax`, `quantile`, `uniq`, `first_value` or `lagInFrame` over `u + 1`. Computing the value in a subquery first is correct: `sum(i.x) OVER (...) FROM (SELECT u + {p} AS x ...) AS i`.
+- Arithmetic around `OVER` works, with parameters: `sum(u) OVER () * {p}`, `row_number() OVER (...) + {p}`, `ifNull(lagInFrame(v) OVER (...), {p})`, `CAST`, `multiIf`, `if`, `u / sum(u) OVER (...)`, and two windows in one expression. So do parameters in an `-If` predicate, a level, an offset and a default. Different specs can share one SELECT.
+- After `GROUP BY`: `sum(sum(u)) OVER (...)` and `rank() OVER (ORDER BY sum(u) DESC)` give the same rows as the nested form over a derived table.
+- A `WHERE`, `ARRAY JOIN` or `DISTINCT` in the same SELECT gave the same rows as the nested form with those below the window (for `DISTINCT`, above it). `ORDER BY` and `LIMIT` on a window alias agree too, also under `prefer_column_name_to_alias = 1`.
+- Alias capture. `id AS k, row_number() OVER (PARTITION BY k ...)` partitions by the alias under the default settings and by the column under `prefer_column_name_to_alias = 1`, so the two settings disagree. `sum(u) OVER () AS u, u + 1 AS x` gives `x` = 151. Qualifying every name (`i.k`) removes it. An item's own alias does not capture its own definition: `sum(u) OVER (PARTITION BY u) AS u`, `row_number() OVER (ORDER BY u DESC) AS u` and `sum(u) OVER (PARTITION BY k) / 2 AS k` read the columns.
+- Window results drop `LowCardinality`: `lagInFrame(lc)`, `first_value(lc)`, `max(lc)` and `argMax(lc, t)` are `String`; `LowCardinality(Nullable(String))` gives `Nullable(String)`. Otherwise window-only functions return the argument's type, and aggregates match their `GROUP BY` result (`sum(Decimal(9, 2))` is `Decimal(38, 2)`, `avg(Nullable)` is `Nullable(Float64)`).
+- Function arguments. `ntile` needs a positive constant and an `ORDER BY` (`ntile(2) OVER ()` raises 36). `nth_value` and `lagInFrame` offsets must be above 0 (36). A default must be the argument's type: `'x'`, `1.5` on `UInt32` and `NULL` on a non-nullable argument all raise 36. `row_number(id)` and `rank(id)` silently ignore their argument.
+- Frames. `ROWS` offsets are non-negative 32-bit integers (1.5 and -1 raise 36) and work without `ORDER BY`. `RANGE` offsets need exactly one `ORDER BY` key (36), which may be an integer, `Date` or `Nullable` integer; `Decimal`, `String` raise 48. A float offset raises 36, and `UNBOUNDED FOLLOWING` cannot start a frame (36).
+- **Window results repeat only under a total order.** One CTE joined to itself with `row_number() OVER (PARTITION BY g)` on 600,000 rows in 2 parts differed on 529,376 rows; with `ORDER BY id` it differed on 0.
+- `sumState(u) OVER ()` returns a state. A `Subquery` in a key is accepted by the server.
+- 24.3 runs all nine window functions below and the catalog aggregates under `OVER`. It has the same code 456 and the same `sum` defect, and the alias capture.
+
+**Call shape (owner decision, Q3).**
+```ts
+from(events).map(r => ({
+  running: sum(r.amount).over({ partitionBy: r.category, orderBy: r.ts.desc() }),
+  rn: row_number().over({ partitionBy: r.category, orderBy: [r.ts.desc(), r.id] }),
+  prev: lagInFrame(r.amount, 1, 0n).over({ orderBy: r.ts }),
+  week: sum(r.amount).over({ orderBy: r.ts, frame: { rows: [{ preceding: 6 }, 'current'] } }),
+  share: sum(r.amount).over({ partitionBy: r.category }).divide(r.amount),
+}));
+```
+```sql
+SELECT sum(`amount`) OVER (PARTITION BY `category` ORDER BY `ts` DESC) AS `running`, ... FROM `events`
+```
+- **Aggregates.** All 11 catalog aggregates, their `If` forms and `-Merge` accept row operands. `-State` does not (`test/types/expressions.ts:127` stays). There are no new overloads, which would turn every `TS2345` pin into `TS2769`. `AggregateOperand<T>` widens to include `Expr<T, string, 'row'>`, and the return is conditional: all non-constant operands row gives `WindowCall<T, N, D>`; grouped or constant gives today's type. `any` keeps today's type, since a distributing conditional broke `slice4b`/`4c`/`4d` tests in the prototype. Mixed row and grouped operands stay rejected, at the type level and at runtime.
+- **`WindowCall<T, N, D>`** is a type with one method, `over(spec)`, so it fits the Decided row "Two-stage calls". It is not an `Expr`: `map`, `aggregate`, `where` and `.plus` all reject it. At runtime it is still today's `Agg` `Expr` in mode `agg`, so runtime behaviour without `.over()` is unchanged: `map` refuses the mode, and `aggregate` raises `invalid_expression_mode`.
+- **Window-only functions**, exported from core under their ClickHouse names (Decided row "Function names"): `row_number()`, `rank()`, `dense_rank()`, `ntile(n)`, `lagInFrame(x, offset?, default?)`, `leadInFrame(x, offset?, default?)`, `first_value(x)`, `last_value(x)`, `nth_value(x, n)`. Each returns `WindowCall`. Zero-argument forms take no argument. `n` and `offset` are positive JS numbers bound as parameters; `default` is `NoInfer` of the argument's value. They live in a new `windowDefinitions` table, not `aggregateDefinitions`, so forged use under `Aggregate` raises `unsupported_aggregate`.
+- **`count()`** has no operand to decide on, and its exact type is pinned (`test/types/expressions.ts:51`). An intersection broke that pin in the prototype. So `Expr` declares `over(this: Expr<bigint, 'count', 'agg'>, spec)`. Known gap, type-level only: `count().plus(1n).over(w)` and `sum(g.count).over(w)` type-check and fail at runtime with `invalid_window_function`.
+- **`M` is a new mode, `'window'`**: `.over()` returns `ResolvedExpr<T, N, 'window', D>`. The generator adds `OperandMode<M> = M extends 'window' ? 'row' | 'window' : M` to every operand position, so a window receiver accepts row and window operands and stays `'window'` through arithmetic, comparisons, `ifNull` and `cast`. A row receiver rejects a window operand: `r.u.divide(sum(r.u).over(w))` is a type error, because a `'row'` result could reach `where`. Write the window first, or use a later `map`. Only `map` accepts `'window'`, through a new `MapProjection`; `Projection` stays row-only, so `groupBy` is unaffected. The next operator sees ordinary row columns.
+- **Spec.** `{ partitionBy?: Expr | Expr[]; orderBy?: Expr | Ordering | (Expr | Ordering)[]; frame? }`, with `Expr` in mode `'row'`. `frame` is `{ rows: [start, end] }` or `{ range: [start, end] }`, each bound `'unbounded' | 'current' | { preceding: n } | { following: n }`; `'unbounded'` means `PRECEDING` as a start and `FOLLOWING` as an end. Offsets are inlined like `LIMIT`, since parameters raise code 456.
+- **After a grouped query.** `.aggregate(...).map(r => ({ running: sum(r.total).over({ orderBy: r.day }) }))` is expressible and emits a window over a derived table; the rows matched `sum(sum(u)) OVER`. `sum(sum(g.x)).over(...)`, `.over()` inside an `aggregate` callback and window functions over grouped operands are not expressible.
+- **Known tier.** `agg.percent_rank().as(col.Float64).over(w)` works, since it has no operand. Known aggregates with operands stay grouped-only, so they cannot use `.over()`; raw `sql` stays the fallback. Their `over` return needs its own signature in `KnownAggregate`.
+
+**Legal positions.** Only a `map` value, including nested under `Call`, `Cast` or `Case`. Everywhere else is rejected three times: by type, by the builder (`containsWindow(ir)`, needed because a JavaScript caller can build a row receiver with a window operand), and by the compiler for hand-built IR (`invalid_window_placement`). The prototype confirmed each type rejection.
+
+| Position | Type | Builder and compiler |
+|---|---|---|
+| `where`, `prewhere` | TS2322, `'window'` is not `'row'` | `invalid_predicate`; `invalid_window_placement` |
+| `orderBy`, `thenBy` (sort on the `map` output instead) | TS2322, also through `.desc()` | `invalid_sort_expression`; `invalid_window_placement` |
+| `limitBy`, `groupBy` | TS2322 | `invalid_limit_by_key`, `invalid_expression_mode`; `invalid_window_placement` |
+| `aggregate` result, `.over()` in its callback | TS2322, `.over` missing on a grouped result (TS2339/TS2684) | `invalid_expression_mode`; `invalid_window_placement` |
+| `join().on`, `.asof`, `arrayJoin` | TS2322 | `invalid_join_predicate`, `invalid_expression_mode`; `invalid_window_placement` |
+| Operand of an aggregate, or window inside a window (argument or key) | TS2345/TS2322 | `invalid_window_operand`; `invalid_window_placement` |
+| `sql` snippet argument | mode check | `rowOperand` in `sql.ts` learns `Window` |
+| Bare `sum(r.x)`, `row_number()` used without `.over` | TS2740/TS2322 `WindowCall`; `.plus` TS2339 | `map` and `aggregate` mode checks, as today |
+| `.over().over()`, `sum(x).plus(1).over()` | TS2339 | `invalid_window_function` |
+
+**IR.** A new `ExprNode` kind: `Window { fn: Agg, partitionBy: ExprNode[], orderBy: SortKey[], frame?: WindowFrame, type }`. Not `Rel['kind']`, so `'Window'` is not added to `test/types/ir.ts:38-53`. Not a field on `Agg`: `references`, `mapExpression`, prune, `referencesName` and `readsName` walk only `args` and `params` of an `Agg`, so a forgotten case would silently lose key demand or an alias check, and `hasAggregate` and `invalid_aggregate_placement` would treat it as a `GROUP BY` aggregate. Under a new kind `resolveTotal` throws, `deterministic` and `referencesName` return their conservative default, and the rest is listed here. `fn` keeps `Agg`, so resolution is reused; `State` and two-combinator forms are rejected under it.
+
+**Every `ExprNode` dispatch that must learn it.**
+- `core`: `ir.ts` union; `query.ts` `readsRow` (`:318`), `deterministic` (`:386`, explicit false), `rebindSort` (`:410`, never reached; raise); `sql.ts` `rowOperand` (`:45`); `known-functions.ts` and `catalog/greatest.ts`, `projection.ts`: `'window'` and `'row'` mixes follow the existing mode checks, with a test each. A new exported `containsWindow`.
+- `compiler/rewrite-expressions.ts`: `exprNode` edge restoring (`:15`), `mapExpression` (`:53`), `contains` (`:313`), `deterministicExpression` (`:303`). `resolveTotal` needs no change, only a test.
+- `compiler/rewrite-rel.ts`: `scoped` and `repeatable` (`:406`, `:410`) and `mergeProject`. `edges` needs nothing, since `Project.exprs` already covers it.
+- `compiler/prune-columns.ts` `expression` (`:77`), `compiler/plan-ctes.ts` `expression` (`:62`), `compiler/validate-structure.ts` expression fields and `choice` (`:256`, `:284`), `compiler/resolve.ts` new `resolveWindow` and `repeatable` (`:324`).
+- `compiler/emit-naive.ts`: `resolvedType` (`:169`), `expression` (`:202`, with a new scope for `fn` so its row-mode refs pass the `ColumnRef` rule at `:207`). `hasAggregate` (`:34`) does not descend, on purpose.
+- `compiler/plan-selects.ts`: `referencesName` (`:47`) and `readsName` (`:56`) keep their conservative default, with a comment and a test; the Distinct arm and the nested-selection arm change.
+- `devtools`: `format-expression.ts` (`:60`), `dataflow.ts` (`:166`). `canonical-key.ts` handles types and values only; no expression goes through it, so it has nothing to learn.
+
+**Fence, pass by pass.** Detection is `hasWindow(e) = contains(e, a => a.kind === 'Window')`. `contains` recurses through `Call`, `Raw`, `Agg`, `Cast` and `Case`, so `sum(x).over(w).divide(y)` is detected like a bare window.
+
+| Pass | Risk | How it is fenced | Change |
+|---|---|---|---|
+| `PushFilterProject` | A filter below a window changes ranks (measured) | `totalExpression` is false for any `Window`: a used window makes the substituted predicate non-total, and an unused one fails `names.every(...)` | None; test |
+| `MergeFilter`, `PushFilterJoin`, `LeftToInner` | Same, one level up | `fallible` counts a `Project` with a non-total expression, so `fallibleComputation` and `fallibleWithin` are true above it | None; test |
+| `PushFilterAggKey`, `PushFilterUnion`, `PushFilterArrayJoin` | A filter reaches the window through them | They stop at the `Project` above | None; test |
+| `MergeProject`, inner has a window | A window substituted into other expressions, into another window, or duplicated | `scoped` adds `Window`; `repeatable` is false | Add |
+| `MergeProject`, outer has a window | A `Param` reaches a key (456), `x = u + 1` reaches `sum(x)` (the defect) | `values(outer.exprs).some(hasWindow)` returns `outer` | Add |
+| Aggregate folding | `sum(rn)` in one block raises 184 | The Aggregate arm requires `!child.project` | None; test |
+| `Filter`, `Sort`, `LimitBy`, `Limit` above | `WHERE` runs before windows | `(!child.project \|\| limitProject)`; `limitProject` requires `totalExpression`, so all open a derived table, conservatively for `Sort` and `Limit` | None; test |
+| `Distinct` above | The arm folds over a `child.project` | Same rows measured, but the fold is not needed: require no window | Add |
+| `ArrayJoin` above, join input, identity `Project` above | Would run below the window | Their arms require `!child.project`; a join input is a derived table | None; test |
+| `Project` with a window below | May fold only on a scan block | The computed-`Project` arm requires a `table` source with Filter clauses, where `WHERE`, `PREWHERE` and `ARRAY JOIN` run first (measured). The nested-selection arm requires `directSelection`, which a window fails | Test |
+| Alias capture on that fold | A sibling alias captures a key (measured) | The arm's `referencesName` returns true for `Window` by default, so any non-identity alias equal to a physical name opens a derived table; naive and derived forms qualify | None; test |
+| `prune-columns` | Keys and arguments lose demand | `expression` visits `fn`, `partitionBy`, `orderBy`. An unread item is dropped: a window never changes the row count, and dropping a failing one is allowed by results-only | Add |
+| `plan-ctes` | A shared window node | `expression` sets `extractable = false` and walks. A shared window is not a CTE; each use is its own subquery in both emitters. An explicit `.cte()` is a `Materialize`, and ClickHouse may evaluate it per use. Docs carry the measured total-order rule | Add |
+| `deterministic`, live | A window is not incremental | `live: false` through `map`'s existing `deterministic` | Explicit case |
+
+**Keys, arguments and frames, in `.over()` and again in compile.**
+- `invalid_window_key`: a key holding a `Param`, `Subquery` or `Raw`, or reading no column. A direct `val()` is also a type error; a `Param` nested in an expression cannot be seen by types. Remedy, in the message: compute it in an earlier `map` and name the column; MergeProject's fence keeps it there. Raw `Param`s go through the same check, so code 456 is never reached.
+- `invalid_window_argument`: a `Param` or `Raw` anywhere in the argument of a typed `sum` under `.over()`. The rule is broader than the failures measured, because the rewrite's conditions are server internals. Same remedy. Other functions keep parameters.
+- `invalid_window_function`: `.over()` on anything but a root `Agg`, on `State`, or with `ntile` lacking an `ORDER BY` or having a `frame`.
+- `invalid_window_frame`: non-integer, negative or above 32-bit offsets, start after end, `RANGE` offsets without exactly one integer or `Date` key.
+- Emit names qualified in naive and derived forms.
+
+**Availability.** Typed: nine functions above, all on 24.3 and 24.8, plus the catalog aggregates. `lag` and `lead` do not exist; `percent_rank` only on 24.8, through the known tier; `cume_dist` on neither.
+
+**Prototype, in a scratch copy, TypeScript 5.8.3, types only.** The owner's shape, arithmetic with row and window operands, a later `where`, and a grouped query's output all infer correctly under `pnpm typecheck` apart from the pins in Q7. Bench source instantiations rose 1.03%, from 3,338,847 to 3,373,260, and passed the budget. Built inputs were not rebuilt, and 5.5.4 and 7.0.2 were not run.
+
+### Gap summary
+
+| Keyword | Exists | core | compiler | client | codegen | docs | type tests |
+|---|---|---|---|---|---|---|---|
+| `-State`/`-Merge` | IR field, 6 exports, types, descriptor | 16 exports, LC fix, level on `quantileMerge` | resolve, rule move | none | parametric test | new rollups guide, 16 function entries | positive and negative |
+| `SETTINGS` | Emitted for 3 internal settings | terminal `settings()`, allowlist, node | peel, tail, validation | none | none | new section, spec | positive and negative |
+| `ASOF JOIN` | none | `asofJoin`, `asofLeftJoin`, `.asof()` | validate, emit, 2 rule fences | none | none | joins page | positive and negative |
+| `WITH FILL` | none | `Ordering.withFill`, `interval`, key generics | validate, 4 renderers, edges | none | none | ordering page, warnings | positive and negative |
+| `OVER` | Raw `sql` only | `.over()`, `'window'` mode, 9 functions, `Window` expression kind | fences, emit, validation | none | none | new page, spec reversal | positive and negative; Q7 |
+
+Devtools (`node-label.ts`, `dataflow.ts`) needs labels and edges for each new node. The unmerged `studio` branch may switch over `Rel['kind']`; not checked.
+
+### Tasks
+
+Every feature task ships with its own runtime and positive and negative type tests. Tester tasks add native, differential, EXPLAIN corpus and adversarial coverage, and run negative controls. Snapshot updates go with the task that changes them. Worker tasks must not change a pre-existing expectation; see Decisions and Q6.
+
+**D1. State rule and `-State`/`-Merge` in compiler and core.** Depends: none. Status: accepted, uncommitted.
+Move `aggregate_state_selection` to the query result and `Subquery` results; add `aggregate_state_operand`; extend `resolveAggregate`; add `invalid_merge_state`; add the exports; strip `LowCardinality` in state descriptors, at runtime and in `StateResult`; `quantileMerge(level)` and `quantileExactMerge(level)`.
+Accept: `from(s).count()`, `from(s).map(plain)`, `sumMerge`, known-tier `agg.uniqMerge(...).as(col.UInt64)`, and `aggregate(sumState).aggregate(sumMerge)` compile on both emitters. Raw `from(s)` and root `sumState` stay rejected. Forged metadata, wrong-function merge, wrong level and non-state operands are rejected in both emitters. Positive types for each function with `.not.toBeAny()`; negative types for wrong-function merge, merge in `map`, and `quantileMerge` without a level. Only the expectations listed under Decisions change, and only in D3.
+
+**D2. `-State`/`-Merge` catalog result agreement.** Depends: D1. Status: accepted, uncommitted.
+Accept: a native test compares `toTypeName` of every state and merged result with the descriptor, for each function over plain, `Nullable`, `LowCardinality`, `Decimal` and temporal inputs (extending the catalog native-agreement test). Codegen test: `AggregateFunction(quantile(0.9), Float64)` renders and feeds `quantileMerge` in types.
+
+**D3. `-State`/`-Merge` native and differential coverage.** Depends: D2. Owner: Tester. Status: accepted, uncommitted.
+Applies the approved expectation edits under Decisions, exactly and nothing else. Accept: real `AggregatingMergeTree` plus a materialized view `TO` table, multi-part before merge, through `run` and `stream`, compared with handwritten SQL and a JavaScript oracle; empty-input values above; `FINAL`, `PREWHERE`; union of rollup state and fresh state; state through a join input and an unmatched outer row; `sumMerge(total) AS total` under `prefer_column_name_to_alias = 1`; a merge level differing from the stored level, on a non-nullable state, with a Nullable state raising `invalid_merge_state` on a mismatch; every Worker-reported correction in the design note; `count`, `uniq` and `uniqExact` merging a stored argument other than the catalog's, and `avg` over `Decimal` rejected. Differential arbitrary gains states over an aggregating fixture, naive and optimized equal. Negative controls: leaving the check on every node, not stripping `LowCardinality`, and dropping the `-Merge` function match each fail a test.
+
+**D4. `-State`/`-Merge` docs and spec.** Depends: D2. Status: accepted, uncommitted.
+New guide for reading rollups and materialized views, one function entry per pair or a shared page, generated SQL. `spec.md:575` (states pass through; only the result is rejected), `spec.md:720` (the shipped list), a Decided row. Accept: docs state that the merge level decides, that `finalizeAggregation` is per row, and the raw-selection rule. `pnpm docs:verify` passes.
+
+**D5. `SETTINGS` in core and compiler.** Depends: D4. Status: accepted, uncommitted.
+`Query.settings(obj)` returns a terminal object with `ir`, `_rowType`, `caps`, `toSQL` and nothing else. Accepts only the allowlist; values validated per key; strings through the escaper; `{ live: false }`. Root-only `Settings` node, a `Rel` kind, peeled by `compile` and `emitNaive`; the Tester adds `'Settings'` at `test/types/ir.ts:38-53` (Q6). Merges with compiler-owned settings; those keys are not settable.
+Accept: runtime tests for each key, bad values, unknown keys, compiler-owned keys, `log_comment` escaping, and placement. Positive types: result accepted by `run` and `stream`. Negative types: `.where`, `.limit`, `.settings`, as a join, union or subquery input. Plan caching keeps working by node identity. Added from D1 to D4: the peel happens before validation, because `aggregate_state_selection` compares against the query root (`rel === root`) and would miss a state under a `Settings` wrapper, so `from(rollup).settings(...)` must still raise it at path `root` on both emitters, a forged `Settings` under a `Subquery` is rejected, and `columns` and `columnPaths` come from the input. Integer keys accept only non-negative safe integers or a bigint: `max_memory_usage = 1.5` silently reads back as 1, and `1e21` (how JavaScript prints it) and `-1` raise code 70. `max_execution_time` keeps fractions (1.5 reads back). `log_comment` containing `*/` and `--` reads back, and sits correctly before the trailing `join_use_nulls` comment.
+
+**D6. `SETTINGS` native coverage.** Depends: D5. Owner: Tester. Status: accepted, uncommitted.
+Accept: `getSetting` through scan, join, CTE, `UNION ALL` and `UNION DISTINCT` on both emitters. Internal settings stay in force. Each resource limit surfaces as `QueryError` with its code; code 241 is reachable with `uniqExactMerge` over a rollup under `max_memory_usage = 1000000` (measured on 1,000 stored rows). Every value reads back through `getSetting` equal to what was set. Do not assume a limit separates the paths: `max_bytes_to_read` gave the same outcome for the pruned and the all-columns nested shape over a rollup, because the server prunes unread columns itself, and `count()` over a table ignored limits of 1. `readonly = 1` surfaces code 164. Differential: the same rows with and without performance settings. Negative controls: placement check removed, escaper bypassed.
+
+**D7. `SETTINGS` docs and spec.** Depends: D5. Status: accepted, uncommitted.
+`spec.md` Emission details and Decided row with the allowlist and Q1, Q2 outcomes. Accept: docs list every key and why others are refused, and state the `readonly = 1` behaviour. `pnpm docs:verify` passes.
+
+**D8. `ASOF JOIN` in core.** Depends: D7. Status: ready.
+`asofJoin` and `asofLeftJoin`, one aliased input per argument as `leftJoin`. `.on(equalities)` returns an intermediate whose only method is `.asof(inequality)`; `.asof` builds the node, `{ live: false }`.
+Accept: positive types for both kinds, including the `Nullable` right side on `asofLeftJoin`. Negative types: the intermediate used as a query (`where`, `map`, `toSQL`, `run`), a `.asof` before `.on`, a second `.asof`. Runtime: non-equality in `.on`, equality in `.asof`, one-side inequality, `join_condition_not_equi` wording, duplicate alias, arity.
+
+**D9. `ASOF JOIN` in compiler.** Depends: D8. Status: not started.
+Fields, `validate`, keywords, naive and planned text, rule fences, `invalid_asof_condition`, `invalid_asof_type`.
+Accept: unit tests that a right-side `Filter` stays above on `ASOF INNER` and `ASOF LEFT`, a left-side conjunct moves below, `LeftToInner` does not fire, and `join_use_nulls = 1` is emitted for `asofLeftJoin`. Forged IR rejected on both emitters. Parameters number in text order.
+
+**D10. `ASOF JOIN` native and differential coverage.** Depends: D9. Owner: Tester. Status: not started.
+Accept: all four operators, reversed operands, each type family and mixed pairs, `Nullable` on both sides, expression and parameter operands, a CTE input, self-join, a null-extended `meta` check per column kind, `run` and `stream`, compared with handwritten SQL. Oracle-based test of right-filter non-commutation. Differential arbitrary gains `ASOF` with unique right keys, which is required: tied rows differ between repeat runs of one SQL. Tie tests assert only the count and that the chosen row is one of the tied rows. Mixed pairs include those raising code 386, with one `QueryError` shape on both paths, and NaN on each side, pinned as measured. The `join_algorithm` table in the design note is pinned through a client-level setting. A smoke run of the core cases on 24.3 and 26.10, or a recorded reason if the harness cannot run it. EXPLAIN corpus entry. Negative controls: admitting the right input, removing the `LeftToInner` fence, and moving residuals above the join each fail a test.
+
+**D11. `ASOF JOIN` docs and spec.** Depends: D9. Status: not started.
+Joins page and `compiler/select-blocks.md`; `spec.md` Joins and Join strictness rows, Decided row. Accept: docs cover ties (not repeatable, and affected by `settings({ max_threads })`), the right-side filter trap with the reproduced rows, supported types and the pairs raising code 386, NaN, and unsupported `join_algorithm`s per version. `pnpm docs:verify` passes.
+
+**D12. `WITH FILL` in core.** Depends: D11. Status: not started.
+`Ordering.withFill({ from?, to?, step? })`, `interval(n, unit)`, with `Ordering` carrying the key's value type (default keeps today's type). Accept: positive types for integer, float, `Date`, `DateTime`, `DateTime64` and `Nullable` keys, ascending and descending, with `thenBy`. Negative types: `String` and `Decimal` keys, bare number step on temporal, interval on numeric, wrong-typed bound, `nullsFirst` then `withFill` and the reverse, `withFill` on a grouped key. Type performance stays under ceilings.
+
+**D13. `WITH FILL` in compiler.** Depends: D12. Status: not started.
+`invalid_fill_key`, sign and bound checks when values are known, `Date` with sub-day unit rejected, renderers, `edges`, `expressions`, step negation.
+Accept: SQL tests for `FROM TO STEP` order and parameter numbering in scan, join and aggregate blocks; `Filter + Sort(fill) + LimitBy + Limit` folds; a `Filter`, computed `Project`, `Aggregate` or `Distinct` above opens a derived table; every renderer emits the fill (a test walks each block shape, like PREWHERE's).
+
+**D14. `WITH FILL` native and differential coverage.** Depends: D13. Owner: Tester. Status: not started.
+Accept: each key type and interval unit, descending, prefix keys, trailing keys, unselected key, `LIMIT` and `LIMIT BY` counting filled rows, an outer filter seeing filled rows, aggregate block with `sumMerge`, `DISTINCT` below, empty input, join and union inputs, CTE. Defaults per column type pinned against the descriptor. `Enum` without zero surfaces code 36 on the naive path; the optimized path may succeed when it prunes that column, per results-only. Differential arbitrary gains fill under a total order. Negative controls: folding a `Filter` above, dropping fill in one renderer, not negating the step.
+
+**D15. `WITH FILL` docs and spec.** Depends: D13. Status: not started.
+Ordering page; `compiler/select-blocks.md`; IR table in `spec.md`; Decided row. Accept: docs cover filled-row defaults and the computed-column case, `Enum`, no upper bound, the interaction order, and Q5's outcome. `pnpm docs:verify` passes.
+
+**D16. `.over()` in core.** Depends: D15. Status: not started.
+`Mode` gains `'window'`; `OperandMode` in `gen-expr-methods.ts`, regenerated; `MapProjection` on `Query.map` and `JoinQuery.map`; widened `AggregateOperand` with the conditional return on base, `If` and `Merge`, with a separate narrow operand for `State`; `WindowCall`; `Expr.over` for `count()` and at runtime; `windowDefinitions` and the nine functions; the `Window` node; `containsWindow`; checks in every illegal builder position; `invalid_window_key`, `invalid_window_argument`, `invalid_window_function`, `invalid_window_frame`; `{ live: false }`; devtools.
+Accept: positive types with `toEqualTypeOf` and `.not.toBeAny()` for each function and aggregate, `If`, `Merge`, key and frame forms, arithmetic with row, window and constant operands, comparison, `ifNull`, `cast`, single-expression `map`, `JoinQuery.map`, a later `where`/`orderBy`/`limit` reading the result, and a grouped query's output. `any` operands keep today's types. Negative types for every row of the legal-positions table, plus mixed row and grouped operands, a direct `val()` key, `withFill` in a window key, wrong-typed `default`, `row_number(x)`, `maxState(r.x)`, `r.u.divide(window)`. Runtime tests: each builder rejection, including a JavaScript caller's row receiver with a window operand; `count().plus(1n).over(w)` raising `invalid_window_function`; `sum(r.x.plus(1)).over()` raising `invalid_window_argument`, and `sum(r.x.plus(r.y)).over()` allowed. `pnpm verify:expr-surface` passes after regeneration. `node scripts/check-type-performance.mjs --all` stays under the ceilings with no budget change; if it does not, stop and report. Pins in Q7 change only in D18.
+
+**D17. `.over()` in compiler.** Depends: D16. Status: not started.
+Every dispatch listed above; `resolveWindow`, with results checked against the node (`LowCardinality` dropped); `invalid_window_placement`; validation of forged `Window` nodes; the MergeProject, Distinct and `plan-ctes` changes; emission.
+Accept: unit tests for every row of the fence table, each asserting SQL shape and hits on both emitters. Named cases: a filter above a window stays above when it reads only the partition key, when it reads the window column, and when it reads neither; `sum(r.x).over(w).divide(r.y)` is fenced exactly like a bare window, in each row; `.map(x = u + 1).map(sum(x).over())` and a key over a computed `Param` column stay nested; a window never folds into an aggregate or `Distinct` block; an unread item is pruned and its keys and arguments are no longer demanded, while a key column read by no other expression is demanded; an alias equal to a sibling's key opens a derived table and an item's own alias does not; a shared window `Project` is not a CTE; the sole-column and `FROM`-less forms keep correct SQL. Forged IR with a window in `Filter`, `Sort`, `LimitBy`, `Aggregate`, `Join.on`, `ArrayJoin`, `RawRel`, an `Agg` argument and inside a key raises `invalid_window_placement` on both emitters. Parameters number in text order, with `fn` before its spec.
+
+**D18. `.over()` native and differential coverage.** Depends: D17. Owner: Tester. Status: not started.
+Applies the Q7 edits, groups A to G, exactly as listed and nothing else. Accept: on 24.8 through `run` and `stream`, against handwritten SQL and a JavaScript oracle: each function and catalog aggregate; `If`, `Merge` over a rollup; frames; empty-frame and first-row values; `meta` equal to the descriptor per wrapper (`Nullable`, `LowCardinality`, `Decimal`, temporal); top-N per group through `where`; arithmetic and two windows in one item; over a join with `join_use_nulls`, an `ASOF` join, a grouped query, `ARRAY JOIN`, `PREWHERE`, a CTE and a union branch. Sibling alias capture under both `prefer_column_name_to_alias` values gives the column's result. `sum(column)` is correct after an earlier `map` computes `x + 1`, including row counts. A differential arbitrary adds `.over()` with a total order, naive and optimized rows equal, including nested arithmetic, parameters outside keys and pruning. EXPLAIN corpus: window step above a filter, no filter below it. A smoke test on 24.3 for every exported function, or a recorded reason if the harness cannot run it. Negative controls, each failing a test: removing each `Add` row in the fence table in turn; making `totalExpression` true for `Window`; removing `invalid_window_argument`; removing the `Param` check on keys; emitting unqualified names in the derived form. The types matrix runs on 5.5.4, 5.8.3 and 7.0.2, and any pin differing from the Q7 list comes back to the PM.
+
+**D19. `.over()` docs and spec.** Depends: D17. Status: not started.
+New query-builder page and one function entry per window function, with generated SQL. `spec.md`: line 20 (window functions leave the out-of-scope list), line 633 (`Window` in the `Expr` node list), the `Mode` and mode-gating text, the "Two-stage calls" row, and line 876 replaced. The note must say: the reversal was approved by the owner, and the reason, attributed to the orchestrator's analysis, is that `sql` windows work but leave the SQL unchecked and result types hand-asserted, on a very common analytics feature, in a library whose purpose is type safety. Record the expression shape, `map`-only placement, and the Window node.
+Accept: docs cover legal positions and the `map`-first remedy; code 456 and the `sum` defect as the reasons for `invalid_window_key` and `invalid_window_argument`; frames and their rules; defaults instead of NULL and NaN on empty frames; `leadInFrame` needing an explicit frame; total order and repeated evaluation; `count().plus(1n).over(w)` failing at runtime; `percent_rank` through known functions and version availability. `pnpm docs:verify` passes.
+
+**D20. Gates and evidence.** Depends: each keyword's tasks, then all. Status: not started.
+Accept, per keyword before the next starts, and again at merge: `pnpm check:all` on TypeScript 5.5.4 and latest, `pnpm docs:verify`, `node scripts/check-type-performance.mjs --all` with no budget change unless approved, and this section updated with evidence. PM then checks coverage against the actual diff.
+
+### Decisions
+
+- **`-State`/`-Merge` test expectations (owner, relayed by the orchestrator, 2026-11-05): approved.** Scope: `packages/compiler/test/aggregation.test.ts`, `uniq-exact.test.ts`, `quantile.test.ts`, `aggregates-min-exact.test.ts` and `packages/client/test/stream.test.ts`, only expectations pinning `unsupported_aggregate_combinator` and `aggregate_state_selection`, and only where the new behaviour contradicts them. The Tester makes the edits, not the Worker. Any other pre-existing expectation goes back to the owner. These are the edits, for audit against the diff; the new codes assume Q4's recommendation, and rows 4 to 6 fall away if State/Merge stays limited to `count`, `sum` and `max`:
+
+| # | Location | Forged input | Old | New | Why |
+|---|---|---|---|---|---|
+| 1 | `aggregation.test.ts:65-66` | `avgIf` node (2 args), `['State']`, `['Merge']` | `unsupported_aggregate_combinator` | `invalid_argument_arity` | Combinator now legal; base `avg` takes 1 arg. Split from the loop; `['If','If']` keeps its old expectation |
+| 2 | `aggregation.test.ts:164` | `argMaxIf` node (3 args), `['State']` | `unsupported_aggregate_combinator` | `invalid_argument_arity` | Same; base `argMax` takes 2 |
+| 3 | `aggregation.test.ts:339-343` | `argMax` node (2 args), `['Merge']`, `['State']` | `unsupported_aggregate_combinator at root.aggs.n` | `['Merge']`: `invalid_argument_arity at root.aggs.n`; `['State']`: `invalid_expression_type at root.aggs.n` | `-Merge` takes 1 state; for `-State` the args are valid but the node declares the value type. Split; `['If','If']` stays |
+| 4 | `uniq-exact.test.ts:111-112` | `uniqExact` node, `['State']`, `['Merge']` | `unsupported_aggregate_combinator` | `['State']`: `invalid_expression_type`; `['Merge']`: `invalid_merge_state` | Declared type wrong for a state; operand is not a state. Split; `['If','If']` stays |
+| 5 | `quantile.test.ts:112-113` | `quantile` node, `['State']`, `['Merge']` | `unsupported_aggregate_combinator` | Same as row 4 | Same |
+| 6 | `aggregates-min-exact.test.ts:174` | `quantileExact` node, `['State']` | `unsupported_aggregate_combinator at root\.aggs\.x` | `invalid_expression_type at root\.aggs\.x` | Same |
+
+  **Stay exactly as they are, checked:** `aggregation.test.ts:68` and `:347`, `uniq-exact.test.ts:105` (`params` on a non-parametric aggregate still raises the combinator code); `aggregates-min-exact.test.ts:175` and every `['If','If']`; `aggregation.test.ts:412` (root `sumState`) and `packages/client/test/stream.test.ts:125` (root `from(unsupported)`): raw selection at the result stays rejected, so `stream.test.ts` has no edit even though it is in the approved scope. Also unchanged, outside the approval: `backend.test.ts:207-213`, `decode.test.ts:116`.
+- **Function names.** `row_number`, `dense_rank`, `first_value` and so on, per the Decided row "everything else the ClickHouse name". No camelCase aliases.
+- **`percent_rank` not typed.** Absent on 24.3, the declared minimum. It stays reachable as a known aggregate: `agg.percent_rank().as(col.Float64).over(w)`. Not `cume_dist`, absent on 24.8.
+- **Not added by this track.** `any`, `anyLast`, `groupArray`, `groupUniqArray` are in `spec.md:720` but not in the catalog; that gap predates this track. `sumStateIf`, `sumMergeIf` and the other two-combinator forms stay rejected; recorded as a later addition.
+- **Q1, `SETTINGS` shape (owner): terminal `q.settings({...})` with the 12-key allowlist**: `max_threads`, `max_execution_time`, `max_memory_usage`, `max_rows_to_read`, `max_bytes_to_read`, `max_result_rows`, `max_result_bytes`, `max_block_size`, `max_bytes_before_external_group_by`, `max_bytes_before_external_sort`, `priority`, `log_comment`. `join_algorithm` stays out.
+- **Q2, resource limits (owner): a named carve-out in `spec.md`**, for codes 158, 159, 241, 307 and 396 under user-set limits. D7 writes it. Code 241 was later raised by hand; D6 pins it.
+- **Q3, `OVER` shape (owner): expression `.over()`**, not the PM's recommended `.window()` operator: `from(events).map(r => ({ running: sum(r.amount).over({ partitionBy: r.category, orderBy: r.ts.desc() }) }))`.
+- **Q4, breadth (orchestrator, under the owner's request, not asked; open to the owner's objection): all 11 catalog aggregates get `-State`/`-Merge`**, since `spec.md:720` says "for each" and the request named rollup reading generally. So rows 4 to 6 above apply.
+- **Q5, `INTERPOLATE` (orchestrator, under the owner's request, not asked; open to the owner's objection): deferred.** It was not in the request. D15 documents it as not supported.
+- **Q6, `test/types/ir.ts:38-53` (owner): approved, additively and nothing else in that file.** The Tester adds `'Settings'` only. **`Settings` stays a `Rel` kind**: `Backend.compile(rel)` takes only a `Rel`, and plans cache on `Rel` identity. `Window` is an `ExprNode` kind, so it is not added to this union; `test/types/ir.ts:55-57` is covered by Q7.
+- **D19 note (orchestrator's analysis; reversal approved by the owner).** `sql` windows work but leave SQL unchecked and result types hand-asserted, on a very common analytics feature, in a library whose purpose is type safety.
+- **`-Merge` arguments (orchestrator, open to the owner's objection): `count`, `uniq` and `uniqExact` merge any stored argument**, since the result is always `UInt64`. The Worker is implementing this, subject to measurement. `avg` over `Decimal` stays rejected and documented.
+- **Integer-level Nullable quantile columns (orchestrator, 2026-11-06, open to the owner's objection): fail closed with `invalid_merge_state`.** `AggregateFunction(quantile(1), Nullable(T))` has no typed merge, because the Float64 level parameter is spelled `1.` and the server raises code 43. The alternative, sending `{l:UInt8}`, works (PM measured 100) and was not built. `quantile(1.)` merges.
+- **`Unknown` states (orchestrator, 2026-11-06, open to the owner's objection): fail closed through the `raw` text scanner**, overriding the "pass-through" wording. `spec.md` and `reference/types.md` carry the exception.
+- **`count`, `uniq`, `uniqExact` (orchestrator, 2026-11-06, open to the owner's objection): merge any stored argument the server allows.** This settles the earlier "subject to measurement": `count` takes 0 or 1 stored arguments (2 raises code 42), the others 1 or more.
+- **Existing test edits for `SETTINGS` (owner, relayed by the orchestrator): approved, and only these.** `test/types/ir.ts` adds `'Settings'`. `prewhere-adversarial.integration.ts:1638` expects `new Set(['6'])`, with the tolerant line tightened to the code. `backend.test.ts`: 3 tests move from a `json` mock to a `stream` mock, keeping what they guard.
+- **`run` path (owner): Option A.** `runBuffered` always reads through `stream()`.
+- **Gzip (owner): documented.** `compression: { response: true }` can lose the code. The owner accepted documenting it when told it was narrow, and has since been told the repeatable counts in `settings.md`. Not blocking unless the owner says so.
+- **`SetQuery` requires `row` (orchestrator, open to the owner's objection).** This narrows a public type, so that a terminal `settings()` result is not a set operand.
+- **`{ max_threads: undefined }` is refused at runtime (orchestrator, open to the owner's objection).** Leave the key out instead.
+- **`max_threads` and `max_block_size` edges are accepted (orchestrator, open to the owner's objection), because they do not change rows.** This overrides D6's "every value reads back equal": on 24.8 `max_threads` is capped at 4096, `0` reads as the auto value, `max_block_size` is capped at 4294967296, and `0` reads as 65409.
+- **`@clickhouse/client` floor is `^1.13.0` in `packages/client`; `packages/codegen` stays `^1.11.0`.** 1.11.0 fails to load, and 1.12.x loses the code on 26.10.
+- **Q7, pre-existing type expectations (owner, relayed by the orchestrator): approved.** The Tester may make the edits in groups A to G below, in D18, using `.over()`, and nothing outside this list. The known gap is accepted: `count().plus(1n).over(w)` and `sum(g.count).over(w)` type-check and fail at runtime with `invalid_window_function`. Measured with a prototype on TypeScript 5.8.3 only, so any pin differing on 5.5.4 or 7.0.2, or outside this list, comes back to the owner.
+
+| Group | Locations in `test/types/` | Today | After |
+|---|---|---|---|
+| A. A bare row-operand call is no longer an error on its own line | `negative/expressions/declared-row.ts:4,5`, `descriptor-boundaries.ts:3`, `grouped.ts:3`, `membership.ts:9`, `z-low-stock.ts:12`, `z-sql-snippets.ts:15` | TS2345 at the call | The statement becomes a use, `q.map(() => ({ x: <call> }))`, expecting TS2322/TS2740 `WindowCall`: the protection moves from the call to its use |
+| B. Same, as `@ts-expect-error` | `expressions.ts:123,125,137`, `descriptor-expressions.ts:54` | Directive on a bare call | Same rewrite. `expressions.ts:127` (`maxState`) stays as it is |
+| C. Row operand inside `aggregate` | `negative/expressions/cast.ts:6`, `z-arg-max.ts:15`, `z-arg-min.ts:15`, `z-avg.ts:10`, `z-min.ts:6`, `z-quantile.ts:13`, `z-quantile-exact.ts:13` | TS2345 `AggregateOperand` | Still an error on the line: TS2322 `WindowCall` not assignable to `AggregateProjection` |
+| D. Mixed row and grouped operands | `z-arg-max.ts:18`, `z-arg-min.ts:18`, `z-avg.ts:13`, `z-min.ts:10` | TS2345 on the predicate | Still an error by design; code and message to be recorded from D16. The prototype did not implement this rule and reported no error |
+| E. Message only | `aggregation.ts:18`, `uniq-exact.ts:11` | TS2345 naming `"grouped"` or `AggregateOperand` | TS2345 with the new operand text |
+| F. Message only, `map` now names both modes | `cast.ts:5`, `query.ts:4,6`, `union.ts:9`, `z-arg-max.ts:19`, `z-arg-min.ts:19`, `z-avg.ts:14`, `z-min.ts:11`, `z-quantile.ts:16`, `z-quantile-exact.ts:16` | TS2322/TS2353 naming `"row"` or `Expr<...>` | Same code, naming `"window" \| "row"` |
+| G. `ExprNode` kinds | `ir.ts:55-57` | Exact union of nine kinds | Adds `'Window'`, nothing else |
+
+### D1 to D4 acceptance (PM, 2026-11-06)
+
+**Result: closed, uncommitted, with no blocking gap.** The merge gate in D20 is still pending, and `check:all` was not run as one command. The PM ran everything marked "checked" in a frozen copy of the worktree taken at 11:50 on 2026-11-06. After the runs, the source, tests, types and docs content still matched that copy; only one prose edit to the `spec.md` Aggregate states row came later, and the PM read it.
+
+| Figure | Value | Status |
+|---|---|---|
+| `pnpm test` | 2277 passed, 1 skipped, 129 files | Checked |
+| Compiler integration | 951 of 951, 48 files | Checked |
+| Codegen integration | 8 of 8 | Checked |
+| `check-type-diagnostics` | 526 on 5.5.4, 5.8.3, latest | Checked |
+| `verify:type-corpus` | 216 records, 54 types, 24.8.14.39 | Checked |
+| `verify:expr-surface`, typecheck, format check, build | Exit 0 | Checked |
+| `docs:verify` | Exit 0, including the two line fixes | Checked |
+| `check-type-performance` | Passes unchanged budget: built 2,559,101, source 3,340,785 instantiations | Checked on 5.8.3 only; `--all` is reported |
+| Package verifications | Clean | Reported |
+| Tester's negative controls | Failed tests as required | Reported, not rerun; the PM ran its own below |
+
+**Existing-test audit.** `git diff` touches exactly 4 tracked test files and no snapshot, fixture, script or harness. The hunks are rows 1 to 6 under Decisions, with each row's stated old and new codes. `['If','If']` keeps its old expectation in rows 1, 3, 4 and 5. Unchanged as required: `aggregation.test.ts:68`, `:347`, `:412`, `uniq-exact.test.ts:105`, `aggregates-min-exact.test.ts:175`, `stream.test.ts`, `backend.test.ts`, `decode.test.ts`.
+
+**Criteria against the diff.**
+- **D1.** `emit-naive.ts` moves the check to `rel === root` and adds `checkStateReads`; `resolve.ts` has `State`, `Merge` and `invalid_merge_state`. All 16 new exports exist. The PM's own table, on both emitters: count, plain map, filter, merge, a merge with filter and sort on its alias, state-to-merge, union and join carriers compile; 9 root shapes raise `aggregate_state_selection`; wrong function, non-state, and reads in `orderBy`, `where`, `limitBy`, join `on` and nested `distinct` raise the required codes; a `groupBy` key on a state at the root raises `aggregate_state_selection`, since it is also the result. Positive and negative types are in `test/types/state-merge.ts` and `negative/expressions/state-merge.ts`, including wrong function, merge in `map`, and a missing level. Known-tier `agg.uniqMerge` compiles on both emitters, and `state-merge-agreement.integration.ts` runs it natively.
+- **D2.** `state-merge-agreement.integration.ts` compares server types with descriptors per function and wrapper, as a new file rather than an extension of the catalog test. `state-parametric.test.ts` covers the codegen case.
+- **D3.** Rollup and differential tests cover every listed case by title, through `run` and `stream`. The differential runs 400 cases. Each Worker correction is pinned.
+- **D4.** `query-builder/rollups.md`, `functions/state-merge.md`, `spec.md:575`, `:720` and a Decided row. Docs state the merge-level rule with its Nullable exception, `finalizeAggregation` per row, and raw selection.
+
+**PM's negative controls, on 505 tests in 10 state and aggregate unit files.** Each mutation failed tests:
+
+| Mutation | Failed |
+|---|---|
+| Root check on every node | 168 |
+| Root check not recursive | 60 |
+| No state-read checks | 68 |
+| `Subquery` result unchecked | 1 |
+| `Distinct` over a state allowed | 20 |
+| `UNION DISTINCT` over a state allowed | 3 |
+| Any function merges | 24 |
+| Nullable level unchecked | 28 |
+| Integer-level spelling unchecked | 8 |
+| `count`/`uniq` restricted to base operands | 1 |
+| `LowCardinality` kept in states | 5 |
+| Level 1 spelled `quantile(1)` | 2 |
+| `Unknown` scanner off | 31 |
+| `Map` not walked | 49 |
+| Decoder refuses no nested state | 19 |
+
+**Reproduced by hand on 24.8.14.** A nullable state at another level or none raises code 43, and at its stored level gives 90. A non-nullable state gave 50 at 0.5 and with no level. `LowCardinality` is dropped in arrays, tuples and `SimpleAggregateFunction`. A parameterized level 1 is `quantile(1.)` and a literal one `quantile(1)`. `system.functions` has no combinator names. `uniqMerge` and `uniqExactMerge` read multi-argument and array states. `countMerge` reads a 1-argument state, and a 2-argument `countState` raises code 42. The server itself accepts `avgMerge` over `Decimal`, so that rejection is this library's rule, as documented.
+
+**Limits.**
+- A state in `Dynamic` cannot be caught: its type says nothing about its contents. Documented, and a native test pins it.
+- A deliberately hand-written `col.Unknown` with an embedded comment gets past the scanner: `AggregateFunction/*x*/(sum, UInt64)` does not match (PM checked the pattern). `system.columns` prints one spelling, so generated descriptors are not affected (Tester's native test).
+- `Tuple` containing a state has compile-level evidence only. The server does accept such a column (PM checked), but a root selection is rejected before anything is sent, so a native test would add little.
+- Native tests ran on 24.8 only. 24.3 was checked by hand for `sumState`/`sumMerge` and the `quantileExact` pair, not for every function.
+- Hand-built `Case` over a state is not walked by `stateOperands`, but the emitter rejects every `Case` (`unsupported_expression`), so it is unreachable (PM checked).
+- `totalAggregate` and `safeAggregate` refuse combinators, so `HAVING` key push-down and join rules stay fenced over merges. Correct but conservative; a later optimization.
+
+### D5 to D7 acceptance (PM, 2026-11-06)
+
+**Result: closed, uncommitted, with no blocking gap.** The merge gate in D20 is still pending for the whole track. The PM ran everything marked "checked" in a frozen copy of the worktree, taken at 16:37. Afterwards the worktree's packages, types, docs, scripts, lockfile, `spec.md` and `README.md` still matched that copy.
+
+| Figure | Value | Status |
+|---|---|---|
+| `pnpm install --frozen-lockfile` | Exit 0, with the hand-edited lockfile | Checked |
+| `pnpm check:all`, as one command | Exit 0 | Checked; this closes the Tester's "not verified" items for `check:all` and package consumers |
+| Inside it: `pnpm test` | 2932 passed, 1 skipped, 135 files | Checked |
+| Inside it: compiler integration | 1547 of 1547, 53 files | Checked |
+| Inside it: codegen integration | 8 of 8 | Checked |
+| Inside it: type corpus, core and codegen package verifications, format, typecheck, build | Clean | Checked |
+| `check-type-diagnostics` | 555 on 5.5.4, 5.8.3, latest | Checked |
+| `check-type-performance --all` | Budget unchanged, on 5.8.3, 5.5.4, 7.0.2. Source on 5.8.3: 3,342,574 instantiations | Checked |
+| `pnpm docs:verify` | Exit 0 | Checked |
+| Performance of `run`: 19% slower at 3M rows, 16% less memory | 7.5-7.6 s vs 6.1-6.4 s; 798-825 MB vs 963-989 MB | Reported; the old figure is the Tester's reconstruction |
+
+**Existing-test audit.** Against master, 7 tracked test files changed: the 4 accepted in D1 to D4, and these 3, each exactly as approved. No snapshot, fixture or script changed.
+- `test/types/ir.ts`: one added line, `'Settings'`.
+- `prewhere-adversarial.integration.ts`: two lines, both stronger. `cause.code === '6' || /decode_missing_column/` became `cause.code` equal to `'6'`, and the set of codes is `['6']`.
+- `backend.test.ts`: 3 tests. Each keeps its guard. The ownership test only swaps its mock. The rejection test still requires `cause`, context and one `close`, with the failure now thrown from the row. The decode test still requires `QueryError` and one `close`, and now pins `json` as not called. None was weakened.
+
+**Criteria against the diff.**
+- **D5.** `core/settings.ts` holds the allowlist and validation, read once. `compiler/settings.ts` peels before validation and re-checks hand-built nodes. `validate-structure.ts` raises `invalid_settings_placement` below the root. `TerminalQuery` has only `ir`, `caps`, `toSQL`. Negative types cover every listed method and input. Compiler-owned keys, `from(rollup).settings(...)` at `root`, `columns` and `columnPaths`, and escaping each have a test.
+- **D6.** Read-back, limits and internal settings have native tests by title. Beyond the plan: mid-stream errors, a proxy, `KILL QUERY` and server signals.
+- **D7.** `query-builder/settings.md`, `spec.md` Emission details, Testing, the Decided rows and the Q2 carve-out. Docs list every key, why others are refused, and `readonly`.
+
+**PM's negative controls.** 19 mutations of the source and 1 reorder, run against 676 unit tests in 8 files. Each failed tests except one:
+
+| Mutation | Failed |
+|---|---|
+| `Settings` allowed below the root | 52 |
+| No peel in `emitNaive` | 309 |
+| Settings dropped in `compile` | 140 |
+| User settings dropped from the tail | 175 |
+| User settings after the compiler's | 4 of 612 |
+| Escaper bypassed | 12 |
+| Integer keys take any number | 80 |
+| Bigint range unchecked | 22 |
+| Tiny timeout accepted | 12 |
+| Compiler-owned check off | 11 |
+| Unknown keys accepted | 30 |
+| Compiler re-check off | 241 |
+| Wrapper output unchecked | 14 |
+| Input not validated in the peel | 4 |
+| Set operand accepts `Settings` | 2 |
+| Terminal query live | 1 |
+| `parsedRow` never reads the error | 8 |
+| `parsedRow` takes any bad line as error text | 23 |
+| `run` reads `result.json` again | 19 |
+| `http_write_exception_in_output_format` not sent | 0 unit; 10 of 12 native, in `midstream-errors` and `settings-midstream` |
+
+**PM's own end-to-end run, through the built client, on 24.3.18, 24.8.14 and 26.10.3, both emitters, `run` and `stream`.** `max_result_rows` and `max_result_bytes` raise 396, `max_rows_to_read` 158, `max_bytes_to_read` 307, `max_memory_usage` 241. A query under the limit returns its rows. A real `exception` column holding `Code: 396. fake` stays data. A late `throwIf` keeps code 395 after up to 327,045 rows on `stream`, and `getSetting` reads the set value through a scan and a union. `max_execution_time` raised 159 at 14 s on all three by direct SQL. A code 160 in the PM's first probe was `sleepEachRow`'s own cap, not the limit; the server's estimated-time path was checked and did not raise 160 on that query.
+
+**General client defect, fixed here.** On ClickHouse before 25.11, a server error after output starts arrives as a final `{"exception": ...}` line under HTTP 200, and the client read it as a row: lost code, or a wrong row with a real `exception` column. The fix is `http_write_exception_in_output_format: 0` in `outputSettings`, now compiler-owned, plus `parsedRow`. The committed `prewhere-adversarial` test pinned the old behaviour, so master has this path; no master checkout was run. **This changes behaviour on every read, not only under `settings()`, so it belongs in the release notes.**
+
+**Lockfile warning.** `pnpm install --lockfile-only` in this worktree prunes `apps/playground` and vitest 3.2.7 entries, because that directory is absent. Edit the specifier by hand, as the Worker did. Only the specifier line changed.
+
+**Limits, reported by the Tester and not closed by the PM.**
+- A proxy ending the body cleanly gives short rows with no error, undetectably. Documented.
+- `SIGTERM` and `SIGKILL` have thin samples: 1 or 2 per path, on 24.8 only. `any` has one measurement.
+- The limit sweep on 24.3 and 26.10 was scan and union only, with no naive path. The PM's run adds both emitters on single scans and one aggregate, which is not a sweep.
+- The `priority` ordering claim in the docs is unmeasured.
+- Driver 1.13.0 had a decoding check and a mid-stream limit check, not the full suite. Codegen on a real 1.11 was not run.
+- No real load balancer was tested.
+
+**Minor, not blocking.** `renderSettings` is exported from core and used only by tests.
+
+**Follow-ups, not done here.**
+- The same validate-then-read Proxy flaw in a forged `Limit` node (`LIMIT 1 UNION ALL SELECT 1`), which predates this work.
+- The cause of the 26.10 gzip `ECONNRESET`.
+- The cause of `Z_DATA_ERROR`.
+- The 19% `run` cost, whose cause is unknown.
+
+**D8 to D11 re-read.** No owner decision is needed before the ASOF Worker starts. Each correction fits a settled precedent:
+- Non-repeatable ties follow `LIMIT BY` without a total order (Track C) and the non-deterministic functions in `settings.md`: unspecified and documented, with unique keys in the differential. The contract's wording is unchanged by this. The owner may want to know that a repeat of one ASOF query can return different rows when right keys tie.
+- NaN follows `min`, `max` and `argMin` (Track A): documented and pinned.
+- Code 386 and code 48 follow engines (Track C): the server's error surfaces as `QueryError`, with no compiler check. `invalid_asof_type` stays for types that cannot be ordered at all.
+- The builder shape, IR and rule fences in D8 and D9 are unaffected, so D8's criteria do not change.
+
 ## Track A: `min`, `minIf`, `argMin`, `argMinIf`, `quantileExact`, `quantileExactIf` (2026-11-05)
 
 **Status: complete on branch `agg-min-exact`, uncommitted. The final gate at merge is pending.**

@@ -1,4 +1,5 @@
 import type { CHType } from './ch-type.js';
+import type { QuerySettings } from './settings.js';
 import type { TableDef } from './table.js';
 import type { NodeId } from './types.js';
 
@@ -165,6 +166,10 @@ export type Join = Node & {
   readonly scope?: NodeId;
   readonly inputs: readonly (readonly [string, Rel])[];
   readonly on: readonly ExprNode[];
+  /** Absent means ALL. With 'asof', `on` is the equalities followed by exactly one inequality, in
+   * that order: every walker sees it as one more expression, and only the keyword and the rewrite
+   * fences read this field. */
+  readonly strictness?: 'asof';
 };
 
 export type ArrayJoin = RelBase & { readonly columns: FlatColumns } & {
@@ -213,6 +218,13 @@ export type Union = RelBase & {
 
 export type Materialize = RelBase & { readonly kind: 'Materialize'; readonly input: Rel };
 
+/** Terminal `SETTINGS` on the whole query. Valid only as the root: `compile` and `emitNaive` remove it first. */
+export type Settings = RelBase & {
+  readonly kind: 'Settings';
+  readonly input: Rel;
+  readonly settings: QuerySettings;
+};
+
 export type Rel =
   | Scan
   | RawRel
@@ -227,7 +239,8 @@ export type Rel =
   | Limit
   | Distinct
   | Union
-  | Materialize;
+  | Materialize
+  | Settings;
 
 type WithoutId<T> = T extends Node ? Omit<T, 'id'> : never;
 

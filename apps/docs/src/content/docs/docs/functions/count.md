@@ -7,7 +7,7 @@ sidebar:
 
 `count()` counts all rows in each group, including rows whose columns contain NULL. It takes no column argument and returns ClickHouse `UInt64`, decoded as `bigint`. An ungrouped count over empty input returns `0n`.
 
-The example counts orders per customer. Although core exports state helpers, the compiler does not support `State` or `Merge` execution.
+The example counts orders per customer. Rollups use [`countState` and `countMerge`](/docs/functions/state-merge/).
 
 ## Example
 

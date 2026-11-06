@@ -1628,14 +1628,14 @@ describe('a failure after rows have streamed', () => {
           expect(error, `${name} ${mode}`).toBeInstanceOf(QueryError);
           expect(rows, `${name} ${mode}`).toBeGreaterThan(0);
           const cause = (error as QueryError).cause as { code?: string; message: string };
-          expect(cause.code === '6' || /decode_missing_column/.test(cause.message)).toBe(true);
+          expect(cause.code).toBe('6');
           seen.set(`${name} ${mode}`, cause.code ?? cause.message);
         } finally {
           await backend.close();
         }
       }
 
-    expect(new Set(seen.values())).toEqual(new Set(['decode_missing_column: id']));
+    expect(new Set(seen.values())).toEqual(new Set(['6']));
   }, 60000);
 });
 

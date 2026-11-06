@@ -49,6 +49,6 @@
   "dependencies": {
     "@typedhouse/compiler": "workspace:*",
     "@typedhouse/core": "workspace:*",
-    "@clickhouse/client": "^1.11.0"
+    "@clickhouse/client": "^1.13.0"
   }
 }

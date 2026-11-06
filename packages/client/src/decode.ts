@@ -1,4 +1,4 @@
-import { print, type CHType, type FlatColumns } from '@typedhouse/core';
+import { containsAggregateState, print, type CHType, type FlatColumns } from '@typedhouse/core';
 
 export function decoder(type: CHType): (value: unknown) => unknown {
   const invalid = (value: unknown): never => {
@@ -107,6 +107,9 @@ export function decoder(type: CHType): (value: unknown) => unknown {
 
   if (type.kind === 'AggregateFunction' || (type.kind === 'scalar' && type.name === 'Nothing'))
     throw new Error(`decode_unsupported: ${print(type)}`);
+
+  // The families below are not walked, so a state nested in a Map or Variant is refused here.
+  if (containsAggregateState(type)) throw new Error(`decode_unsupported: ${print(type)}`);
 
   // Trust ClickHouse and the driver's JSON parser for all other families. In
   // particular, Maps retain string keys and wire values, without walking them.

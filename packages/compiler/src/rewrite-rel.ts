@@ -308,6 +308,16 @@ function fallible(node: Rel, filters: boolean): boolean {
   return result;
 }
 
+/** Every Join rebuilt by a rule carries this: losing it silently turns ASOF into an ordinary join. */
+const strictnessOf = (join: Extract<Rel, { kind: 'Join' }>) =>
+  join.strictness === undefined ? {} : { strictness: join.strictness };
+
+const asofColumnInequality = (join: Extract<Rel, { kind: 'Join' }>, e: ExprNode, i: number) =>
+  join.strictness !== undefined &&
+  i === join.on.length - 1 &&
+  e.kind === 'Call' &&
+  e.args.every(a => a.kind === 'ColumnRef');
+
 /** Null-extended input occurrences of a Join kind: what LeftToInner strictly decreases. */
 const extendedSides = (node: Extract<Rel, { kind: 'Join' }>) =>
   node.inputs.filter((_, i) => nullExtended(node.joinKind, i, node.inputs.length)).length;
@@ -630,6 +640,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
 
     if (
       child.kind === 'Join' &&
+      child.strictness === undefined &&
       (child.joinKind === 'left' || child.joinKind === 'right' || child.joinKind === 'full') &&
       !exposed.has(node) &&
       !fallibleInput
@@ -668,9 +679,12 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
     // push-down copies such a conjunct across ON equalities into the other input, where a guard
     // this rule moved into one input no longer precedes it (CANNOT_PARSE_TEXT where naive, whose
     // guard is pushed together with it, returns rows). This held for inner joins before 4b too.
+    // ASOF: the inequality between two bare columns can raise only at plan time, on either form, so
+    // it does not fence the rule whatever its type (a temporal key is the usual one). Only the left
+    // input is admitted, also for ASOF INNER: filtering the right input changes which row matches.
     if (
       child.kind === 'Join' &&
-      child.on.every(safePredicate) &&
+      child.on.every((e, i) => safePredicate(e) || asofColumnInequality(child, e, i)) &&
       !exposed.has(node) &&
       !fallibleInput
     ) {
@@ -683,6 +697,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
           .filter(
             ([alias, input], i) =>
               !nullExtended(child.joinKind, i, child.inputs.length) &&
+              (child.strictness === undefined || i === 0) &&
               (child.output.inputs[i]?.[1] === input.output ||
                 JSON.stringify(child.output.inputs[i]?.[1]) === own(input)),
           )
@@ -734,6 +749,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
         on: child.on,
         scope: child.scope ?? child.id,
         output: child.output,
+        ...strictnessOf(child),
       });
 
       hits.PushFilterJoin++;
@@ -892,6 +908,7 @@ export function rewriteRel(root: Rel, maxPasses = 50): RewriteResult {
             scope: node.scope ?? node.id,
             joinKind: node.joinKind,
             output: node.output,
+            ...strictnessOf(node),
           });
       } else if (node.kind === 'Union') {
         const inputs = node.inputs.map(visit);

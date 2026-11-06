@@ -70,7 +70,7 @@ function label(rel: Rel): string {
     case 'Sort':
       return `Sort ${rel.keys.map(key => `${formatExpression(key.expr)} ${key.dir.toUpperCase()}${key.nulls ? ` NULLS ${key.nulls.toUpperCase()}` : ''}`).join(', ')}`;
     case 'Join':
-      return `${rel.joinKind} Join`;
+      return `${rel.strictness ? `${rel.strictness} ` : ''}${rel.joinKind} Join`;
     case 'Union':
       return rel.all ? 'Union ALL' : 'Union DISTINCT';
     case 'ArrayJoin':
@@ -207,6 +207,7 @@ export function toDataflowGraph(root: Rel): DataflowGraph {
       case 'Limit':
       case 'Distinct':
       case 'Materialize':
+      case 'Settings':
         break;
       case 'RawRel':
         rel.args.forEach((e, i) => expression(e, ['args', i]));

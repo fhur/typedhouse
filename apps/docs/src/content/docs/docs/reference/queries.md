@@ -33,6 +33,10 @@ The [Query Builder section](/docs/query-builder/overview/) documents each implem
 
 [final](/docs/query-builder/final/), [sample](/docs/query-builder/sample/) and [prewhere](/docs/query-builder/prewhere/) — apply FINAL, SAMPLE and an explicit PREWHERE before general query operations.
 
+## settings
+
+[settings](/docs/query-builder/settings/) — end a query with a typed allowlist of resource limits and a query comment.
+
 ## Combining and expanding rows
 
 - [join / crossJoin](/docs/query-builder/joins/)

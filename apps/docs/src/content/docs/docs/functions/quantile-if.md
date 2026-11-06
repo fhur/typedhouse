@@ -11,7 +11,7 @@ Integer and float inputs produce `Float64` (`number`); nullable values retain nu
 
 Use [`quantileExactIf`](/docs/functions/quantile-exact-if/) for an exact result. `quantileIf` interpolates and always returns `Float64`; `quantileExactIf` returns an input element in the input type and holds all qualifying values in memory. Over `[1, 2, 3, 4]`, level `0.5` gives `2.5` from `quantileIf` and `3` from `quantileExactIf`.
 
-Each application creates a fresh level parameter; reuse the resulting expression to share it. `State`/`Merge` execution is unsupported.
+Each application creates a fresh level parameter; reuse the resulting expression to share it. Stacked combinators such as `quantileStateIf` are not available.
 
 ## Example
 

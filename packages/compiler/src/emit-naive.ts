@@ -1,4 +1,5 @@
 import {
+  containsAggregateState,
   isNullable,
   print,
   scalarDescriptor,
@@ -17,6 +18,7 @@ import { parameterExpression, parameterWireType, serializeParameter } from './pa
 import { resolveAggregate, resolveCall, resolveCast } from './resolve.js';
 import { resolveRaw } from './resolve-raw.js';
 
+import { peelSettings } from './settings.js';
 import { validateStructure } from './validate-structure.js';
 import { references, totalExpression, totalPredicate } from './rewrite-expressions.js';
 import { ValidationError } from './validation-error.js';
@@ -41,13 +43,48 @@ function base(t: CHType): CHType {
   return t.kind === 'Nullable' || t.kind === 'LowCardinality' ? base(t.inner) : t;
 }
 
-const joinKeyword = {
+/** Inequality operands the server's ASOF accepts, measured on 24.3, 24.8 and 26.10. Everything else
+ * raises code 169 alone, and 386 or 43 against another type; a LowCardinality on both sides raises 169. */
+function asofOperand(t: CHType): { readonly supported: boolean; readonly lowCardinality: boolean } {
+  switch (t.kind) {
+    case 'Nullable':
+    case 'SimpleAggregateFunction':
+      return asofOperand(t.inner);
+    case 'LowCardinality':
+      return { ...asofOperand(t.inner), lowCardinality: true };
+    case 'DateTime':
+    case 'DateTime64':
+    case 'Decimal':
+    case 'Enum':
+      return { supported: true, lowCardinality: false };
+    case 'scalar':
+      return {
+        supported: /^(U?Int(8|16|32|64|128|256)|Float(32|64)|Bool|Date|Date32|DateTime)$/.test(
+          t.name,
+        ),
+        lowCardinality: false,
+      };
+    default:
+      return { supported: false, lowCardinality: false };
+  }
+}
+
+const isState = (t: CHType | null | undefined): boolean => !!t && containsAggregateState(t);
+
+const joinKeywords = {
   inner: 'INNER ALL JOIN',
   left: 'LEFT ALL JOIN',
   right: 'RIGHT ALL JOIN',
   full: 'FULL ALL JOIN',
   cross: 'CROSS JOIN',
 } as const;
+
+const joinKeyword = (join: Extract<Rel, { kind: 'Join' }>): string =>
+  join.strictness === 'asof'
+    ? join.joinKind === 'left'
+      ? 'ASOF LEFT JOIN'
+      : 'ASOF INNER JOIN'
+    : joinKeywords[join.joinKind];
 
 /** Kinds whose null-extended input set contains this kind's: LeftToInner keeps the Join's
  * output when it stops extending an input, so an inner Join may carry a left/right/full
@@ -104,7 +141,8 @@ function joinRead(
 
 /** Permanent one-subquery-per-node reference backend. Unsupported IR is rejected. */
 export function emitNaive(root: Rel): CompiledQuery {
-  return emitQuery(root);
+  const { input, settings } = peelSettings(root);
+  return emitQuery(input, undefined, settings);
 }
 
 /** Transitional validation adapter: reuse the reference backend's complete checks.
@@ -114,11 +152,11 @@ export function validateRel(root: Rel): CompiledQuery {
   return emitQuery(root);
 }
 
-export function emitPlanned(plan: SqlPlan): CompiledQuery {
-  return emitQuery(plan.root, plan);
+export function emitPlanned(plan: SqlPlan, settings: readonly string[] = []): CompiledQuery {
+  return emitQuery(plan.root, plan, settings);
 }
 
-function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
+function emitQuery(root: Rel, plan?: SqlPlan, userSettings: readonly string[] = []): CompiledQuery {
   // Planned emission follows validateRel; preflight once per public compilation.
   if (!plan) validateStructure(root);
   const rendered = new Map<Rel, string>();
@@ -481,6 +519,77 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
     }
   }
 
+  /** The server compares binary state contents where the row model has no value to compare (`WHERE total = total`,
+   * `ORDER BY total`, `uniqExact(total)`), so a read is rejected unless it finalizes: a `-Merge`, whose function
+   * `resolveAggregate` matches, or a known-tier or trusted call, whose result is the caller's declaration. */
+  function stateOperands(e: ExprNode, path: string, top = false): void {
+    if (!e || typeof e !== 'object') return;
+
+    if (e.kind === 'Subquery') {
+      if (outputLeaves(e.rel.output).some(l => isState(l.type)))
+        fail('aggregate_state_selection', e, `${path}.rel`);
+
+      return;
+    }
+
+    if (!top && isState(e.type)) fail('aggregate_state_operand', e, path);
+
+    const finalizes =
+      e.kind === 'Raw' ||
+      ((e.kind === 'Call' || e.kind === 'Agg') && e.fn.origin === 'known') ||
+      (e.kind === 'Agg' && e.combinators.length === 1 && e.combinators[0] === 'Merge');
+
+    const operands = e.kind === 'Cast' ? [e.expr] : 'args' in e ? e.args : [];
+
+    operands.forEach((operand, i) => {
+      // Only a column read directly finalizes: `sumMerge(total.ifNull(total))` still reads the bytes.
+      if (!finalizes || operand.kind !== 'ColumnRef')
+        stateOperands(operand, `${path}.${e.kind === 'Cast' ? 'expr' : `args[${i}]`}`);
+    });
+  }
+
+  function checkStateReads(rel: Rel, leaves: readonly { type: CHType }[], path: string): void {
+    switch (rel.kind) {
+      case 'Project':
+        // A bare column carries the state on. An Agg here is a placement error, reported by its renderer.
+        for (const [k, e] of Object.entries(rel.exprs ?? {}))
+          if (e?.kind !== 'ColumnRef' && e?.kind !== 'Agg') stateOperands(e, `${path}.exprs.${k}`);
+
+        break;
+      case 'Filter':
+      case 'Prewhere':
+        stateOperands(rel.pred, `${path}.pred`);
+        break;
+      case 'Sort':
+        rel.keys?.forEach((k, i) => stateOperands(k?.expr, `${path}.keys[${i}].expr`));
+        break;
+      case 'LimitBy':
+        rel.keys?.forEach((k, i) => stateOperands(k, `${path}.keys[${i}]`));
+        break;
+      case 'ArrayJoin':
+        stateOperands(rel.expr, `${path}.expr`);
+        break;
+      case 'Join':
+        rel.on?.forEach((e, i) => stateOperands(e, `${path}.on[${i}]`));
+        break;
+      case 'Aggregate':
+        for (const [k, e] of Object.entries(rel.keys ?? {})) stateOperands(e, `${path}.keys.${k}`);
+
+        for (const [k, e] of Object.entries(rel.aggs ?? {}))
+          stateOperands(e, `${path}.aggs.${k}`, true);
+
+        break;
+      case 'Distinct':
+        if (leaves.some(l => isState(l.type))) fail('aggregate_state_operand', rel, path);
+        break;
+      case 'Union':
+        if (rel.all === false && leaves.some(l => isState(l.type)))
+          fail('aggregate_state_operand', rel, path);
+
+        break;
+    }
+  }
+
   const scanHints = (scan: Extract<Rel, { kind: 'Scan' }>) =>
     `${scan.final ? ' FINAL' : ''}${scan.sample === undefined ? '' : ` SAMPLE ${scan.sample}`}`;
 
@@ -547,7 +656,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
             ? ` ON ${conditions[i]!.map((e, j) => expression(e, join, `${path}.on[${j}]`, undefined, false, 'row', '')).join(' AND ')}`
             : '';
 
-        return `${i ? `${separator}${joinKeyword[join.joinKind]} ` : ''}${source} AS ${joinAlias(join, alias)}${hints}${on}`;
+        return `${i ? `${separator}${joinKeyword(join)} ` : ''}${source} AS ${joinAlias(join, alias)}${hints}${on}`;
       })
       .join('');
   }
@@ -837,9 +946,11 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
       )
         return fail('invalid_output', rel, path);
 
-      if (order.some(k => base(columns[k]!).kind === 'AggregateFunction'))
+      // Only the query result is decoded: a raw state there is binary in a JSON string, and invalid UTF-8 is lost.
+      if (rel === root && order.some(k => isState(columns[k]!)))
         return fail('aggregate_state_selection', rel, path);
 
+      checkStateReads(rel, leaves, path);
       nodes[path] = rel;
       const list = physicalOrder.map(quoteIdentifier).join(', ');
       if (plan?.blocks.has(rel)) return renderBlock(rel, physicalOrder, path);
@@ -903,9 +1014,35 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
         }
 
         case 'Join': {
-          if (!Object.hasOwn(joinKeyword, rel.joinKind)) return fail('unsupported_join', rel, path);
+          if (!Object.hasOwn(joinKeywords, rel.joinKind))
+            return fail('unsupported_join', rel, path);
+
           const outer = rel.joinKind !== 'inner' && rel.joinKind !== 'cross';
           if (!Array.isArray(rel.on)) return fail('invalid_join_condition', rel, `${path}.on`);
+
+          const strictness: unknown = rel.strictness;
+          const asof = strictness !== undefined;
+
+          if (asof) {
+            if (strictness !== 'asof')
+              return fail('invalid_asof_condition', rel, `${path}.strictness`, 'expected asof');
+
+            if ((rel.joinKind !== 'inner' && rel.joinKind !== 'left') || rel.inputs.length !== 2)
+              return fail(
+                'invalid_asof_condition',
+                rel,
+                path,
+                'ASOF is INNER or LEFT, over exactly two inputs',
+              );
+
+            if (rel.on.length < 2)
+              return fail(
+                'invalid_asof_condition',
+                rel,
+                `${path}.on`,
+                'ASOF needs at least one equality and the inequality',
+              );
+          }
 
           if (rel.joinKind === 'cross' && rel.on.length)
             return fail(
@@ -922,8 +1059,9 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           )
             return fail('join_input_count', rel, `${path}.inputs`);
 
+          // No rule rewrites an ASOF kind, so its output is its own kind's.
           if (
-            !outputKinds[rel.joinKind].some(
+            !(asof ? [rel.joinKind] : outputKinds[rel.joinKind]).some(
               kind => JSON.stringify(joinOutput(kind, rel.inputs)) === JSON.stringify(rel.output),
             )
           )
@@ -945,7 +1083,76 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
               return new Set(e.args.flatMap((a, i) => [...sides(a, `${p}.args[${i}]`)]));
 
             if (e.kind === 'Param') return new Set();
+
+            if (asof && e.kind === 'Literal') return new Set();
+            if (asof && e.kind === 'Cast') return sides(e.expr, `${p}.expr`);
+
+            if (asof && e.kind === 'Raw')
+              return new Set(e.args.flatMap((a, i) => [...sides(a, `${p}.args[${i}]`)]));
+
             return fail('join_condition_arity', e, p);
+          }
+
+          if (asof) {
+            const at = rel.on.length - 1;
+            const last: ExprNode = rel.on[at]!;
+            const p = `${path}.on[${at}]`;
+
+            if (
+              last.kind !== 'Call' ||
+              last.fn.origin !== 'typed' ||
+              !['ge', 'gt', 'le', 'lt'].includes(last.fn.name)
+            )
+              return fail('invalid_asof_condition', last, p, 'the last element is the inequality');
+
+            const read = (a: ExprNode | undefined, i: number): readonly number[] => {
+              try {
+                return a ? [...sides(a, `${p}.args[${i}]`)] : [];
+              } catch (error) {
+                // A form `sides` cannot follow (Case, Subquery) gives this condition's own code.
+                if (error instanceof ValidationError && error.code === 'join_condition_arity')
+                  return [];
+
+                throw error;
+              }
+            };
+
+            const left = read(last.args[0], 0),
+              right = read(last.args[1], 1);
+
+            if (
+              last.args.length !== 2 ||
+              left.length !== 1 ||
+              right.length !== 1 ||
+              left[0] === right[0]
+            )
+              return fail(
+                'invalid_asof_condition',
+                last,
+                p,
+                'the inequality reads one input on each side',
+              );
+
+            let types: readonly CHType[];
+
+            try {
+              types = last.args.map(a => resolvedType(a));
+            } catch (error) {
+              return fail(error instanceof Error ? error.message : 'invalid_call', last, p);
+            }
+
+            const operands = types.map(asofOperand);
+
+            if (!operands.every(o => o.supported))
+              return fail('invalid_asof_type', last, p, types.map(print).join(', '));
+
+            if (operands.every(o => o.lowCardinality))
+              return fail(
+                'invalid_asof_type',
+                last,
+                p,
+                'LowCardinality on both sides of the inequality',
+              );
           }
 
           function conjuncts(e: ExprNode, p: string): { e: ExprNode; path: string }[] {
@@ -962,10 +1169,15 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
             return e.args.flatMap((child, i) => conjuncts(child, `${p}.args[${i}]`));
           }
 
-          for (const { e, path: p } of rel.on.flatMap((e, i) => conjuncts(e, `${path}.on[${i}]`))) {
+          // ASOF elements are never split or moved: the builder wrote them as they stay.
+          const elements: readonly { e: ExprNode; path: string }[] = asof
+            ? rel.on.slice(0, -1).map((e, i) => ({ e, path: `${path}.on[${i}]` }))
+            : rel.on.flatMap((e, i) => conjuncts(e, `${path}.on[${i}]`));
+
+          for (const { e, path: p } of elements) {
             if (e.kind !== 'Call' || e.fn.origin !== 'typed' || e.fn.name !== 'eq') {
               // An outer join's ON only decides null extension: a residual cannot move above it.
-              if (outer) return fail('join_condition_not_equi', e, p);
+              if (outer || asof) return fail('join_condition_not_equi', e, p);
               const type = e.type && base(e.type);
 
               if (!type || type.kind !== 'scalar' || type.name !== 'Bool')
@@ -975,7 +1187,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
               continue;
             }
 
-            if (e.args.length !== 2 || (outer && e.args.some(a => a.kind !== 'ColumnRef')))
+            if (e.args.length !== 2 || (outer && !asof && e.args.some(a => a.kind !== 'ColumnRef')))
               return fail('join_condition_arity', e, p);
 
             const left = [...sides(e.args[0]!, `${p}.args[0]`)],
@@ -986,6 +1198,9 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
 
             clauses[Math.max(left[0]!, right[0]!)]!.push({ e, path: p });
           }
+
+          if (asof)
+            clauses[1]!.push({ e: rel.on.at(-1)!, path: `${path}.on[${rel.on.length - 1}]` });
 
           for (let i = 1; i < clauses.length; i++)
             if (rel.joinKind !== 'cross' && !clauses[i]!.length)
@@ -1011,7 +1226,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
           let source = '';
 
           for (const [i, [alias, child]] of rel.inputs.entries()) {
-            source += `${i ? ` ${joinKeyword[rel.joinKind]} ` : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${joinAlias(rel, alias)}`;
+            source += `${i ? ` ${joinKeyword(rel)} ` : ''}(${emit(child, `${path}.inputs[${i}]`)}) AS ${joinAlias(rel, alias)}`;
 
             if (i && rel.joinKind !== 'cross')
               source += ` ON ${clauses[i]!.map(c => expression(c.e, rel, c.path, undefined, false, 'row', '')).join(' AND ')}`;
@@ -1348,6 +1563,7 @@ function emitQuery(root: Rel, plan?: SqlPlan): CompiledQuery {
   const body = `${definitions.length ? `WITH ${definitions.join(', ')}${plan?.blocks.get(root)?.source.kind === 'join' ? '\n' : ' '}` : ''}${emit(root, 'root')}`;
 
   const settings = [
+    ...userSettings,
     ...(weekBucketing ? ['enable_extended_results_for_datetime_functions = 1'] : []),
     // Nullable membership's declared result requires the server's default NULL policy.
     ...(dateMembership ? ['transform_null_in = 0'] : []),

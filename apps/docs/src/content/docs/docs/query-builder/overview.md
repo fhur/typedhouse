@@ -25,6 +25,7 @@ Each concept below has a standalone code example and the **final SQL and paramet
 12. [cte](/docs/query-builder/cte-hints/)
 13. [in / notIn](/docs/query-builder/set-subqueries/)
 14. [scalar](/docs/query-builder/scalar-subqueries/)
+15. [settings](/docs/query-builder/settings/)
 
 ## Composition and execution
 

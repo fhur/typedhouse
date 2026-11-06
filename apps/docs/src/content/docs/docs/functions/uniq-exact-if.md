@@ -7,7 +7,7 @@ sidebar:
 
 `uniqExactIf(value, predicate)` counts distinct non-NULL strings exactly, considering only rows whose Bool predicate is true. False and NULL predicates exclude rows. The result is non-null `UInt64` (`bigint`), with `0n` when no qualifying non-NULL values remain.
 
-The current typed surface accepts only `String` or `Nullable(String)` values and `Bool` or `Nullable(Bool)` predicates, not LowCardinality wrappers or numeric distinct-count operands. Memory usage grows with distinct cardinality. Distinct `State`/`Merge` execution is not exposed.
+The current typed surface accepts only `String` or `Nullable(String)` values and `Bool` or `Nullable(Bool)` predicates, not LowCardinality wrappers or numeric distinct-count operands. Memory usage grows with distinct cardinality. Stacked combinators such as `uniqExactStateIf` are not available.
 
 ## Example
 

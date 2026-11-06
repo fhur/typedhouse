@@ -11,7 +11,7 @@ Integer and float operands return `Float64` (`number`); NULL values are skipped 
 
 Use [`quantileExact`](/docs/functions/quantile-exact/) for an exact result. `quantile` interpolates and always returns `Float64`; `quantileExact` returns an input element in the input type and holds all values in memory. Over `[1, 2, 3, 4]`, level `0.5` gives `2.5` from `quantile` and `3` from `quantileExact`.
 
-Each application creates a fresh level parameter; reusing the resulting expression shares that parameter. `State`/`Merge` execution is unsupported.
+Each application creates a fresh level parameter; reusing the resulting expression shares that parameter. Rollups use [`quantileState` and `quantileMerge`](/docs/functions/state-merge/).
 
 ## Example
 

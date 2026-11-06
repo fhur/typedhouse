@@ -1,6 +1,6 @@
 ---
-title: join / outer joins / crossJoin
-description: Combine named inputs with an inner ALL join, a LEFT, RIGHT or FULL ALL join, or a Cartesian product.
+title: join / outer joins / crossJoin / asofJoin
+description: Combine named inputs with an inner ALL join, a LEFT, RIGHT or FULL ALL join, a Cartesian product, or an ASOF join.
 sidebar:
   order: 8
 ---
@@ -191,3 +191,136 @@ The null-extended inputs (the second for `leftJoin`, the first for `rightJoin`, 
 The compiler appends `SETTINGS join_use_nulls = 1` (with a trailing comment) whenever any outer join is present, including one nested in a subquery. This is the one server default it changes. Queries with only inner and cross joins never carry it. The setting is query-global and has no effect on inner joins.
 
 An outer join's `.on` takes only equalities between one column of each input. A conjunct that is not an `eq` (`lt`, `or`, `startsWith`, …) throws `join_condition_not_equi` when `.on` runs, because it would decide which rows are null-extended rather than which rows survive. An inner join moves such conditions above the join as a filter instead. An `eq` that passes the builder but is not a column-to-column equality across the two inputs fails later, at `compile`/`toSQL()`, with `join_condition_arity`. That covers a computed operand (`r.a.id.plus(1).eq(r.b.id)`), both columns from the same input, a constant (`r.a.id.eq(1)`), and an empty array of conditions. A `where` after an outer join filters the joined rows, `NULL`s included, so `where((r) => r.plan.seats.gt(0))` also drops unmatched accounts. The optimizer does not push filters into or below an outer join.
+
+## ASOF joins
+
+`asofJoin` and `asofLeftJoin` match each left row with the closest right row: the equalities pick the candidates, and one inequality picks the closest of them. They are binary, with one aliased input per argument, as for `leftJoin`. The row keeps the nested shape. `.on` takes the equalities and returns a value whose only method is `.asof`, so nothing can run until the inequality is given. `.on` needs at least one equality, and `.asof` takes exactly one `ge`, `gt`, `le` or `lt`, with one input on each side, in either order.
+
+<details>
+<summary>Setup: imports and table definitions</summary>
+
+```ts
+import {
+  asofLeftJoin,
+  col,
+  from,
+  table,
+} from '@typedhouse/core';
+import { compile } from '@typedhouse/compiler';
+
+const trades = table(
+  'trades',
+  {
+    id: col.UInt32,
+    symbol: col.String,
+    ts: col.DateTime('UTC'),
+  },
+  {
+    engine: 'MergeTree',
+    sortingKey: ['id'],
+    partitionKey: [],
+  },
+);
+const quotes = table(
+  'quotes',
+  {
+    symbol: col.String,
+    ts: col.DateTime('UTC'),
+    bid: col.Float64,
+  },
+  {
+    engine: 'MergeTree',
+    sortingKey: ['symbol', 'ts'],
+    partitionKey: [],
+  },
+);
+```
+
+</details>
+
+```ts
+const query = asofLeftJoin(
+  { trade: from(trades) },
+  { quote: from(quotes) },
+)
+  .on((r) => r.trade.symbol.eq(r.quote.symbol))
+  .asof((r) => r.trade.ts.ge(r.quote.ts))
+  .map((r) => ({
+    id: r.trade.id,
+    bid: r.quote.bid,
+  }));
+
+export default compile(query.ir);
+```
+
+<!-- generated-sql:start -->
+
+Final SQL:
+
+```sql
+SELECT
+  `trade`.`id` AS `id`,
+  `quote`.`bid` AS `bid`
+FROM
+  `trades` AS `trade` ASOF
+  LEFT JOIN `quotes` AS `quote` ON `trade`.`symbol` = `quote`.`symbol`
+  AND `trade`.`ts` >= `quote`.`ts`
+SETTINGS
+  join_use_nulls = 1 /* join_use_nulls = 1: unmatched outer-join columns are NULL, not type defaults */
+```
+
+Parameters:
+
+```json
+{}
+```
+
+<!-- generated-sql:end -->
+
+`asofLeftJoin` keeps a left row with no match, with the same null extension as `leftJoin`, and appends `join_use_nulls = 1`: here `bid` is `number | null`. A `NULL` in an equality or in the inequality, on either side, never matches. Without `join_use_nulls = 1` such a row carries type defaults, which is why the setting is always present.
+
+Both `.on` and `.asof` accept computed operands and parameters, for example `r.t.id.plus(5).ge(r.q.id.plus(1))`. Each operand must read exactly one input, and a condition on one input alone is refused (`join_condition_arity` in `.on`, `invalid_asof_condition` in `.asof`). A date or time offset has no typed method; write it with a SQL snippet in the operand, such as ``sql`${r.t.ts} - ${5}`.as(col.DateTime('UTC'))``. The builder has no way to express a single-input condition in `ON`, because ClickHouse treats it as a filter before matching, which is neither a `where` above the join nor one on the input you might have meant.
+
+### Filtering the right input changes the match
+
+A `where` on the right input, written after the join, keeps a join that already picked its row. Filtering the input first changes which row gets picked. The compiler never moves a right-side `where` below an ASOF join, also on `asofJoin`, and never turns `asofLeftJoin` into an inner join. A left-side `where` does move into its input, because it gives the same rows.
+
+With these rows:
+
+| `trades.id` | `symbol` | `ts`       |     | `quotes.symbol` | `ts`       | `flag` | `v` |
+| ----------- | -------- | ---------- | --- | --------------- | ---------- | ------ | --- |
+| 1           | A        | `00:00:10` |     | A               | `00:00:05` | 1      | 10  |
+| 2           | A        | `00:00:30` |     | A               | `00:00:20` | 0      | 20  |
+
+Trade 2 matches the quote at `00:00:20`, whose `flag` is 0. Measured on ClickHouse 24.3, 24.8 and 26.10:
+
+| Form                                                                        | Rows (`id`, `v`)     |
+| --------------------------------------------------------------------------- | -------------------- |
+| `asofJoin({ t }, { q }).on(…).asof(…).where((r) => r.q.flag.eq(1))`         | (1, 10)              |
+| `asofJoin({ t }, { q: from(quotes).where((r) => r.flag.eq(1)) }).on(…).asof(…)` | (1, 10), (2, 10) |
+
+Decide which one you mean, and write that one.
+
+### Ties are not repeatable
+
+Which row wins among right rows tied on the equalities and the inequality value is unspecified. In a probe over 3 parts with 3 tied rows per key and 200 left rows, the same SQL run twice returned different rows on 24.3, 24.8 and 26.10. Changing the columns of the right input, its nesting, or [`settings({ max_threads })`](/docs/query-builder/settings/) changed them too. The row count did not change. `max_threads: 1` gave the same rows on all three versions in that probe, once each, which is not evidence that it is repeatable. Make the key unique if the choice matters. The compiler also prunes columns of the right input, so your query and the same query written by hand can differ here.
+
+### Inequality types
+
+These work on 24.3, 24.8 and 26.10, also `Nullable`, and `LowCardinality` on one side only: `Int*`, `UInt*`, `Float*`, `Decimal`, `Date`, `Date32`, `DateTime`, `DateTime64`, `Bool` and `Enum`.
+
+`compile` refuses the rest with `invalid_asof_type`, and those fail on the server too: `String`, `FixedString`, `UUID`, `IPv4`, `IPv6`, `Array`, `Tuple`, `Map`, and `LowCardinality` on both sides raise code 169 against their own type. The check reads the operand's declared type. A function over a `LowCardinality` column can stay `LowCardinality` on the server without saying so here (`toUInt8(lc)` did), and then the code 169 surfaces as a `QueryError`.
+
+Mixed types are partial. `Date`, `Date32`, `DateTime` across zones and `DateTime64` across precisions compared correctly, as did `Decimal` across scales, `Int32` against `UInt8`, `Decimal` against `UInt32` and `Float32` against `Float64`. `UInt32` against `Float64` matched on the rows tried. These compile, and raise code 386 as a `QueryError`, on the optimized and the naive form alike: `UInt64` against `Int64`, `UInt64` against `Float64`, `Decimal` against `Float64`. A computed operand can reach this too: `r.t.id.plus(1).ge(r.q.id.minus(1))` compares `UInt64` with `Int64`. A date or time against a number does not compile, with `incompatible_operands`, as anywhere else; the server raises 386, or 43 for `Date`.
+
+`NaN` does not behave as a comparison. `1 >= NaN` and `NaN >= 1` each matched a row on all three versions. It is not filtered out for you, as with `min` and `max`.
+
+### Join algorithms
+
+`join_algorithm` is not in the [`settings`](/docs/query-builder/settings/) allowlist, but a client or a profile can set it. A value ASOF does not support surfaces as a `QueryError` with code 48, with no compiler check:
+
+| `join_algorithm`                        | 24.3     | 24.8    | 26.10   |
+| --------------------------------------- | -------- | ------- | ------- |
+| `hash`, `parallel_hash`, `auto`         | works    | works   | works   |
+| `full_sorting_merge`                    | code 48  | works   | works   |
+| `partial_merge`, `grace_hash`, `direct` | code 48  | code 48 | code 48 |

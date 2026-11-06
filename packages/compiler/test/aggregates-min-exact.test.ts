@@ -171,7 +171,7 @@ describe('quantileExact resolution', () => {
     );
 
     check({ fn: { ...agg.fn, linear: true } }, /invalid_function_metadata at root\.aggs\.x/);
-    check({ combinators: ['State'] }, /unsupported_aggregate_combinator at root\.aggs\.x/);
+    check({ combinators: ['State'] }, /invalid_expression_type at root\.aggs\.x/);
     check({ combinators: ['If', 'If'] }, /unsupported_aggregate_combinator at root\.aggs\.x/);
     check({ type: col.Float64.type }, /invalid_expression_type at root\.aggs\.x/);
     check({ args: [q.row.s.ir] }, /incompatible_operands at root\.aggs\.x/);
