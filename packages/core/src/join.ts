@@ -82,9 +82,10 @@ export class JoinBuilder<I extends Record<string, Input>, R = Rows<I>, V = Value
   constructor(
     inputs: I,
     readonly kind: Exclude<JoinKind, 'cross'> = 'inner',
+    // Outer joins pass their argument order: a merged record sorts integer-like keys, and position
+    // decides which input is null-extended.
+    entries: readonly (readonly [string, Input])[] = Object.entries(inputs),
   ) {
-    const entries = Object.entries(inputs);
-
     if (entries.length < 2 || Object.getOwnPropertySymbols(inputs).length)
       throw new Error('join_input_count');
 
@@ -363,7 +364,11 @@ function outer(
   args: readonly unknown[],
 ): JoinBuilder<Record<string, Input>> {
   const [left, right] = binaryInputs(`${kind}Join`, args);
-  return new JoinBuilder({ ...left, ...right }, kind);
+
+  return new JoinBuilder({ ...left, ...right }, kind, [
+    ...Object.entries(left),
+    ...Object.entries(right),
+  ]);
 }
 
 /** LEFT ALL JOIN: the right input is null-extended. */

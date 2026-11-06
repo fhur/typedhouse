@@ -220,8 +220,8 @@ export function planSelects(
       rel.on.every(
         // Every kind: a WHERE, select list or GROUP BY folded into a join block is evaluated over the
         // joined (null-extended) rows, exactly like the nested Filter/Project/Aggregate above the Join.
-        // ASOF: the same, since 24.3 to 26.10 push neither input's WHERE conjunct below the join; its
-        // last element is the validated inequality.
+        // ASOF: the same. 24.3 to 26.10 keep a right input's WHERE conjunct above the join; a left one may
+        // go below, which commutes. The last `on` element is the validated inequality.
         (e, i) =>
           e.kind === 'Call' &&
           e.fn.origin === 'typed' &&
