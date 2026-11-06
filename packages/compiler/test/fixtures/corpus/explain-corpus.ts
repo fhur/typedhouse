@@ -1,7 +1,7 @@
 // EXPLAIN corpus (spec "Testing", M4): every supported API example plus one minimal query per rewrite rule.
 // Ids reuse test/types/corpus-coverage.json. `fences` lists the kinds that justify every SELECT boundary the
 // planned emission opens (empty = one SELECT).
-import { cast, col, count, from, join, leftJoin, unionAll, type Rel } from '@typedhouse/core';
+import { asofJoin, asofLeftJoin, cast, col, count, from, join, leftJoin, unionAll, type Rel } from '@typedhouse/core';
 import * as s from './supported-types.js';
 import { componentsLatest } from './components-latest.js';
 import { projectionEnrichment } from './projection-enrichment.js';
@@ -50,7 +50,13 @@ const limitByEntries: readonly CorpusEntry[] = [
   { id: 'limit-by/subquery-key', run: false, query: components.limitBy(c => c.entityId.in(fresh().map(x => x.entityId))).take(1), fences: ['Subquery'] },
   { id: 'limit-by/union-input', query: unionAll(fresh(), fresh()).limitBy(c => c.category).take(1), fences: ['Union'] },
 ];
+const asofEntries: readonly CorpusEntry[] = [
+  { id: 'asof/right-filter-above', query: asofJoin({ a: fresh() }, { b: fresh() }).on(r => r.a.entityId.eq(r.b.entityId)).asof(r => r.a.updatedAt.ge(r.b.updatedAt)).where(r => r.b.state.eq('active')).map(r => ({ entityId: r.a.entityId })), fences: ['Join'] },
+  { id: 'asof/left-filter-below', query: asofJoin({ a: fresh() }, { b: fresh() }).on(r => r.a.entityId.eq(r.b.entityId)).asof(r => r.a.updatedAt.ge(r.b.updatedAt)).where(r => r.a.state.eq('active')).map(r => ({ entityId: r.a.entityId })), fences: ['Join'] },
+  { id: 'asof/left-null-filter-above', query: asofLeftJoin({ a: fresh() }, { b: fresh() }).on(r => r.a.entityId.eq(r.b.entityId)).asof(r => r.a.updatedAt.ge(r.b.updatedAt)).where(r => r.b.state.isNull()).map(r => ({ entityId: r.a.entityId })), fences: ['Join'] },
+];
 export const entries: readonly CorpusEntry[] = [
+  ...asofEntries,
   { id: 'filtering/tenant-active', query: s.filterTenantActive, fences: [] },
   { id: 'filtering/category', query: s.filterCategory, fences: [] },
   { id: 'filtering/not-empty', query: s.filterMatched, fences: [] },

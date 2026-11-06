@@ -3,9 +3,8 @@ import { col, from, fullJoin, leftJoin, rightJoin, table } from '@typedhouse/cor
 import { compile } from '@typedhouse/compiler';
 import { connect, startServer, type Connection } from './asof-support.js';
 
-/** `leftJoin`, `rightJoin` and `fullJoin` build their inputs by merging two records, `{...left, ...right}`.
- * An integer-like alias reorders keys in JavaScript, so `leftJoin({ 2: a }, { 1: b })` may swap the sides.
- * Separate from ASOF, whose builder keeps argument order (asof-adversarial.test.ts). */
+/** `leftJoin`, `rightJoin` and `fullJoin` keep the sides the caller wrote, also for an integer-like
+ * alias, which JavaScript would sort first in a merged record. ASOF: asof-adversarial.test.ts. */
 const opts = { engine: 'MergeTree', sortingKey: ['id'], partitionKey: [] } as const;
 
 const a = table('alias_a', { id: col.UInt32, k: col.UInt8 }, opts);
