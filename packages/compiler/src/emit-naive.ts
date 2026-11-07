@@ -98,9 +98,26 @@ const outputKinds = {
   cross: ['cross'],
 } as const;
 
-/** Kinds the Decided row keeps unwrapped by null extension: a declared `Nullable(Tuple)` is not one. */
-const keepsDefault = (t: CHType): boolean =>
-  t.kind === 'Tuple' || (t.kind === 'scalar' && t.name === 'JSON');
+/** Kinds the Decided row keeps unwrapped by null extension, also under `SimpleAggregateFunction`. A
+ * declared `Nullable(Tuple)` is not one, and `LowCardinality` cannot hold either (code 43). A parser
+ * `Unknown` is not one either, although the read would not use its text: `Point`, `Tuple(... Point ...)`
+ * and `JSON(...)` measured safe, but the documented limit is pinned, so widening is an owner decision. */
+function keepsDefault(t: CHType): boolean {
+  switch (t.kind) {
+    case 'Tuple':
+      return true;
+    case 'scalar':
+      return t.name === 'JSON';
+    case 'SimpleAggregateFunction':
+      return keepsDefault(t.inner);
+    default:
+      return false;
+  }
+}
+
+/** The column's own type without the Nullable that join_use_nulls adds, as constant text. */
+const physicalTypeName = (sql: string) =>
+  `replaceRegexpOne(toTypeName(${sql}), ${quoteString('(?s)^Nullable\\((.*)\\)$')}, ${quoteString('\\1')})`;
 
 /** A join input column read where the Join's output declares it null-extended but the Join no
  * longer extends that input (after LeftToInner): toNullable gives exactly outerColumnType's
@@ -118,12 +135,15 @@ function joinRead(
 
   // D21: a Tuple or JSON keeps its type and its default when unmatched (Decided, outer join row types),
   // but under join_use_nulls = 1 the server wraps it in Nullable and sends NULL, Tuple from 26.3 and JSON
-  // from 25.3. ifNull restores the default and the declared type, and is the identity on older servers.
-  // The type is text, not a value, so it is a quoted literal, never a parameter.
-  if (nullExtended(join.joinKind, index, join.inputs.length))
-    return keepsDefault(declared)
-      ? `ifNull(${sql}, defaultValueOfTypeName(${quoteString(print(declared))}))`
-      : sql;
+  // from 25.3. The default and the CAST take the type from the column itself, never from the descriptor,
+  // so a descriptor that lags the table cannot change a matched row: ifNull alone unifies its branches into
+  // a supertype that drops LowCardinality members, SimpleAggregateFunction and Point, and the CAST restores
+  // the column's type. Measured on 24.3 to 26.10; the identity on rows where the column is not NULL.
+  if (nullExtended(join.joinKind, index, join.inputs.length)) {
+    if (!keepsDefault(declared)) return sql;
+    const type = physicalTypeName(sql);
+    return `CAST(ifNull(${sql}, defaultValueOfTypeName(${type})), ${type})`;
+  }
 
   if (same(declared, physical)) return sql;
 

@@ -194,15 +194,23 @@ An outer join's `.on` takes only equalities between one column of each input. A 
 
 ### `Tuple` and `JSON` columns
 
-From ClickHouse 26.3, `join_use_nulls = 1` also wraps a `Tuple` in `Nullable` and sends `NULL` for an unmatched row, and from 25.3 it does the same to `JSON`; 24.3 and 24.8 keep the type and send its default. So that every version returns what the descriptor says, the compiler reads a null-extended `Tuple` or `JSON` column through `ifNull`, with its printed type as a quoted literal:
+From ClickHouse 26.3, `join_use_nulls = 1` also wraps a `Tuple` in `Nullable` and sends `NULL` for an unmatched row, and from 25.3 it does the same to `JSON`; 24.3 and 24.8 keep the type and send its default. So that every version returns what the descriptor says, the compiler reads a null-extended `Tuple` or `JSON` column with a default and a type taken from the column itself:
 
 ```sql
-ifNull(`plan`.`dims`, defaultValueOfTypeName('Tuple(w UInt32, h UInt32)'))
+CAST(
+  ifNull(`plan`.`dims`, defaultValueOfTypeName(T)),
+  T
+)
+-- T: replaceRegexpOne(toTypeName(`plan`.`dims`), '(?s)^Nullable\\((.*)\\)$', '\\1')
 ```
 
-An unmatched row then reads as the type's default, `(0, 0)` or `{}`, and so does every `element` of it, in a select list, `where`, `orderBy`, `groupBy` or raw `sql`. This was measured on 24.3, 24.8, 25.3, 25.8, 25.10, 26.3 and 26.10 (`JSON` from 24.8), through `leftJoin`, `rightJoin`, `fullJoin` and `asofLeftJoin`. On older servers the wrapper changes nothing. Only reads of the null-extended input are wrapped: not `ON` conditions, not inner joins, not other column kinds, and not a column declared `Nullable(Tuple(…))`.
+`T` is the column's type name without the `Nullable` the join adds, so no descriptor text reaches the SQL. An unmatched row reads as that type's default, `(0, 0)` or `{}`, and so does every `element` of it, in a select list, `where`, `orderBy`, `groupBy` or raw `sql`. A matched row reads exactly what the column holds, and `meta` is the column's own type, `LowCardinality` members and `SimpleAggregateFunction` included; `ifNull` alone would drop both. This was measured on 24.3, 24.8, 25.3, 25.8, 25.10, 26.3 and 26.10 (`JSON` from 24.8), through `leftJoin`, `rightJoin`, `fullJoin` and `asofLeftJoin`.
 
-One limit stays. A type the descriptor parser does not model, such as `Point`, is declared `unknown`, so it is read as it comes: `(0, 0)` up to 25.10 and `NULL` from 26.3 for an unmatched `Point`. Its declared type does not promise either.
+The same read applies to `SimpleAggregateFunction` over a `Tuple` or `JSON`, as codegen writes for an `AggregatingMergeTree`. It does not apply to `ON` conditions, inner joins, a non-extended input, other column kinds, or a column declared `Nullable(Tuple(…))`.
+
+If the descriptor lags the table, for example an `Enum` value added after codegen or `col.JSON` describing a `JSON(a UInt8)` column, the read still follows the table: a matched row is unchanged, and an unmatched row gets the table type's default. Decoding a value the descriptor does not know behaves as it does without a join.
+
+Types the descriptor parser leaves `unknown` are read as they come, because their declared `unknown` type promises nothing. Among them, `Point`, a `Tuple` with a `Point` member and a parameterised `JSON(…)` (such as `JSON(a UInt8)`) are newly wrapped by the server: an unmatched one reads as its default up to 25.10 (`(0, 0)` for a `Point`; `JSON` up to 24.8) and `NULL` from 26.3 (`JSON(…)` from 25.3). `Nested(…)` reads as an `Array` and keeps `[]` on every version listed. `Object('json')` keeps a tuple of defaults up to 25.10, needs an experimental setting there, and does not exist from 26.3. `BFloat16` is wrapped like a number, `NULL` when unmatched from 25.3, where it first exists.
 
 ## ASOF joins
 
