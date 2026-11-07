@@ -76,9 +76,16 @@ describe('agent results', () => {
     expect(bounded).toEqual({ value: { [prefix]: 'kept' }, truncated: true });
     const { connection } = fixture(Array.from({ length: 25 }, () => ({ x: 1 })));
     const api = createAgentCapabilities({ ...connection, runAgentQuery: async () => ({ rows: Array.from({ length: 25 }, () => ({ x: 1 })), sql: 'SELECT x', elapsedMs: 0, truncated: false, columns: Array.from({ length: 21 }, (_, n) => ({ name: `c${n}`, path: [`c${n}`], type: 'String' })) }) });
+    // 21 columns fit (#10): metadata has its own limit, and only a cut row marks the rows truncated.
     const first = await api.queryRun('', 'owner');
-    expect(first.truncated).toBe(true);
-    expect(api.queryResultsGet(first.resultId, first.nextCursor, 'owner').truncated).toBe(true);
+    expect(first).toMatchObject({ truncated: false, columnsTruncated: false });
+    expect(api.queryResultsGet(first.resultId, first.nextCursor, 'owner').truncated).toBe(false);
+    // Past the limit the rows are cut too, and that stays true on later pages.
+    const names = Array.from({ length: RESULT_LIMITS.columns + 1 }, (_, n) => `c${n}`);
+    const cutRows = createAgentCapabilities({ ...connection, runAgentQuery: async () => ({ rows: Array.from({ length: 25 }, () => Object.fromEntries(names.map(name => [name, 1]))), sql: 'SELECT x', elapsedMs: 0, truncated: false, columns: names.map(name => ({ name, path: [name], type: 'String' })) }) });
+    const cut = await cutRows.queryRun('', 'owner');
+    expect(cut).toMatchObject({ truncated: true, columnsTruncated: true });
+    expect(cutRows.queryResultsGet(cut.resultId, cut.nextCursor, 'owner').truncated).toBe(true);
   });
   it('bounds nested/circular display values', () => {
     const x: unknown[] = []; x.push(x);

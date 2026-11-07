@@ -1,3 +1,16 @@
+## Studio: review fixes for the exploration tools (2026-11-06)
+
+Fixes the 10 review findings on `bfaf90a`, plus the defects independent testing found in those fixes (Worker and Tester rounds). `columns_describe` aliases no longer collide with column names. Exploration tools honour Stop through `currentRunSignal()`, and `@typedhouse/client` `stream` gains an optional `{ signal }` (new exported type `RunOptions`; existing callers unchanged). An apply beside a non-apply tool is refused. Surrogate-safe `cut` moved to `server/text.ts` and is used for model-visible text. Column metadata has its own limit, reported as `columnsTruncated`; long SQL as `sqlTruncated`. Reads: one `AbortController` and a 12 s timeout per `chat.get`, `no-store`, no batching, no superseding by a poll tick, and a reply ends `generating` regardless of its re-read. `openChat` restores the browser copy at once, so a failing read can't overwrite a hand edit. Startup reads retry. Tab into the thread takes one stop again.
+
+**Evidence, final tree, load 12-43:** root `pnpm typecheck` passes; root `pnpm test` twice, 2229 passed, 2 skipped; studio `test` 786 passed, 1 skipped; `test:integration` 92; `build` passes; `test:browser` 306 passed, 21.0 min, no retries; `test:compiler-integration` 375. Not run on this tree: `check:all`, type-perf budget. Test expectation changed in `agent-capabilities.test.ts` (21 columns are no longer truncated).
+
+**Known, left open:**
+- A chat with no browser copy and failing reads shows the previous chat's query, and typing saves it as this chat's copy. Pinned in a test.
+- `query_apply(good)` + `query_apply(bad)` in one round, then giving up, is an error turn offering the bad source. Pinned by existing tests.
+- Each full browser run under load surfaced a different low-rate timing failure until the last; `chat.spec.ts:661` failed once and was never explained.
+- `compile` looks exponential in chained `.where` (n=20 took 13.9 s, 500 ran over 6 minutes) and is synchronous in `query_run`, so model-written source could freeze the server beyond Stop. Cause not yet confirmed.
+- A saved query with no chart gets the chat's chart back if a read was out (also at `bfaf90a`). `?` drops the selection.
+
 ## Studio working indicator
 
 - Removed the top-level disclosure arrow so only the live spinner remains; native keyboard/click expansion is preserved. Added a moving text sheen to live labels, disabled with a readable static fallback for reduced motion. Studio typecheck/build and both activity browser tests passed, including hidden marker and reduced-motion sheen checks.

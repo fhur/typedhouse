@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { awaitWithContext } from '@earendil-works/chord/context';
 import { defineTool } from '@earendil-works/pi-durable';
 import { MAX_SOURCE } from '../web/rules.js';
 
@@ -15,9 +17,13 @@ export type ExplorationCapabilities = {
   [K in keyof ExplorationArgs]: (args: ExplorationArgs[K], owner: number) => unknown | Promise<unknown>;
 };
 
+const runSignal = new AsyncLocalStorage<AbortSignal | undefined>();
+/** For a capability that does slow work: the signal of the run it is serving, aborted by Stop or the run's timeout. */
+export const currentRunSignal = () => runSignal.getStore();
+
 const text = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value, (_key, v: unknown) => typeof v === 'bigint' ? v.toString() : v) ?? 'No result.';
 const descriptions: Record<keyof ExplorationArgs, string> = {
-  query_run: 'Run a complete TypedHouse query without changing the editor. Returns bounded real results and a resultId for paging.',
+  query_run: 'Run a complete TypedHouse query without changing the editor. Returns bounded real results and a resultId for paging. truncated: rows or cells were cut. columnsTruncated: the column list was cut. sqlTruncated: only the SQL text shown was cut.',
   query_results_get: 'Read a bounded page of a prior query result belonging to this conversation. Pass its opaque nextCursor as cursor; omit cursor for the first page.',
   tables_list: 'Discover available tables and their builder bindings, optionally filtering by search. Pass nextCursor as cursor for further pages, retaining the same search.',
   table_describe: 'Inspect a table and its columns before writing a query. Pass nextCursor as cursor for further columns of the same table.',
@@ -41,7 +47,7 @@ export function explorationTools(capabilities?: ExplorationCapabilities) {
     name,
     description: descriptions[name],
     parameters: { type: 'object' as const, ...schemas[name], additionalProperties: false },
-    execute: async (raw, api) => {
+    execute: async (raw, api, context) => {
       try {
         if (name === 'query_run') {
           const { source } = raw as ExplorationArgs['query_run'];
@@ -49,9 +55,12 @@ export function explorationTools(capabilities?: ExplorationCapabilities) {
         }
         if (!capabilities) throw new Error('Exploration is unavailable on this server. Ask the user to configure the database/documentation capabilities.');
         const invoke = capabilities[name] as (args: unknown, owner: number) => unknown;
-        const result = await invoke(raw, api.conversationId);
+        // A capability that is slow to notice the abort must not hold the run: it has to settle within the abort grace.
+        const result = await awaitWithContext(runSignal.run(context.abortSignal, async () => invoke(raw, api.conversationId)), context);
         return { output: [{ type: 'text' as const, text: text(result) }], ...(result && typeof result === 'object' && 'ok' in result && result.ok === false ? { isError: true } : {}) };
       } catch (error) {
+        // pi-durable records the aborted call itself.
+        if (context.abortSignal?.aborted) throw error;
         return { output: [{ type: 'text' as const, text: `${name} failed: ${error instanceof Error ? error.message : String(error)} Correct the arguments or try a narrower request.` }], isError: true };
       }
     },

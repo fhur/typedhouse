@@ -619,6 +619,7 @@ describe('stop', () => {
     let seed = 11;
     const next = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
     const tally = { version: 0, stopped: 0 };
+    let stopsInARow = 0;
     for (let i = 0; i < 600 && (i < 100 || tally.version < 10 || tally.stopped < 10); i++) {
       const before = (await s.turns(chatId)).length;
       const began = performance.now();
@@ -628,8 +629,9 @@ describe('stop', () => {
       const stop = await s.api.chat.stop({ id: chatId });
       const result = await sending;
       const added = (await s.turns(chatId)).slice(before);
-      if ('stopped' in result) { tally.stopped++; expect(stop.stopped).toBe(true); expect(kinds(added)).toEqual(['user', 'note']); }
-      else if (result.ok) { tally.version++; span = performance.now() - began; expect(stop.stopped, JSON.stringify({ i, wait })).toBe(false); expect(kinds(added)).toEqual(['user', 'version']); }
+      // Load can arrive after the seed: runs then outlast `span`, and only a finished run would ever raise it.
+      if ('stopped' in result) { tally.stopped++; if (++stopsInARow % 20 === 0) span *= 2; expect(stop.stopped).toBe(true); expect(kinds(added)).toEqual(['user', 'note']); }
+      else if (result.ok) { tally.version++; stopsInARow = 0; span = performance.now() - began; expect(stop.stopped, JSON.stringify({ i, wait })).toBe(false); expect(kinds(added)).toEqual(['user', 'version']); }
       else throw new Error(`unexpected ${JSON.stringify(result)}`);
     }
     const turns = await s.turns(chatId);

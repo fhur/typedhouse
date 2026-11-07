@@ -97,7 +97,8 @@ The agent can explore before proposing changes:
 | `docs_read` | Read a bounded part of a documentation page. |
 
 Validation and exploration do not change the editor. Only successful `query_apply` and `chart_apply`
-produce version turns and end the agent's turn. Result snapshots expire and are conversation-scoped;
+produce version turns and end the agent's turn; an apply sent in one message with an exploration or
+validation call is refused, and the model is told to send it again without them. Result snapshots expire and are conversation-scoped;
 a restart or conversation fork may require rerunning a query. Truncated results and sampled column
 statistics are explicitly identified rather than presented as complete database statistics.
 
@@ -132,6 +133,8 @@ statistics are explicitly identified rather than presented as complete database 
 | `r` | Retry |
 | `y` | Copy the query, or the text |
 | Esc or `i` | Back to the box. Esc stops a generation first |
+
+Tab from a selected turn reaches its activity. On an activity summary, ↵ and Space only open or close it, and the turn's keys do nothing.
 
 During a generation only `y` is offered. During an edit `r` isn't, because it would discard your rewrite, and the
 message being edited offers `↵` back to the box and `y`. Notes have no keys.

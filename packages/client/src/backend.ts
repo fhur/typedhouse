@@ -10,6 +10,7 @@ import type { EncodedInsert } from './encode-insert.js';
  * or pass them to another backend, even one with the same name/mode.
  */
 export interface Plan { readonly compiled: CompiledQuery }
+export interface RunOptions { readonly signal?: AbortSignal }
 /** Each yielded array is a batch of decoded row objects (not positional cells).
  * Implementations must honor the Rel's output schema and close each execution's
  * cursor on exhaustion, failure or iterator return. Compilation is synchronous;
@@ -19,7 +20,8 @@ export interface Plan { readonly compiled: CompiledQuery }
 export interface Backend {
   readonly name: string;
   compile(rel: Rel): Plan;
-  run(plan: Plan): AsyncIterable<unknown[]>;
+  /** `options.signal` asks to cancel the execution; a backend that can't may ignore it. */
+  run(plan: Plan, options?: RunOptions): AsyncIterable<unknown[]>;
   /** Optional bulk write capability. The facade validates the complete batch first. */
   insert?(batch: EncodedInsert): Promise<void>;
 }
@@ -55,7 +57,7 @@ export function createClickHouseBackend(options: ClickHouseClientConfigOptions =
     if (!decode) throw new Error('backend_plan_owner: plan belongs to another backend');
     return decode;
   }
-  function execute(compiled: CompiledQuery) {
+  function execute(compiled: CompiledQuery, signal?: AbortSignal) {
     // The compiler has already serialized typed Arrays per the spec. Passing
     // that literal as a query_params string makes the driver escape its quotes
     // and backslashes again. Use the driver's settings API only for these Array
@@ -67,7 +69,7 @@ export function createClickHouseBackend(options: ClickHouseClientConfigOptions =
       if (type && unwrap(type).kind === 'Array') containers[`param_${name}`] = value;
       else params[name] = value;
     }
-    return driver.query({ query: compiled.sql, query_params: params, format: 'JSONEachRow', clickhouse_settings: { ...containers, ...outputSettings } });
+    return driver.query({ query: compiled.sql, query_params: params, format: 'JSONEachRow', clickhouse_settings: { ...containers, ...outputSettings }, ...(signal ? { abort_signal: signal } : {}) });
   }
   return {
     name: mode,
@@ -87,18 +89,22 @@ export function createClickHouseBackend(options: ClickHouseClientConfigOptions =
         finally { result.close(); }
       } catch (cause) { throw new QueryError(compiled, cause); }
     },
-    async *run(plan: Plan): AsyncGenerator<unknown[], void> {
+    async *run(plan: Plan, options: RunOptions = {}): AsyncGenerator<unknown[], void> {
       const decode = prepare(plan);
       const { compiled } = plan;
       try {
-        const result = await execute(compiled);
+        const result = await execute(compiled, options.signal);
         try {
           const stream = result.stream<unknown>();
+          // The driver only honors abort_signal until the response starts.
+          const abort = () => { stream.destroy(new Error('The query was aborted')); result.close(); };
+          options.signal?.addEventListener('abort', abort, { once: true });
+          if (options.signal?.aborted) abort();
           try {
             for await (const rows of stream) {
               for (const row of rows) yield [decode(row.json())];
             }
-          } finally { stream.destroy(); }
+          } finally { options.signal?.removeEventListener('abort', abort); stream.destroy(); }
         } finally { result.close(); }
       } catch (cause) { throw new QueryError(compiled, cause); }
     },

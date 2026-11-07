@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
+import { BACKGROUND_CONTEXT as context, type Context } from '@earendil-works/chord/context';
 import type { JsonValue } from '@earendil-works/chord';
-import { defineDoc, defineExtension, defineTool, section, type Conversation, type ConversationId, type EntryId, type EntryRecord, type Harness, type Submission } from '@earendil-works/pi-durable';
+import { defineDoc, defineExtension, defineTool, LiveDoc, section, type Conversation, type ConversationId, type EntryId, type EntryRecord, type Harness, type Submission, type ToolExecutionApi } from '@earendil-works/pi-durable';
 import type { Message } from '@earendil-works/pi-ai';
 import { obj, opt, str } from '@earendil-works/pi-schema';
 import { checkChartSpec, type ChartColumn } from './chart.js';
 import { MAX_SOURCE } from '../web/rules.js';
 import type { Stage } from './eval.js';
 import type { ModelRef } from './pi.js';
+import { cut } from './text.js';
 import { explorationTools, type ExplorationCapabilities } from './tools.js';
 
 /** `columns` are the result columns a chart may name. */
@@ -17,8 +18,7 @@ export type CheckResult = { ok: true; sql: string; rowType: string; columns?: Ch
 export { MAX_SOURCE };
 export const MAX_SAMPLE_ROWS = 20;
 export const json = (value: unknown) => JSON.stringify(value, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v instanceof Date ? v.toISOString() : v));
-/** Cuts at a code unit limit without leaving half an emoji behind (F29). */
-export const cut = (text: string, limit: number) => (text.length > limit && /[\uD800-\uDBFF]/.test(text[limit - 1]!) ? text.slice(0, limit - 1) : text.slice(0, limit));
+export { cut };
 
 // ---- Line diff ----
 
@@ -93,6 +93,9 @@ function chatMessage(text: string, source: string, columns: readonly ChartColumn
 
 type RunArgs = { source?: unknown; spec?: unknown; summary?: unknown };
 type RunOutcome = { attempts: number; last?: { tool: string; args: RunArgs; passed: boolean; output: string } };
+const APPLY_TOOLS = ['query_apply', 'chart_apply', 'check_query', 'check_chart'];
+/** What an apply says when another kind of tool shared its round. Nothing was attempted, so it doesn't count as a failed attempt. */
+const APPLY_ALONE = 'Not applied: query_apply and chart_apply cannot share a message with other tools, because a successful one ends the turn. Call it again without them.';
 /** Only apply attempts decide editor changes. Historical check_* calls are readable, never advertised. */
 function readRun(messages: readonly Message[]): RunOutcome {
   const calls = new Map<string, RunArgs>();
@@ -100,9 +103,11 @@ function readRun(messages: readonly Message[]): RunOutcome {
   for (const message of messages) {
     if (message.role === 'assistant') {
       for (const block of message.content) if (block.type === 'toolCall') calls.set(block.id, block.arguments as RunArgs);
-    } else if (message.role === 'toolResult' && (['query_apply', 'chart_apply', 'check_query', 'check_chart'].includes(message.toolName))) {
+    } else if (message.role === 'toolResult' && APPLY_TOOLS.includes(message.toolName)) {
+      const output = message.content.map(c => (c.type === 'text' ? c.text : '')).join('\n');
+      if (output === APPLY_ALONE) continue;
       out.attempts++;
-      out.last = { tool: message.toolName, args: calls.get(message.toolCallId) ?? {}, passed: !message.isError, output: message.content.map(c => (c.type === 'text' ? c.text : '')).join('\n') };
+      out.last = { tool: message.toolName, args: calls.get(message.toolCallId) ?? {}, passed: !message.isError, output };
     }
   }
   return out;
@@ -198,18 +203,24 @@ export function unavailableChats(reason: string): ChatService {
 
 // ---- The extension ----
 
-/** Apply ends the run on success. Keep the extension name stable for stored conversations. */
+/**
+ * Apply ends the run on success. pi-durable ends a round only when every call in it asks to, and other tools never do, so an apply
+ * beside one is refused: otherwise the run would go on past a passing apply, and a later failing one would turn it into an error.
+ * Applies in one round settle among themselves, the last deciding. Keep the extension name stable for stored conversations.
+ */
 export function chatExtension(options: { guide: string; schema: () => string; check: (source: string) => CheckResult | Promise<CheckResult>; exploration?: ExplorationCapabilities }) {
   const tooLong = (source: string) => (source.length > MAX_SOURCE ? `The source has ${source.length} characters; the editor takes at most ${MAX_SOURCE}. Make it shorter.` : undefined);
   const refused = (message: string) => ({ output: [{ type: 'text' as const, text: message }], isError: true });
+  const shared = async (api: Pick<ToolExecutionApi, 'snapshot' | 'conversationId'>, context: Context) => ((await api.snapshot(LiveDoc, api.conversationId, context))?.tools ?? []).some(slot => !APPLY_TOOLS.includes(slot.name));
   const queryTool = (apply: boolean) => defineTool({
     name: apply ? 'query_apply' : 'query_validate',
-    description: apply ? 'Validate and apply the complete query to the editor. Ends the turn on success; include a summary.' : 'Type-check and compile a complete query without running it or changing the editor. Returns SQL and row type or errors.',
+    description: apply ? 'Validate and apply the complete query to the editor. Do not call other tools in the same message. Ends the turn on success; include a summary.' : 'Type-check and compile a complete query without running it or changing the editor. Returns SQL and row type or errors.',
     parameters: obj({
       source: str({ description: 'The complete query.ts source' }),
       summary: opt(str({ description: 'One line for the user saying what changed' })),
     }),
-    execute: async args => {
+    execute: async (args, api, context) => {
+      if (apply && await shared(api, context)) return refused(APPLY_ALONE);
       const long = tooLong(args.source);
       if (long) return refused(long);
       const result = await options.check(args.source);
@@ -219,7 +230,7 @@ export function chatExtension(options: { guide: string; schema: () => string; ch
   });
   const chartTool = (apply: boolean) => defineTool({
     name: apply ? 'chart_apply' : 'chart_validate',
-    description: `${apply ? 'Validate and apply a chart to the editor; ends the turn on success.' : 'Validate a chart without changing the editor.'} Pass a complete Vega-Lite spec without data. Optional source changes the query used for validation; otherwise uses the editor query.`,
+    description: `${apply ? 'Validate and apply a chart to the editor. Do not call other tools in the same message; ends the turn on success.' : 'Validate a chart without changing the editor.'} Pass a complete Vega-Lite spec without data. Optional source changes the query used for validation; otherwise uses the editor query.`,
     parameters: {
       type: 'object',
       properties: {
@@ -230,6 +241,7 @@ export function chatExtension(options: { guide: string; schema: () => string; ch
       required: ['spec'],
     } as { type: 'object'; properties: { spec: object; source: object; summary: object }; required: ['spec'] },
     execute: async (raw, api, context) => {
+      if (apply && await shared(api, context)) return refused(APPLY_ALONE);
       const args = raw as { spec?: unknown; source?: string };
       const source = args.source ?? (await api.snapshot(SentDoc, api.conversationId, context))?.source ?? '';
       if (!source.trim()) return refused('The editor is empty, so there are no columns to chart: pass source with the query.');
@@ -517,6 +529,18 @@ export function createChats(harness: Harness, options: {
     return { entry: status?.entry, stuck: settled !== true, why: `timed out after ${Math.round(options.timeoutMs / 1000)} s`, answered: false };
   }
 
+  /** For what is only a nicety after a run: a read that hangs or fails must not hold the guard (F28). `undefined` then. */
+  const boundedEntries = (conversation: Conversation) => within(abortGrace, allEntries(conversation)).catch(() => undefined);
+
+  /** What the abandoned turn did, for its note. */
+  async function abandonedActivityOf(conversation: Conversation): Promise<ChatActivity[]> {
+    try {
+      const history = await boundedEntries(conversation) ?? [];
+      const latestUser = history.filter(e => e.kind === USER_KIND).at(-1)?.id;
+      return toActivity(history, false).filter(a => a.afterUserId === latestUser);
+    } catch { return []; }
+  }
+
   /** Edit-and-resend: the conversation to continue, without `replaceFrom` and everything after it. */
   async function branch(current: Conversation, replaceFrom: number, model: ModelRef): Promise<{ conversation: Conversation; first: boolean } | undefined> {
     const entries = await allEntries(current);
@@ -609,9 +633,7 @@ export function createChats(harness: Harness, options: {
             // Whatever the run does later lands in the abandoned parent, which nothing reads.
             if (stuck && entry !== undefined) {
               target = await conversation.fork(entry, { ownership: { kind: 'ownerless' } }, context);
-              const history = await allEntries(conversation);
-              const latestUser = history.filter(e => e.kind === USER_KIND).at(-1)?.id;
-              abandonedActivity = toActivity(history, false).filter(a => a.afterUserId === latestUser);
+              abandonedActivity = await abandonedActivityOf(conversation);
             }
             data = await decide(run, input.source, entries.flatMap(e => e.model ?? []), answered, why, elapsedMs);
           } catch (error) {
@@ -619,11 +641,7 @@ export function createChats(harness: Harness, options: {
           }
           // Stop wins, even over a check that passed at the same moment. From here a stop is too late.
           const stopped = run.stopped;
-          if (stopped && !abandonedActivity) {
-            const history = await allEntries(conversation);
-            const latestUser = history.filter(e => e.kind === USER_KIND).at(-1)?.id;
-            abandonedActivity = toActivity(history, false).filter(a => a.afterUserId === latestUser);
-          }
+          if (stopped && !abandonedActivity) abandonedActivity = await abandonedActivityOf(conversation);
           run.recording = true;
           const write = stopped || data === null
             ? { kind: NOTE_KIND, data: { text: STOPPED } }
@@ -634,7 +652,8 @@ export function createChats(harness: Harness, options: {
             const chat = (await tx.doc(ChatIndexDoc)).chats.find(c => c.id === chatId);
             if (chat) { chat.updatedAt = Date.now(); chat.conversationId = target.id; delete chat.running; }
           }, context);
-          const turn = toTurns(await allEntries(target)).at(-1) as VersionTurn | TextTurn | ErrorTurn | NoteTurn;
+          // It is recorded: without a read, what was written still answers, and the page reads the rest. Only its number and id are placeholders.
+          const turn = toTurns(await boundedEntries(target) ?? [{ ...write, id: 0 } as unknown as EntryRecord]).at(-1) as VersionTurn | TextTurn | ErrorTurn | NoteTurn;
           if (turn.kind === 'note') return { ok: false, chatId, error: 'Stopped.', stopped: true, turn };
           return turn.kind === 'error' ? { ok: false, chatId, error: turn.error, turn } : { ok: true, chatId, turn };
         } finally {

@@ -4,13 +4,14 @@ import * as core from '@typedhouse/core';
 import { compile } from '@typedhouse/compiler';
 import { renderSchema, type DatabaseSchema } from '@typedhouse/codegen';
 import type { CompiledQuery, OutputSchema } from '@typedhouse/core';
+import { cut } from './text.js';
 
 /** Where a run failed. The UI shows the stage and message, never a stack. */
 export type Stage = 'parse' | 'types' | 'evaluate' | 'compile' | 'clickhouse';
 export class StudioError extends Error {
   constructor(readonly stage: Stage, message: string) { super(message); this.name = 'StudioError'; }
 }
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 4000);
+const messageOf = (error: unknown) => cut(error instanceof Error ? error.message : String(error), 4000);
 
 export const AUTO_LIMIT = 100;
 const MAX_SOURCE = 64_000;

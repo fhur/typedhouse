@@ -55,8 +55,15 @@ export async function startHarness(ui: Ui, options: { noLlm?: boolean; env?: Rec
 export const q1 = 'export default from(entity_ots_component).orderBy(c => c.entityId).map(c => ({ id: c.entityId, parts: c.countOfParts }))';
 export const qOnlyId = 'export default from(entity_ots_component).orderBy(c => c.entityId).map(c => ({ only_id: c.entityId }))';
 
+/** `ERR_NETWORK_CHANGED` is the machine's network changing under the browser (other containers coming and going), not the page failing to load: only that is retried. */
+export async function gotoStudio(page: Page, url: string) {
+  for (let attempt = 0; ; attempt++) {
+    try { await page.goto(url); return; }
+    catch (error) { if (attempt >= 2 || !String(error).includes('ERR_NETWORK_CHANGED')) throw error; }
+  }
+}
 export async function open(page: Page, harness: Harness) {
-  await page.goto(harness.url);
+  await gotoStudio(page, harness.url);
   await page.waitForSelector('.cm-content');
 }
 /** The source of truth for what is in the editor. */

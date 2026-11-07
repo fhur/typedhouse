@@ -6,6 +6,7 @@ import { compile } from '@typedhouse/compiler';
 import { editorSchema, editorScope, messageOf, prepare, schemaScope, StudioError, type Column } from './eval.js';
 import type { CheckResult } from './llm.js';
 import { createTypeService, type CoreMode, type TypeDiagnostic, type TypeService } from './types.js';
+import { cut } from './text.js';
 import { createTypeWorker } from './types-client.js';
 
 /** Agent limits are fail-closed: overflow raises an error, never silently returns aggregates over a partial scan. */
@@ -124,11 +125,12 @@ export function connect(config: ConnectionConfig, typeOptions: { core?: CoreMode
     refresh,
     runQuery,
     /** Trusted local evaluator, not a hostile-code sandbox. Typecheck before evaluating. */
-    async runAgentQuery(input: string) {
+    async runAgentQuery(input: string, signal?: AbortSignal) {
       if (schemaError) throw new Error(`Schema unavailable: ${schemaError}`);
       if (input.length > 64_000) throw new Error('Source exceeds 64000 characters');
       const errors = (await types.checkExact(input)).filter(d => d.severity === 'error');
-      if (errors.length) throw new StudioError('types', errors.slice(0, 8).map(d => `${d.line}:${d.column} ${d.message}`).join('\n').slice(0, 4000));
+      if (errors.length) throw new StudioError('types', cut(errors.slice(0, 8).map(d => `${d.line}:${d.column} ${d.message}`).join('\n'), 4000));
+      signal?.throwIfAborted();
       const prepared = prepare(input, scope, { autoLimit: false });
       // Streaming preserves the client decoder and Array parameter transport behavior.
       const execute = prepared.execute.limit(501);
@@ -137,7 +139,7 @@ export function connect(config: ConnectionConfig, typeOptions: { core?: CoreMode
       const rows: unknown[] = [];
       let resultBytes = 0;
       try {
-        for await (const row of agentClient.stream(execute)) {
+        for await (const row of agentClient.stream(execute, signal ? { signal } : {})) {
           const value = transportValue(row);
           // Server byte accounting can compress constant columns; also bound decoded wire/display bytes.
           resultBytes += Buffer.byteLength(JSON.stringify(value, (_key, v: unknown) => typeof v === 'bigint' ? String(v) : v));

@@ -6,6 +6,7 @@ import * as core from '@typedhouse/core';
 import { print, type CHType } from '@typedhouse/core';
 import type { DatabaseSchema } from '@typedhouse/codegen';
 import { editorSchema, StudioError, transpile } from './eval.js';
+import { cut } from './text.js';
 
 /**
  * Editor language intelligence (R12): one in-process TypeScript LanguageService over virtual files.
@@ -69,7 +70,7 @@ export function shorten(text: string, max = MAX_MESSAGE): string {
   out = out.replace(/ & \{ readonly ir: /g, ' & { ir: ');
   for (let i = 0; i < 5; i++) out = out.replace(/\b(Expr|DescribedExpr|Operand)<([^<>,]+)(?:,[^<>]*)>/g, '$1<$2>');
   out = collapse(out);
-  return out.length > max ? `${out.slice(0, max - 1)}…` : out;
+  return out.length > max ? `${cut(out, max - 1)}…` : out;
 }
 
 export function createTypeService(options: { core?: CoreMode | 'auto'; compilerOverrides?: ts.CompilerOptions } = {}) {
@@ -156,7 +157,7 @@ export function createTypeService(options: { core?: CoreMode | 'auto'; compilerO
       return {
         from: start, to: start + (d.length ?? 0), line: where.line + 1, column: where.character + 1,
         severity: d.category === ts.DiagnosticCategory.Error ? 'error' as const : 'warning' as const,
-        message: shorten(full), full: full.length > 4000 ? `${full.slice(0, 4000)}…` : full,
+        message: shorten(full), full: full.length > 4000 ? `${cut(full, 4000)}…` : full,
       };
     });
   }
@@ -291,7 +292,7 @@ export function createTypeService(options: { core?: CoreMode | 'auto'; compilerO
       items.push({
         label: entry.name,
         kind: column ? 'column' : tables.has(entry.name) && !result.isMemberCompletion ? 'table' : entry.kind,
-        ...(column ? { detail: column.length > 40 ? `${column.slice(0, 39)}…` : column } : tables.has(entry.name) && !result.isMemberCompletion ? { detail: 'table' } : {}),
+        ...(column ? { detail: column.length > 40 ? `${cut(column, 39)}…` : column } : tables.has(entry.name) && !result.isMemberCompletion ? { detail: 'table' } : {}),
         boost,
         ...(entry.replacementSpan && entry.insertText ? { apply: entry.insertText }
           : entry.insertText && entry.insertText !== entry.name ? { apply: `${prefix}${entry.insertText}` }

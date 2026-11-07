@@ -1,4 +1,4 @@
-import { Fragment, forwardRef, type ReactNode, type Ref } from 'react';
+import { Fragment, forwardRef, type ReactNode, type Ref, useState } from 'react';
 import type { ChatActivity, ChatTurn, UserTurn } from '../server/chat.js';
 import { activitySummary, groupActivity, type ActivityItem } from './activity.js';
 import { attemptsLabel, canLoadAttempt, cappedChanges, chartSummary } from './rules.js';
@@ -62,14 +62,14 @@ function Reply(props: { turn: Exclude<ChatTurn, UserTurn>; inEditor: number | un
   );
 }
 
-function Activity(props: { item: ActivityItem }) {
+function Activity(props: { item: ActivityItem; tabbable: boolean }) {
   const { item } = props;
   const status = item.status === 'success' ? 'completed' : item.status;
   const truncated = item.truncated && <span className="activity-truncated">Truncated — only part of this content is shown.</span>;
   if (item.kind === 'text') return <div className="activity activity-text" data-activity={item.id}><span className="eyebrow">Assistant</span><div>{item.text}</div>{truncated}</div>;
   return (
     <details className="activity activity-tool" data-activity={item.id} data-status={status}>
-      <summary><span className="mono">{item.toolName}</span> <span className="activity-status">{status}</span>{(item.truncated || item.results.some(result => result.truncated)) && <span> · truncated</span>}</summary>
+      <summary tabIndex={props.tabbable ? 0 : -1}><span className="mono">{item.toolName}</span> <span className="activity-status">{status}</span>{(item.truncated || item.results.some(result => result.truncated)) && <span> · truncated</span>}</summary>
       <section aria-label="Inputs"><span className="eyebrow">Inputs</span><pre>{item.arguments}</pre>{truncated}</section>
       {item.results.map(result => <section key={result.id} aria-label="Result" data-status={result.status}>
         <span className="eyebrow">Result</span><pre>{result.text}</pre>
@@ -80,19 +80,22 @@ function Activity(props: { item: ActivityItem }) {
   );
 }
 
-function ActivityRow(props: { activity: readonly ChatActivity[]; userId: number | undefined; live: boolean; stopping: boolean; onStop: () => void }) {
+/** Tab stops only in the selected turn's row, or one already holding focus: the thread is one stop on the way to its turns (F53). */
+function ActivityRow(props: { activity: readonly ChatActivity[]; userId: number | undefined; live: boolean; stopping: boolean; onStop: () => void; selected: boolean }) {
+  const [holdsFocus, setHoldsFocus] = useState(false);
   const summary = activitySummary(props.activity, props.userId, props.live);
   if (!props.live && summary.items.length === 0) return null;
+  const tabbable = props.selected || holdsFocus;
   return (
-    <div className="activity-row" data-testid={props.live ? 'generating' : undefined}>
+    <div className="activity-row" data-testid={props.live ? 'generating' : undefined} onFocus={() => setHoldsFocus(true)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setHoldsFocus(false); }}>
       <details className="activity-log">
-        <summary>
+        <summary tabIndex={tabbable ? 0 : -1}>
           {props.live && <span className="activity-spinner" aria-hidden="true" />}
           <span className={props.live ? 'activity-label activity-label-live' : 'activity-label'}>{props.live && props.stopping ? 'Stopping…' : summary.label}</span>{' '}
           <span aria-label={props.live && summary.earlier > 0 ? `${summary.earlier} earlier tool calls; show activity` : 'Show activity'}>[{summary.disclosure}]</span>
           {summary.hints && <span className="activity-status"> · {summary.hints}</span>}
         </summary>
-        {summary.items.length === 0 ? <div className="activity">No tool activity yet.</div> : groupActivity(summary.items).map(item => <Activity key={item.id} item={item} />)}
+        {summary.items.length === 0 ? <div className="activity">No tool activity yet.</div> : groupActivity(summary.items).map(item => <Activity key={item.id} item={item} tabbable={tabbable} />)}
       </details>
       {props.live && <button type="button" className="gen-stop" onClick={props.onStop}><Kbd>esc</Kbd> stop</button>}
     </div>
@@ -122,6 +125,8 @@ export const Thread = forwardRef(function Thread(props: {
 }, ref: Ref<HTMLDivElement>) {
   const latestUser = props.turns.filter(turn => turn.kind === 'user').at(-1)?.id;
   const liveUser = props.pending === undefined ? latestUser : undefined;
+  const at = props.turns.findIndex(turn => turn.id === props.selected);
+  const selectedUser = at < 0 ? undefined : props.turns.slice(0, at + 1).filter(turn => turn.kind === 'user').at(-1)?.id;
   const empty = props.turns.length === 0 && props.pending === undefined && !props.generating;
   return (
     <div ref={ref} onScroll={props.onScroll} className="thread" role="log" aria-label="Conversation" aria-live="polite" tabIndex={props.turns.length ? 0 : -1}
@@ -148,14 +153,14 @@ export const Thread = forwardRef(function Thread(props: {
               </div>
             )}
           </div>
-          {turn.kind === 'user' && (props.editingTurn === undefined || turn.id < props.editingTurn) && <ActivityRow activity={props.activity} userId={turn.id} live={props.generating && liveUser === turn.id} stopping={props.stopping} onStop={props.onStop} />}
+          {turn.kind === 'user' && (props.editingTurn === undefined || turn.id < props.editingTurn) && <ActivityRow activity={props.activity} userId={turn.id} live={props.generating && liveUser === turn.id} stopping={props.stopping} onStop={props.onStop} selected={selectedUser === turn.id} />}
           </Fragment>
         );
       })}
       {props.pending !== undefined && (
         <div className="turn turn-user-pending" data-kind="user"><div className="turn-user"><span className="eyebrow turn-you">You</span><div className="turn-user-text">{props.pending}</div></div></div>
       )}
-      {props.generating && liveUser === undefined && props.editingTurn === undefined && <ActivityRow activity={[]} userId={undefined} live stopping={props.stopping} onStop={props.onStop} />}
+      {props.generating && liveUser === undefined && props.editingTurn === undefined && <ActivityRow activity={[]} userId={undefined} live stopping={props.stopping} onStop={props.onStop} selected={false} />}
     </div>
   );
 });

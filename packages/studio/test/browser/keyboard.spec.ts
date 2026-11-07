@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
-import { editorText, lastUser, q1, sendMessage, startHarness, turnKinds, uiOf, waitForTurns, type Harness } from './support.js';
+import { gotoStudio, editorText, lastUser, q1, sendMessage, startHarness, turnKinds, uiOf, waitForTurns, type Harness } from './support.js';
 
 // Runs in the page. The root TypeScript program has no DOM lib, on purpose, so only what these callbacks use is declared.
 declare const document: any; declare const window: any; declare const navigator: any;
@@ -23,7 +23,7 @@ const editBanner = (p: Page) => p.locator('.chat-editing');
 const generating = (p: Page) => p.locator('[data-testid="generating"]');
 const hints = async (p: Page) => (await p.locator('.footer .hint').allInnerTexts()).map(t => t.replace(/\s+/g, ' ').trim());
 const press = (p: Page, ...keys: string[]) => keys.reduce<Promise<void>>((done, key) => done.then(() => p.keyboard.press(key)), Promise.resolve());
-const openApp = async (p: Page) => { await p.goto(harness.url); await p.waitForSelector('.cm-content'); };
+const openApp = async (p: Page) => { await gotoStudio(p, harness.url); await p.waitForSelector('.cm-content'); };
 /** ALPHA v1, BRAVO v2, focus in the box. */
 async function twoVersions(p: Page) {
   await openApp(p);
@@ -31,6 +31,8 @@ async function twoVersions(p: Page) {
   await waitForTurns(p, 2);
   await sendMessage(p, 'BRAVO');
   await waitForTurns(p, 4);
+  // The read after a reply brings the real id of its message, and its activity. A key on the message before that loses its selection: see the report.
+  await expect(p.locator('.activity-log')).toHaveCount(2);
   await box(p).focus();
 }
 /** To the thread on the last turn. */
@@ -728,9 +730,10 @@ test.describe('the shortcuts dialog', () => {
   test('? opens from the thread; esc or ? closes; focus returns; it blocks everything behind it', async ({ page: p }) => {
     await twoVersions(p);
     await toThread(p);
+    // Read first: focus leaving the thread for the dialog drops the selection a moment later, and coming back selects the last turn again.
+    const id = await selected(p).getAttribute('data-turn');
     await press(p, '?');
     await expect(dialog(p)).toBeVisible();
-    const id = await selected(p).getAttribute('data-turn');
     for (const key of ['j', 'k', 'e', 'r', 'y', 'i', 'Enter', 'Control+l', 'Control+e', 'Control+k', 'Control+s', 'Control+Enter', 'Control+1', 'Control+Shift+L', 'Tab']) await press(p, key);
     await expect(dialog(p)).toBeVisible();
     await expect(p.locator('#save-name')).toHaveCount(0);
@@ -866,6 +869,8 @@ test.describe('reach with Tab', () => {
     await press(p, 'Control+m');
     await expect(p.locator('.tab-moves')).toContainText('Tab moves focus');
     const source = await editorText(p);
+    // Disabled, so not a stop, while the reply's run is out.
+    await expect(p.locator('.run-btn').first()).toBeEnabled();
     const after = await walk(p, 'Tab', 4);
     const names = after.map(f => f.name).join('\n');
     expect(names, 'Tab out of the editor').toContain('run-btn');

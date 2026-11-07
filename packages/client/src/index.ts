@@ -3,8 +3,8 @@ import { getInsertCommandData, type InsertCommand, type Caps, type Query, type R
 import { encodeInsert } from './encode-insert.js';
 import { InsertError, UnsupportedOperationError } from './errors.js';
 export { type EncodedInsert, InsertValidationError } from './encode-insert.js';
-import { createClickHouseBackend, type Backend, type Plan } from './backend.js';
-export { createClickHouseBackend, type Backend, type Plan } from './backend.js';
+import { createClickHouseBackend, type Backend, type Plan, type RunOptions } from './backend.js';
+export { createClickHouseBackend, type Backend, type Plan, type RunOptions } from './backend.js';
 export { decoder, rowDecoder } from './decode.js';
 export { QueryError, InsertError, UnsupportedOperationError } from './errors.js';
 
@@ -16,11 +16,11 @@ function facade(backend: Backend, buffered?: (plan: Plan) => Promise<unknown[]>)
     if (!plan) { plan = backend.compile(ir); plans.set(ir, plan); }
     return plan;
   }
-  async function* stream<R, C extends Caps>(query: Executable<R, C>): AsyncGenerator<R, void> {
+  async function* stream<R, C extends Caps>(query: Executable<R, C>, options?: RunOptions): AsyncGenerator<R, void> {
     // Everything, including preparation, is lazy. The only row assertion is at
     // the plugin boundary: Backend promises the decoded schema of this Rel.
     const plan = prepare(query.ir);
-    for await (const batch of backend.run(plan)) for (const row of batch) yield row as R;
+    for await (const batch of options ? backend.run(plan, options) : backend.run(plan)) for (const row of batch) yield row as R;
   }
   return {
     async run<R, C extends Caps>(query: Executable<R, C>): Promise<R[]> {

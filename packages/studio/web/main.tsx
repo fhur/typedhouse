@@ -20,11 +20,12 @@ const language: Language = {
   completions: (source, pos) => api.types.completions.mutate({ source, pos }),
   hover: (source, pos) => api.types.hover.mutate({ source, pos }),
 };
-// A batch answers when its slowest call ends: a send lasts minutes and a run can be slow, and neither may hold up type checks or a stop.
+// A batch answers when its slowest call ends: a send lasts minutes, a run or a chat read can be slow, and none may hold up type checks or a stop.
+// A chat read has its own request so it can be aborted, and skips the HTTP cache, where identical GETs wait on each other's lock.
 const api = createTRPCClient<AppRouter>({
   links: [splitLink({
-    condition: op => op.path === 'chat.send' || op.path === 'query.run',
-    true: httpLink({ url: '/trpc', transformer: superjson }),
+    condition: op => op.path === 'chat.send' || op.path === 'query.run' || op.path === 'chat.get',
+    true: httpLink({ url: '/trpc', transformer: superjson, fetch: (url, options) => fetch(url, { ...options, cache: 'no-store' } as RequestInit) }),
     false: httpBatchLink({ url: '/trpc', transformer: superjson }),
   })],
 });
@@ -221,6 +222,12 @@ const isTextField = (target: EventTarget | null) => target instanceof HTMLElemen
 const newestChart = (turns: readonly ChatTurn[]): Spec | undefined => turns.filter((t): t is Version => t.kind === 'version').at(-1)?.chart;
 const newestVersion = (turns: readonly ChatTurn[]) => turns.filter((t): t is Version => t.kind === 'version').at(-1);
 const lastId = (turns: readonly ChatTurn[]) => turns.at(-1)?.id ?? 0;
+/** How long polling waits on a read before starting another beside it. The older one may still land, however slow, until its time is up. */
+const READ_PATIENCE_MS = 4_000;
+/** A read still out after this is aborted, so lost ones hold at most a few of the browser's connections to the server (this / the patience). */
+const READ_TIMEOUT_MS = 12_000;
+const LOAD_FAILED = 'Could not load this chat, trying again:';
+const LIST_FAILED = 'Could not load chats:';
 
 function App() {
   const [meta, setMeta] = useState<Meta>();
@@ -383,19 +390,65 @@ function App() {
   }, []);
 
   const detailRead = useRef(0);
+  /** Reads under way, and when the newest began. */
+  const readsOut = useRef(new Map<number, AbortController>());
+  const readStarted = useRef(0);
+  /** Only a newer read than this may still land. */
+  const landedRead = useRef(0);
+  /** The open chat still needs a read to land: polling goes on until one does, generating or not. */
+  const [readOwed, setReadOwed] = useState(false);
+  /** A read or a send took over: nothing up to `read` may land, and those still out are aborted. */
+  const dropReads = useCallback((read: number) => {
+    landedRead.current = Math.max(landedRead.current, read);
+    for (const [out, controller] of readsOut.current) if (out <= read) { controller.abort(); readsOut.current.delete(out); }
+  }, []);
+  /** What opening a chat still has to do once a read of it lands. Whichever read that is: the newest wins, and nothing retries. */
+  const afterRead = useRef<{ id: string; run: (found: ChatDetail | null) => void } | undefined>(undefined);
   const sentAfter = useRef(0);
-  /** Reads the open chat from the server; a newer read supersedes an older response. */
-  const refreshDetail = useCallback(async (id: string | null): Promise<ChatDetail | null> => {
+  /** The turn a resend under way drops. Until the server has the branch, it still reads that turn and what followed it. */
+  const replacing = useRef<number | undefined>(undefined);
+  const threadAtBottom = useRef(true);
+  /**
+   * Reads the open chat from the server; a newer read supersedes an older response. A tick of polling supersedes nothing
+   * until it lands (`alongside`): the only read that can land must be able to, however slow.
+   * `null`: no such chat. `undefined`: superseded, which says nothing about the chat.
+   */
+  const refreshDetail = useCallback(async (id: string | null, alongside = false): Promise<ChatDetail | null | undefined> => {
     const read = ++detailRead.current;
+    if (!alongside) dropReads(read - 1);
     if (id === null) { setDetail(undefined); return null; }
-    const found = await api.chat.get.query({ id });
-    if (read !== detailRead.current) return null;
+    const controller = new AbortController();
+    readsOut.current.set(read, controller);
+    readStarted.current = Date.now();
+    const timer = setTimeout(() => controller.abort(), READ_TIMEOUT_MS);
+    let stored: ChatDetail | null;
+    try { stored = await api.chat.get.query({ id }, { signal: controller.signal }); }
+    catch (error) {
+      if (read <= landedRead.current) return undefined;
+      readsOut.current.delete(read);
+      if (afterRead.current?.id === id && chatRef.current === id) setChatError(`${LOAD_FAILED} ${error instanceof Error ? error.message : String(error)}`);
+      // A newer one is still out, and may yet land.
+      if ([...readsOut.current.keys()].some(out => out > read)) return undefined;
+      throw error;
+    } finally { clearTimeout(timer); readsOut.current.delete(read); }
+    if (read <= landedRead.current) return undefined;
+    dropReads(read);
+    const dropped = replacing.current;
+    const found = stored && dropped !== undefined && stored.turns.some(t => t.id === dropped)
+      ? { ...stored, turns: stored.turns.filter(t => t.id < dropped), activity: stored.activity.filter(a => a.afterUserId < dropped) }
+      : stored;
     if (chatRef.current === id) setDetail(found ?? undefined);
     if (found) setChats(current => current.map(chat => chat.id === found.id
       ? { id: found.id, title: found.title, conversationId: found.conversationId, updatedAt: found.updatedAt, generating: found.generating }
       : chat));
+    if (chatRef.current === id) {
+      setReadOwed(false);
+      setChatError(current => (current?.startsWith(LOAD_FAILED) || current?.startsWith(LIST_FAILED) ? undefined : current));
+      const after = afterRead.current;
+      if (after?.id === id) { afterRead.current = undefined; after.run(found); }
+    }
     return found;
-  }, []);
+  }, [dropReads]);
 
   /** A reply came in. What the open chat shows follows at once; a chat left meanwhile finds it when reopened. */
   const applyReply = useCallback((chat: string, turn: ChatTurn | undefined) => {
@@ -438,8 +491,9 @@ function App() {
   useEffect(() => {
     let live = true;
     void (async () => {
+      let listed: Awaited<ReturnType<typeof api.chat.list.query>> = [];
       try {
-        const listed = await api.chat.list.query();
+        listed = await api.chat.list.query();
         if (!live) return;
         setChats(listed);
         const pending = parsePending(store.get(PENDING_KEY));
@@ -449,37 +503,41 @@ function App() {
           if (made) { store.set(PENDING_KEY, JSON.stringify({ ...pending, chatId: made.id })); setChatId(made.id); }
           else store.remove(PENDING_KEY);
         }
-        const found = await refreshDetail(chatRef.current);
-        if (!live) return;
+      } catch (error) { if (live) setChatError(`${LIST_FAILED} ${String(error)}`); }
+      const open = chatRef.current;
+      if (!live || !open) return;
+      // Whichever read lands first does this; one that fails or is lost is followed by another.
+      setReadOwed(true);
+      afterRead.current = { id: open, run: found => {
         // Forgotten only if the server is up and says so; without credentials the list is empty and the chat comes back later (F27).
-        if (chatRef.current && !found && listed.length > 0) {
-          saveEdit(chatRef.current, undefined);
+        if (found === null && listed.length > 0) {
+          saveEdit(open, undefined);
           setEditing(undefined);
           setChatId(null);
         }
         if (found) { applyPending(found); checkEdit(found); }
-      } catch (error) { if (live) setChatError(`Could not load chats: ${String(error)}`); }
+      } };
+      await refreshDetail(open).catch(() => undefined);
     })();
     return () => { live = false; };
   }, [applyPending, checkEdit, refreshDetail, setChatId]);
 
   // Follow both our own send and a generation recovered after reload. Only the send
   // callback applies our reply; polling is observational while that callback owns it.
-  const following = openGenerating && chatId !== null;
+  const following = (openGenerating || readOwed) && chatId !== null;
   useEffect(() => {
     if (!following || chatId === null) return;
     const id = chatId;
-    let reading = false;
     const timer = setInterval(() => {
-      if (reading) return;
-      reading = true;
-      refreshDetail(id).then(found => {
+      // Any read under way, not only a tick's: one taking longer than a tick would otherwise never get to finish.
+      if (readsOut.current.size > 0 && Date.now() - readStarted.current < READ_PATIENCE_MS) return;
+      refreshDetail(id, true).then(found => {
         if (found?.generating && stopWanted.current) {
           stopWanted.current = false;
           void api.chat.stop.mutate({ id }).catch(error => setChatError(`Could not stop: ${String(error)}`));
         }
         if (found && !found.generating) { applyPending(found); void refreshChats(); }
-      }, () => undefined).finally(() => { reading = false; });
+      }, () => undefined);
     }, 500);
     return () => { clearInterval(timer); };
   }, [following, chatId, refreshDetail, applyPending, refreshChats]);
@@ -496,11 +554,13 @@ function App() {
   }, [otherFollowing, refreshChats]);
 
   /** Sends. `options.source` is what goes with it when that isn't the editor text as it is now (a retry). */
-  const send = useCallback(async (text: string, options: { replaceFrom?: number; source?: string } = {}) => {
+  const send = useCallback(async (text: string, options: { replaceFrom?: number; source?: string; putBack?: { source: string | null; chart: Spec | undefined } } = {}) => {
     const message = text.trim();
     const current = latest.current;
     if (!message || sendingRef.current || current.generating) return;
     sendingRef.current = true;
+    // Whoever sends wants to see what comes back, wherever they had scrolled to.
+    threadAtBottom.current = true;
     const chat = chatRef.current;
     const sent = options.source ?? current.source ?? '';
     const ok = current.result?.ok ? current.result : undefined;
@@ -509,8 +569,11 @@ function App() {
     const edit = current.editing;
     const replaceFrom = options.replaceFrom ?? edit?.turn;
     const keptTurns = replaceFrom === undefined ? current.detail?.turns ?? [] : (current.detail?.turns ?? []).filter(t => t.id < replaceFrom);
-    ++detailRead.current;
+    dropReads(++detailRead.current);
+    afterRead.current = undefined;
+    setReadOwed(false);
     sentAfter.current = lastId(keptTurns);
+    replacing.current = replaceFrom;
     if (chat && current.detail) setDetail({ ...current.detail, turns: keptTurns });
     setEditing(undefined);
     if (edit && chat) saveEdit(chat, undefined);
@@ -523,15 +586,21 @@ function App() {
     store.set(PENDING_KEY, JSON.stringify({ chatId: chat, after: lastId(keptTurns), at: Date.now(), ...(replaceFrom === undefined ? {} : { replaced: replaceFrom }) }));
 
     const known = { id: chat };
+    let reread = false;
 
     /** Nothing was recorded as far as this page knows: the words go back in the box of their chat, and a resend stays one. */
-    const giveBack = () => {
+    const giveBack = (refused: boolean) => {
       const home = known.id ?? chat;
       if (chatRef.current === home) setDraft(latest.current.draft ? `${latest.current.draft}\n${text}` : text);
       else { const other = store.get(draftKey(home)); store.set(draftKey(home), other ? `${other}\n${text}` : text); }
       if (!chat) return;
       if (edit) saveEdit(chat, edit);
       if (chatRef.current !== chat) return;
+      // Only a refusal: with no answer, the retry may have gone through, and the hand edit is one undo away.
+      if (refused && options.putBack) {
+        if (options.putBack.source !== null) replaceSource(options.putBack.source);
+        setChart(options.putBack.chart);
+      }
       if (edit) setEditing(edit);
       if (current.detail) setDetail(current.detail);
       // What the server has, if it can still say. A stored resend ends the edit; its words stay in the box.
@@ -553,26 +622,37 @@ function App() {
         void refreshChats();
       }
       const outcome = await api.chat.send.mutate({ chatId: known.id, text: message, source: sent, ...(sample ? { sample } : {}), ...(replaceFrom === undefined ? {} : { replaceFrom }) });
+      replacing.current = undefined;
       const id = outcome.chatId ?? known.id;
       // Refused before anything was recorded: nothing happened, so the message goes back in the box.
       if (!outcome.ok && !outcome.turn) {
         setChatError(outcome.error);
         store.remove(PENDING_KEY);
-        giveBack();
+        giveBack(true);
       } else if (id) {
         store.remove(PENDING_KEY);
         store.remove(draftKey(null));
         const reply = outcome.turn as ChatTurn | undefined;
         if (chatRef.current === id && !store.get(editorKey(id))) store.set(editorKey(id), latest.current.source ?? '');
         applyReply(id, reply);
-        await refreshDetail(chatRef.current);
+        // The reply is the end of the generation, whatever becomes of the read that follows it.
+        reread = chatRef.current === id;
+        if (reread) setDetail(open => {
+          if (open?.id !== id) return open;
+          // A placeholder has no id or number to show: the read brings it.
+          if (!reply || reply.id === 0) return { ...open, generating: false };
+          const hasUser = open.turns.some(t => t.kind === 'user' && t.id > sentAfter.current);
+          const user: ChatTurn[] = hasUser ? [] : [{ kind: 'user', id: reply.id - 1, text: message, source: sent }];
+          return { ...open, generating: false, turns: [...open.turns.filter(t => t.id !== reply.id), ...user, reply] };
+        });
       }
     } catch (error) {
       sendingRef.current = false;
+      replacing.current = undefined;
       // No answer. The turn may be stored all the same, and then the words show twice, which beats losing them. The pending
       // mark stays, so a reply the server still gets to is found by a reload.
       setChatError(`Lost the server: ${error instanceof Error ? error.message : String(error)}`);
-      giveBack();
+      giveBack(false);
     } finally {
       sendingRef.current = false;
       setPendingText(undefined);
@@ -580,7 +660,9 @@ function App() {
       setStopping(false);
       void refreshChats();
     }
-  }, [applyReply, checkEdit, refreshChats, refreshDetail, setChatId, setDraft]);
+    // Outside the try: a read that fails says nothing about the send. Polling keeps at it until one lands.
+    if (reread) { setReadOwed(true); void refreshDetail(chatRef.current).catch(() => undefined); }
+  }, [applyReply, checkEdit, dropReads, refreshChats, refreshDetail, replaceSource, setChart, setChatId, setDraft]);
 
   const stop = useCallback(async () => {
     if (!latest.current.generating) return;
@@ -591,7 +673,7 @@ function App() {
       const outcome = await api.chat.stop.mutate({ id });
       if (!outcome.stopped && sendingRef.current) stopWanted.current = true;
       // A send of this page finishes by itself; following one, the next read shows the note.
-      if (!sendingRef.current) await refreshDetail(id);
+      if (!sendingRef.current) await refreshDetail(id).catch(() => undefined);
     } catch (error) { setChatError(`Could not stop: ${String(error)}`); }
     finally { if (!sendingRef.current) setStopping(false); }
   }, [refreshDetail]);
@@ -628,18 +710,26 @@ function App() {
     disownRuns();
     setResult(undefined);
     ranSource.current = undefined;
-    const found = await refreshDetail(id).catch(() => null);
-    if (chatRef.current !== id) return;
-    const turns = found?.turns ?? [];
-    const text = store.get(editorKey(id)) ?? newestVersion(turns)?.source;
-    if (text !== undefined) replaceSource(text);
-    setChart(parseSpec(store.get(chartKey(id))) ?? newestChart(turns));
-    if (found) { applyPending(found); checkEdit(found); }
+    // What this browser keeps for the chat needs no server, and typing from here on writes to it: it can't wait for a read.
+    const keptSource = store.get(editorKey(id));
+    if (keptSource !== null) replaceSource(keptSource);
+    setChart(parseSpec(store.get(chartKey(id))));
+    setReadOwed(true);
+    afterRead.current = { id, run: found => {
+      const turns = found?.turns ?? [];
+      // Only what the browser doesn't have, or still doesn't: it may have been typed or loaded since.
+      const newest = newestVersion(turns)?.source;
+      if (store.get(editorKey(id)) === null && newest !== undefined) replaceSource(newest);
+      if (store.get(chartKey(id)) === null) setChart(newestChart(turns));
+      if (found) { applyPending(found); checkEdit(found); }
+    } };
+    await refreshDetail(id).catch(() => undefined);
   }, [applyPending, checkEdit, disownRuns, leaveEdit, refreshDetail, replaceSource, setChart, setChatId]);
 
   /** A new chat keeps the editor and the results as they are. */
   const newChat = useCallback(() => {
     leaveEdit();
+    setReadOwed(false);
     setChatId(null);
     setDetail(undefined);
     setSelected(undefined);
@@ -673,9 +763,10 @@ function App() {
     const user = userTurnOf(turn);
     // Checked before anything changes: a retry that can't go must leave the editor alone.
     if (!user || latest.current.generating || sendingRef.current) return;
+    const putBack = { source: latest.current.source, chart: latest.current.chartSpec };
     replaceSource(user.source);
     setChart(newestChart((latest.current.detail?.turns ?? []).filter(t => t.id < user.id)));
-    void send(user.text, { replaceFrom: user.id, source: user.source });
+    void send(user.text, { replaceFrom: user.id, source: user.source, putBack });
     focusSoon(composer.current);
   }, [replaceSource, send, setChart, userTurnOf]);
 
@@ -744,7 +835,6 @@ function App() {
   // Keyed on what is at the end, not on a count: a reply swaps pending + generating for user + reply.
   const activityEnd = visibleActivity.map(item => `${item.id}:${item.status}:${item.kind === 'toolCall' ? item.arguments.length : item.text.length}`).join('|');
   const threadEnd = `${lastVisible?.id}:${pendingShown ?? ''}:${openGenerating}:${activityEnd}`;
-  const threadAtBottom = useRef(true);
   const trackThreadScroll = () => {
     const el = threadEl.current;
     if (el) threadAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -929,7 +1019,7 @@ function App() {
       if (event.key === 'Escape') { claim(); escapeToBox(); return; }
       if (event.shiftKey) return;
       // Native disclosure keyboard behavior belongs to activity, not the selected turn.
-      if (event.target instanceof Element && event.target.closest('[data-activity]')) return;
+      if (event.target instanceof Element && event.target.closest('.activity-log')) return;
       if (event.target instanceof Node && threadEl.current?.contains(event.target) && onThreadKey(event)) claim();
     };
     const release = (event: KeyboardEvent) => { keysDown.current.delete(event.key.toLowerCase()); };

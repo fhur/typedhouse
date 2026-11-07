@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { quoteIdentifier } from '@typedhouse/compiler';
 import { AGENT_SETTINGS, type Connection } from './clickhouse.js';
+import { cut } from './text.js';
 
-export const RESULT_LIMITS = Object.freeze({ ttlMs: 300_000, globalBytes: 8_000_000, snapshots: 64, snapshotBytes: 256_000, pageBytes: 16_000, pageRows: 20, cellChars: 512 });
+export const RESULT_LIMITS = Object.freeze({ ttlMs: 300_000, globalBytes: 8_000_000, snapshots: 64, snapshotBytes: 256_000, pageBytes: 16_000, pageRows: 20, cellChars: 512, columns: 32 });
 /** Tool-facing JSON: bigint/date/non-finite values are strings. Complex cells are bounded too. */
 export function boundedValue(value: unknown): { value: unknown; truncated: boolean } {
   let truncated = false, nodes = 0;
@@ -11,12 +12,12 @@ export function boundedValue(value: unknown): { value: unknown; truncated: boole
     if (typeof v === 'bigint') return String(v);
     if (v instanceof Date) return v.toISOString();
     if (typeof v === 'number' && !Number.isFinite(v)) return String(v);
-    if (typeof v === 'string') { if (v.length > 512) { truncated = true; return v.slice(0, 512) + '…'; } return v; }
+    if (typeof v === 'string') { if (v.length > 512) { truncated = true; return cut(v, 512) + '…'; } return v; }
     if (Array.isArray(v)) { if (v.length > 20) truncated = true; return v.slice(0, 20).map(x => visit(x, depth + 1)); }
     if (v && typeof v === 'object') {
       const entries = Object.entries(v);
-      if (entries.length > 32) truncated = true;
-      return Object.fromEntries(entries.slice(0, 32).filter(([k]) => {
+      if (entries.length > RESULT_LIMITS.columns) truncated = true;
+      return Object.fromEntries(entries.slice(0, RESULT_LIMITS.columns).filter(([k]) => {
         if (k.length > 128) { truncated = true; return false; }
         return true;
       }).map(([k, x]) => [k, visit(x, depth + 1)]));
@@ -57,7 +58,7 @@ export function createAgentCapabilities(connection: AgentConnection, now: () => 
   }
   function requireSchema() {
     const error = connection.schemaError?.();
-    if (error) throw new Error(`Schema unavailable: ${error.slice(0, 2000)}`);
+    if (error) throw new Error(`Schema unavailable: ${cut(error, 2000)}`);
   }
   function tableNamed(table: string) {
     requireSchema();
@@ -67,9 +68,9 @@ export function createAgentCapabilities(connection: AgentConnection, now: () => 
     return found;
   }
   return {
-    async queryRun(source: string, owner: string) {
+    async queryRun(source: string, owner: string, signal?: AbortSignal) {
       ownerCheck(owner);
-      const result = await connection.runAgentQuery(source);
+      const result = await connection.runAgentQuery(source, signal);
       let truncated = result.truncated, size = 0;
       const pages: unknown[][] = [[]]; let pageSize = 2;
       for (const row of result.rows) {
@@ -89,11 +90,12 @@ export function createAgentCapabilities(connection: AgentConnection, now: () => 
         total -= first[1].bytes; snapshots.delete(first[0]);
       }
       const resultId = randomUUID();
-      const columns = boundedValue(result.columns);
-      truncated ||= columns.truncated || result.sql.length > 8000;
+      // The same keys a row keeps, and reported apart: a cut column list says nothing about the rows.
+      const columns = result.columns.slice(0, RESULT_LIMITS.columns).filter(c => c.name.length <= 128).map(c => boundedValue(c));
+      const columnsTruncated = columns.length < result.columns.length || columns.some(c => c.truncated);
       snapshots.set(resultId, { scope, owner, expires: now() + RESULT_LIMITS.ttlMs, bytes: size, pages, cursors: pages.map(() => randomUUID()), truncated });
       return { ...queryResultsGet(resultId, null, owner),
-        sql: result.sql.slice(0, 8000), elapsedMs: result.elapsedMs, columns: columns.value, retainedRows: pages.reduce((n, p) => n + p.length, 0) };
+        sql: cut(result.sql, 8000), sqlTruncated: result.sql.length > 8000, elapsedMs: result.elapsedMs, columns: columns.map(c => c.value), columnsTruncated, retainedRows: pages.reduce((n, p) => n + p.length, 0) };
     },
     queryResultsGet,
     releaseOwner(owner: string) { for (const [id, s] of snapshots) if (s.scope === scope && s.owner === owner) snapshots.delete(id); },
@@ -104,7 +106,7 @@ export function createAgentCapabilities(connection: AgentConnection, now: () => 
       const offset = schemaOffset(key, cursor);
       const tables = connection.tables().filter(t => `${t.name}\n${t.binding}`.toLowerCase().includes(search.toLowerCase()));
       const page = tables.slice(offset, offset + 50);
-      return { tables: page.map(t => ({ name: t.name.slice(0, 256), binding: t.binding.slice(0, 256), engine: t.engine.slice(0, 128), columnCount: t.columns.length })), total: tables.length, nextCursor: schemaNext(key, offset + page.length, tables.length), truncated: page.some(t => t.name.length > 256 || t.binding.length > 256 || t.engine.length > 128) };
+      return { tables: page.map(t => ({ name: cut(t.name, 256), binding: cut(t.binding, 256), engine: cut(t.engine, 128), columnCount: t.columns.length })), total: tables.length, nextCursor: schemaNext(key, offset + page.length, tables.length), truncated: page.some(t => t.name.length > 256 || t.binding.length > 256 || t.engine.length > 128) };
     },
     tableDescribe(table: string, cursor?: string | null) {
       const t = tableNamed(table);
@@ -118,11 +120,11 @@ export function createAgentCapabilities(connection: AgentConnection, now: () => 
         const meta = metadata?.columns.find(m => m.name === c.name);
         const comment = meta?.comment ?? '';
         truncated ||= c.name.length > 256 || c.type.length > 512 || comment.length > 512;
-        return { name: c.name.slice(0, 256), type: c.type.slice(0, 512), comment: comment.slice(0, 512), defaultKind: (meta?.defaultKind ?? '').slice(0, 128), position: meta?.position ?? null };
+        return { name: cut(c.name, 256), type: cut(c.type, 512), comment: cut(comment, 512), defaultKind: cut(meta?.defaultKind ?? '', 128), position: meta?.position ?? null };
       });
-      return { name: t.name, binding: t.binding.slice(0, 256), engine: t.engine.slice(0, 128), keys: keys.value, sizeEstimates: { available: false, reason: 'Row and byte estimates are not collected by Studio introspection.' }, columns, totalColumns: t.columns.length, nextCursor: schemaNext(key, offset + page.length, t.columns.length), truncated };
+      return { name: t.name, binding: cut(t.binding, 256), engine: cut(t.engine, 128), keys: keys.value, sizeEstimates: { available: false, reason: 'Row and byte estimates are not collected by Studio introspection.' }, columns, totalColumns: t.columns.length, nextCursor: schemaNext(key, offset + page.length, t.columns.length), truncated };
     },
-    async columnsDescribe(table: string, columns: string[]) {
+    async columnsDescribe(table: string, columns: string[], signal?: AbortSignal) {
       const t = tableNamed(table);
       if (!columns.length || columns.length > 8 || new Set(columns).size !== columns.length) throw new Error('Select 1–8 distinct columns');
       const selected = columns.map(name => {
@@ -133,14 +135,20 @@ export function createAgentCapabilities(connection: AgentConnection, now: () => 
       // Identifiers must come from introspection AND are quoted. No user SQL/settings accepted.
       const stats = [];
       for (const column of selected) {
+        signal?.throwIfAborted();
         const id = quoteIdentifier(column.name);
+        // ClickHouse resolves a name to a SELECT alias first, so an alias equal to the column would read itself.
+        const collided = `${column.name}__stat`;
+        const as = (name: string) => (name === column.name ? collided : name);
         const simple = /^(Nullable\(|LowCardinality\()*(U?Int\d+|Float\d+|Decimal|Date|String|FixedString|Enum|Bool|UUID)/.test(column.type);
         const range = /^(Nullable\(|LowCardinality\()*(U?Int\d+|Float\d+|Decimal|Date)/.test(column.type);
-        const query = `SELECT count() AS sampledRows, countIf(isNull(${id})) AS nulls${simple ? `, uniqCombined64(${id}) AS approximateDistinct, topK(5)(substring(toString(${id}), 1, 128)) AS commonValues` : ''}${range ? `, toString(min(${id})) AS min, toString(max(${id})) AS max` : ''} FROM (SELECT ${id} FROM ${quoteIdentifier(connection.database)}.${quoteIdentifier(table)} LIMIT 10000)`;
-        const result = await connection.driver.query({ query, format: 'JSONEachRow', abort_signal: AbortSignal.timeout(15_000), clickhouse_settings: AGENT_SETTINGS });
+        const query = `SELECT count() AS ${as('sampledRows')}, countIf(isNull(${id})) AS ${as('nulls')}${simple ? `, uniqCombined64(${id}) AS ${as('approximateDistinct')}, topK(5)(substring(toString(${id}), 1, 128)) AS ${as('commonValues')}` : ''}${range ? `, toString(min(${id})) AS ${as('min')}, toString(max(${id})) AS ${as('max')}` : ''} FROM (SELECT ${id} FROM ${quoteIdentifier(connection.database)}.${quoteIdentifier(table)} LIMIT 10000)`;
+        const result = await connection.driver.query({ query, format: 'JSONEachRow', abort_signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000), clickhouse_settings: AGENT_SETTINGS });
         try {
-          const values = boundedValue((await result.json<unknown>())[0]);
-          stats.push({ column: column.name, type: column.type.slice(0, 512), statistics: values.value, truncated: values.truncated, unsupportedStatistics: !simple });
+          const [row] = await result.json<Record<string, unknown>>();
+          if (row && collided in row) { row[column.name] = row[collided]; delete row[collided]; }
+          const values = boundedValue(row);
+          stats.push({ column: column.name, type: cut(column.type, 512), statistics: values.value, truncated: values.truncated, unsupportedStatistics: !simple });
         } finally { result.close(); }
       }
       return { table, sampleScope: { maxRows: 10000, method: 'First rows in storage order; not random or representative. Each column sampled independently.', commonValuesScope: 'Approximate topK of non-null values converted to strings and truncated to 128 bytes BEFORE counting; long values can collide. No frequencies reported.', nullsScope: 'nulls is the number of NULL rows among sampledRows; approximateDistinct excludes NULL', scanRowsBudget: 1000000, scanBytesBudget: 67108864 }, columns: stats };

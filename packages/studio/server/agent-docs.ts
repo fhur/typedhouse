@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, resolve } from 'node:path';
+import { charStart, cut } from './text.js';
 
 interface Bundle { version: string; documents: Record<string, string> }
 const here = dirname(fileURLToPath(import.meta.url));
@@ -50,7 +51,7 @@ export function createAgentDocs() {
     while (cursors.size >= 256) cursors.delete(cursors.keys().next().value!);
     const token = randomUUID(); cursors.set(token, { key, offset, expires: Date.now() + 300_000 }); return token;
   }
-  const titleOf = (id: string) => /^title:\s*(.+)$/m.exec(bundle.documents[id] ?? '')?.[1]?.slice(0, 200) ?? id;
+  const titleOf = (id: string) => cut(/^title:\s*(.+)$/m.exec(bundle.documents[id] ?? '')?.[1] ?? id, 200);
   return {
     read(id: string, cursor?: string | null) {
       // Exact allowlisted bundle lookup: never resolve a caller-supplied filesystem path or URL.
@@ -58,7 +59,8 @@ export function createAgentDocs() {
       const text = bundle.documents[id]!;
       const key = JSON.stringify(['read', id]);
       const offset = offsetOf(key, cursor);
-      const page = text.slice(offset, offset + 8000);
+      // The next page starts where this one ended, so a pair at the boundary moves to it whole.
+      const page = cut(text.slice(offset, offset + 8001), 8000);
       return { id, title: titleOf(id), version: bundle.version, text: page, nextCursor: next(key, offset + page.length, text.length), truncated: offset + page.length < text.length };
     },
     search(query: string, cursor?: string | null) {
@@ -71,7 +73,8 @@ export function createAgentDocs() {
       return { version: bundle.version, matches: page.map(id => {
         const text = bundle.documents[id]!;
         const index = terms.length ? Math.max(0, text.toLowerCase().indexOf(terms[0]!)) : 0;
-        return { id, title: titleOf(id), excerpt: text.slice(Math.max(0, index - 80), index + 320) };
+        const start = charStart(text, Math.max(0, index - 80));
+        return { id, title: titleOf(id), excerpt: cut(text.slice(start, index + 321), index + 320 - start) };
       }), total: matches.length, nextCursor: next(key, offset + page.length, matches.length), truncated: offset + page.length < matches.length };
     },
   };
