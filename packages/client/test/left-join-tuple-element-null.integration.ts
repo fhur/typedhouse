@@ -13,13 +13,11 @@ import {
 import { compile } from '@typedhouse/compiler';
 import { canonical, connect, startServer, type Connection } from './asof-support.js';
 
-/** DEFECT on 26.10, not specific to ASOF. `.element()` over a null-extended Tuple field is Nullable on
- * the server and `meta` says so, but the descriptor does not. On an unmatched row, a field whose decoder
- * does not check returns `null` with no error (UInt8, String, FixedString, Decimal, Enum, UUID, IPv4,
- * LowCardinality); the others raise decode_invalid (Int64, UInt64, Float64, Bool, Date, Date32, DateTime,
- * DateTime64). A filter above changes the rows silently, whatever the field: `element('u8').eq(0)` keeps
- * the unmatched row on 24.3 and 24.8 and drops it on 26.10. Stays failing until the descriptor is right
- * or the behaviour is loud. Passes on 24.3 and 24.8. Array and Map element access stay typed. */
+/** `.element()` over a null-extended Tuple field reads the field's typed default on an unmatched row, on
+ * every version, and a filter on it keeps that row, as on 24.3 and 24.8. On 26.10 the server sends NULL
+ * there, which D21 reads through its default (it used to return `null` for UInt8, String, FixedString,
+ * Decimal, Enum, UUID, IPv4 and LowCardinality fields and raise decode_invalid for the others). Array and
+ * Map element access stay typed. Not specific to ASOF. */
 const opts = { engine: 'MergeTree', sortingKey: ['k'], partitionKey: [] } as const;
 
 const fields = [

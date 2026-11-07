@@ -36,31 +36,31 @@ const r = table(
 
 const printed = "Tuple(e Enum8('it\\'s' = 1), t DateTime('Asia/Tokyo'), `x\\`y` UInt8)";
 
-/** quoteString of `printed`: backslashes doubled, then quotes escaped. */
-const literal = `'${printed.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+/** The column's own type without the join's Nullable: the second D21 form, byte for byte. */
+const physical = (alias: string, column: string) =>
+  `replaceRegexpOne(toTypeName(\`${alias}\`.\`${column}\`), ` +
+  String.raw`'(?s)^Nullable\\((.*)\\)$', '\\1')`;
 
-const wrapped = (alias: string, column: string, type: string) =>
-  `ifNull(\`${alias}\`.\`${column}\`, defaultValueOfTypeName(${type}))`;
+const wrapped = (alias: string, column: string) =>
+  `CAST(ifNull(\`${alias}\`.\`${column}\`, defaultValueOfTypeName(${physical(alias, column)})), ${physical(alias, column)})`;
 
 const both = (ir: unknown) => [compile(ir as never).sql, emitNaive(ir as never).sql];
 
 const left = () => leftJoin({ t: from(l) }, { q: from(r) }).on(x => x.t.k.eq(x.q.k));
 
 describe('null-extended Tuple and JSON reads', () => {
-  it('wrap a whole Tuple with its escaped printed type, on both emitters', () => {
+  it('wrap a whole Tuple with its own type, on both emitters, and never the descriptor text', () => {
     for (const text of both(left().map(x => ({ tup: x.q.tup })).ir)) {
-      expect(text).toContain(`defaultValueOfTypeName(${literal})`);
+      expect(text).toContain(wrapped('q', 'tup'));
+      expect(text).not.toContain(printed);
+      expect(text).not.toContain("defaultValueOfTypeName('");
       expect(text).not.toMatch(/\{p\d+:/);
     }
-
-    expect(compile(left().map(x => ({ tup: x.q.tup })).ir).sql).toContain(
-      wrapped('q', 'tup', literal),
-    );
   });
 
   it('wrap JSON', () => {
     for (const text of both(left().map(x => ({ js: x.q.js })).ir))
-      expect(text).toContain("defaultValueOfTypeName('JSON')");
+      expect(text).toContain(wrapped('q', 'js'));
   });
 
   it('wrap under element, where, orderBy, groupBy and raw sql in a folded join block', () => {
@@ -72,9 +72,9 @@ describe('null-extended Tuple and JSON reads', () => {
     const text = compile(q.ir).sql;
     // The computed select list nests over the join block and reads its one wrapped leaf.
     expect(text.match(/defaultValueOfTypeName/g)!.length).toBe(3);
-    expect(text).toMatch(/SELECT ifNull\(`q`\.`tup`, .*\) AS `__typedhouse_leaf_\d+` FROM/);
-    expect(text).toMatch(/WHERE .*ifNull\(`q`\.`tup`/);
-    expect(text).toMatch(/ORDER BY .*ifNull\(`q`\.`tup`/);
+    expect(text).toContain(`SELECT ${wrapped('q', 'tup')} AS \`__typedhouse_leaf_`);
+    expect(text).toMatch(/WHERE .*CAST\(ifNull\(`q`\.`tup`/);
+    expect(text).toMatch(/ORDER BY .*CAST\(ifNull\(`q`\.`tup`/);
   });
 
   it('extend only the null-extended input, per kind', () => {

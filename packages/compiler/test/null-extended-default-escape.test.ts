@@ -5,44 +5,69 @@ import {
   fullJoin,
   leftJoin,
   print,
+  quoteName,
+  quoteString,
   rightJoin,
   table,
   type CHType,
 } from '@typedhouse/core';
 import { compile, emitNaive } from '@typedhouse/compiler';
 
-/** D21 Tester: the type text is a SQL string literal. Read back with ClickHouse's own unescaping, every
- * literal must be exactly the printed descriptor, so nothing in a name, label or forged raw text can end
- * the literal early or reach SQL as code. */
+/** D21 Tester, second form. The wrapper takes the type from the column, `toTypeName(c)`, so no text of
+ * the descriptor may reach the SQL, however hostile its names, labels, zones or forged raw text. The only
+ * literals the wrapper writes are its two fixed regex arguments. */
 const opts = { engine: 'MergeTree', sortingKey: ['k'], partitionKey: [] } as const;
 
-/** ClickHouse string literal unescaping, for the escapes quoteString writes. */
-function unescape(body: string): string {
-  const map: Record<string, string> = { n: '\n', r: '\r', t: '\t', '0': '\0', b: '\b', f: '\f' };
-  return body.replace(/\\(.)/gs, (_, ch: string) => map[ch] ?? ch);
-}
+const FIXED_PATTERN = String.raw`(?s)^Nullable\\((.*)\\)$`;
 
-/** Every literal argument of defaultValueOfTypeName, scanned as the server lexes a quoted string. */
+const FIXED_GROUP = String.raw`\\1`;
+
+/** Every single-quoted literal in the SQL, as written (escapes kept), lexed as the server reads them. */
 function literals(sql: string): string[] {
   const out: string[] = [];
-  const marker = "defaultValueOfTypeName('";
-  let at = sql.indexOf(marker);
 
-  while (at >= 0) {
-    let i = at + marker.length;
+  for (let i = 0; i < sql.length; i++) {
+    if (sql[i] === '`') {
+      for (i++; i < sql.length && sql[i] !== '`'; i++) if (sql[i] === '\\') i++;
+      continue;
+    }
+
+    if (sql[i] !== "'") continue;
     let body = '';
 
-    for (; i < sql.length && sql[i] !== "'"; i++) {
+    for (i++; i < sql.length && sql[i] !== "'"; i++) {
       if (sql[i] === '\\') body += sql[i++]!;
       body += sql[i]!;
     }
 
-    // The literal must close directly into the call's closing parenthesis.
-    expect(sql.slice(i, i + 2)).toBe("')");
-    out.push(unescape(body));
-    at = sql.indexOf(marker, i);
+    out.push(body);
   }
 
+  return out;
+}
+
+/** Hostile pieces of a descriptor, raw and in each spelling print or quoteString would give them. */
+function fragments(t: CHType): string[] {
+  const out: string[] = [];
+
+  const add = (s: string) => {
+    if (s.length > 2) out.push(s, quoteString(s), quoteName(s));
+  };
+
+  const walk = (x: CHType) => {
+    if (x.kind === 'Tuple')
+      for (const item of x.items) {
+        if (item.name !== undefined) add(item.name);
+        walk(item.type);
+      }
+    else if (x.kind === 'Enum') for (const v of x.values) add(v.name);
+    else if ((x.kind === 'DateTime' || x.kind === 'DateTime64') && x.tz) add(x.tz);
+    else if (x.kind === 'Unknown') add(x.raw);
+    else if (x.kind === 'Nullable' || x.kind === 'LowCardinality' || x.kind === 'Array')
+      walk(x.inner);
+  };
+
+  walk(t);
   return out;
 }
 
@@ -79,22 +104,30 @@ describe.each(Object.keys(hostileTypes))('%s', name => {
     ['leftJoin', leftJoin],
     ['rightJoin', rightJoin],
     ['fullJoin', fullJoin],
-  ] as const)('%s: each literal reads back as the printed type, on both emitters', (_, f) => {
-    // `q` is the null-extended input in each kind: rightJoin takes it first.
-    const sides =
-      f === rightJoin ? [{ q: from(r) }, { t: from(l) }] : [{ t: from(l) }, { q: from(r) }];
+  ] as const)(
+    '%s: no descriptor text, and only the two fixed literals, on both emitters',
+    (_, f) => {
+      // `q` is the null-extended input in each kind: rightJoin takes it first.
+      const sides =
+        f === rightJoin ? [{ q: from(r) }, { t: from(l) }] : [{ t: from(l) }, { q: from(r) }];
 
-    const q = (f as any)(...sides)
-      .on((x: any) => x.t.k.eq(x.q.k))
-      .map((x: any) => ({ k: x.t.k, h: x.q.h }));
+      const q = (f as any)(...sides)
+        .on((x: any) => x.t.k.eq(x.q.k))
+        .map((x: any) => ({ k: x.t.k, h: x.q.h }));
 
-    for (const emit of [compile, emitNaive]) {
-      const { sql, params } = emit(q.ir);
-      const found = literals(sql);
-      expect(found.length).toBeGreaterThan(0);
-      for (const literal of found) expect(literal).toBe(print(type));
-      // No parameter is created from the type text.
-      expect(Object.values(params).some(v => String(v).includes('Tuple('))).toBe(false);
-    }
-  });
+      for (const emit of [compile, emitNaive]) {
+        const { sql, params } = emit(q.ir);
+        expect(sql).toContain('CAST(ifNull(');
+
+        // No part of the printed descriptor: the whole text, each hostile name and label, the zone, the
+        // forged raw text, in any of the spellings print or quoteString would give them.
+        expect(sql).not.toContain(print(type));
+        for (const fragment of fragments(type)) expect(sql, fragment).not.toContain(fragment);
+
+        // The only string literals in the query are the wrapper's two fixed ones, once per read.
+        expect([...new Set(literals(sql))].sort()).toEqual([FIXED_GROUP, FIXED_PATTERN].sort());
+        expect(Object.values(params).some(v => String(v).includes('Tuple('))).toBe(false);
+      }
+    },
+  );
 });

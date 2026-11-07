@@ -842,10 +842,8 @@ describe.each(['24.3', '24.8', '26.10'] as const)('ASOF native on %s', (version:
           id: r.t.id,
           rk: r.q.k,
           rts: r.q.ts,
-          // 26.10 reports a null-extended Tuple as Nullable(Tuple): null-extended-tuple-limit.integration.ts.
-          ...Object.fromEntries(
-            kinds.filter(([n]) => version !== '26.10' || n !== 'tup').map(([n]) => [n, r.q[n]]),
-          ),
+          // Every kind on every version, `tup` included on 26.10 since D21 reads it as its default.
+          ...Object.fromEntries(kinds.map(([n]) => [n, r.q[n]])),
         }));
 
     beforeAll(async () => {
