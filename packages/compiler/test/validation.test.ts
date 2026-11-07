@@ -52,6 +52,54 @@ it('500 meaningful mutation recipes, with exact diagnostics for both emitters', 
   );
 });
 
+it.each(['filter', 'projection', 'aggregate'] as const)(
+  'rejects forbidden typed fn.js metadata in %s before rewriting or execution',
+  shape => {
+    const implementation = vi.fn(() => 3);
+
+    for (const js of [implementation, 'forbidden', null, false, 3, {}]) {
+      const root = structuredClone(
+        shape === 'filter'
+          ? source.where(r => r.id.ge(0n)).where(r => r.id.gt(3n)).ir
+          : shape === 'projection'
+            ? source.map(r => ({ p: r.id.gt(3n) })).ir
+            : source.aggregate(() => ({ n: count() })).ir,
+      );
+
+      const expr =
+        root.kind === 'Filter'
+          ? root.pred
+          : root.kind === 'Project'
+            ? root.exprs.p
+            : root.kind === 'Aggregate'
+              ? root.aggs.n
+              : undefined;
+
+      if (!expr || (expr.kind !== 'Call' && expr.kind !== 'Agg')) throw new Error('fixture');
+      // Deliberately cross the readonly/never boundary to model manually supplied IR.
+      Object.assign(expr.fn, { js });
+
+      const path =
+        shape === 'filter' ? 'root.pred' : shape === 'projection' ? 'root.exprs.p' : 'root.aggs.n';
+
+      for (const emit of [compile, emitNaive]) {
+        let caught: unknown;
+
+        try {
+          emit(root);
+        } catch (error) {
+          caught = error;
+        }
+
+        expect(caught).toBeInstanceOf(ValidationError);
+        expect(caught).toMatchObject({ code: 'invalid_function_metadata', path });
+        expect((caught as ValidationError).node).toBe(expr);
+        expect(implementation).not.toHaveBeenCalled();
+      }
+    }
+  },
+);
+
 it('a missing-child guard bypass really fails, shrinks and replays the minimized diagnostic mismatch', () => {
   const validate = structural.validateStructure;
 

@@ -234,6 +234,16 @@ export function mutation(recipe: Recipe): {
         node.pred.fn.known = knownEvidence('gt', false);
         edge = '.pred';
         code = 'invalid_function_metadata';
+      } else if (recipe.malformation === 'invalidTag' && recipe.value % 2 === 1) {
+        // Executable metadata must be rejected before two filters can merge and
+        // take ownership of their combined predicate.
+        node = structuredClone(
+          source.where(r => r.id.ge(0n)).where(r => r.id.gt(BigInt(recipe.value))).ir,
+        );
+
+        node.pred.fn.js = () => recipe.value;
+        edge = '.pred';
+        code = 'invalid_function_metadata';
       } else if (recipe.malformation === 'invalidChild') {
         node.pred.fn = { ...node.pred.fn, deterministic: null, argumentPolicies: [null] };
         edge = '.pred.fn.argumentPolicies[0]';

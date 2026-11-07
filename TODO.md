@@ -1,23 +1,10 @@
 ## Property-arbitrary coverage hardening
 
 - Expanded CHType and Decimal-normalization generators; malformed-IR expression, descriptor, metadata and output-schema cases; project-merge/CTE provenance, cloning and join scopes; aggregate alias keys, range guards and nullable rollups.
-- Existing native oracles, assertions, seeds, run counts and production source are unchanged; no new tests. Matching V8 coverage provider added for measurement only.
-- Fixed full-unit branch benchmark: 3308/3553 → 3380/3553 (95.13%). Archived research branch `autoresearch/coverage-hardening-20260717` retains experiment provenance.
+- During the research phase, existing native oracles, assertions, seeds, run counts and production source stayed unchanged; no tests were added. Matching V8 coverage provider added for measurement only.
+- Historical fixed-source benchmark (before the F1 production fix): 3308/3553 → 3380/3553 (95.13%). Archived research branch `autoresearch/coverage-hardening-20260717` retains experiment provenance.
 - Prior verification passed full units, typecheck, native campaigns, extra seeds 104729/130363/155921 and six negative controls. Final cleanup passed `pnpm check:all:uncached-baseline`, `pnpm test:coverage` (124 files; 1806 passed, 1 pre-existing skip; 3380/3553 branches), all three extra seeds and all six negative controls. Root compiler checks also passed on TypeScript 5.5.4 and 7.0.2; full version-specific gates and docs were not rerun.
-- **F1 — unpatched follow-up:** manually supplied `fn.js` metadata (typed `js?: never`) is accepted by `emitNaive`, while `compile` leaks a raw `TypeError` during filter merging. Neither emitter invokes the supplied function. Production rejection needs a decision; the failing generator expansion remains unapplied. Minimal JavaScript repro, run from the repository root after building:
-
-```js
-import { col, from, table } from './packages/core/dist/index.js';
-import { compile, emitNaive } from './packages/compiler/dist/index.js';
-
-const source = from(table('validation_rows', { id: col.UInt64 }, {
-  engine: 'Memory', sortingKey: [], partitionKey: [],
-}));
-const root = structuredClone(source.where(r => r.id.ge(0n)).where(r => r.id.gt(3n)).ir);
-root.pred.fn.js = () => 3;
-emitNaive(root); // Accepts.
-compile(root); // Throws a raw TypeError.
-```
+- **F1 — fixed:** typed scalar and aggregate resolvers now reject non-`undefined` `fn.js` metadata as `invalid_function_metadata`, matching known-function validation. Both compiler paths report the original expression/path as `ValidationError` before rewriting; supplied functions are never invoked. Regression tests cover stacked filters, projections and aggregates with function and non-function payloads. The previously failing property-generator expansion is enabled, and type tests pin `js?: never` for calls and aggregates. Verification passed: the new regressions failed before the fix and pass afterward; `pnpm check:all:uncached-baseline` (including 766 compiler/client integration tests), malformed-IR campaigns under seeds 104729/130363/155921, and root compiler checks on TypeScript 5.5.4/7.0.2.
 
 ## Track A: `min`, `minIf`, `argMin`, `argMinIf`, `quantileExact`, `quantileExactIf` (2026-11-05)
 
