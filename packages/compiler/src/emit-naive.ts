@@ -2,6 +2,7 @@ import {
   containsAggregateState,
   isNullable,
   print,
+  quoteString,
   scalarDescriptor,
   outputLeaves,
   expandedOutput,
@@ -97,6 +98,10 @@ const outputKinds = {
   cross: ['cross'],
 } as const;
 
+/** Kinds the Decided row keeps unwrapped by null extension: a declared `Nullable(Tuple)` is not one. */
+const keepsDefault = (t: CHType): boolean =>
+  t.kind === 'Tuple' || (t.kind === 'scalar' && t.name === 'JSON');
+
 /** A join input column read where the Join's output declares it null-extended but the Join no
  * longer extends that input (after LeftToInner): toNullable gives exactly outerColumnType's
  * descriptor on 24.8 (scalars, LowCardinality, SimpleAggregateFunction alike), so expression
@@ -111,8 +116,16 @@ function joinRead(
 ): string {
   const index = join.inputs.findIndex(([a]) => a === alias);
 
-  if (same(declared, physical) || nullExtended(join.joinKind, index, join.inputs.length))
-    return sql;
+  // D21: a Tuple or JSON keeps its type and its default when unmatched (Decided, outer join row types),
+  // but under join_use_nulls = 1 the server wraps it in Nullable and sends NULL, Tuple from 26.3 and JSON
+  // from 25.3. ifNull restores the default and the declared type, and is the identity on older servers.
+  // The type is text, not a value, so it is a quoted literal, never a parameter.
+  if (nullExtended(join.joinKind, index, join.inputs.length))
+    return keepsDefault(declared)
+      ? `ifNull(${sql}, defaultValueOfTypeName(${quoteString(print(declared))}))`
+      : sql;
+
+  if (same(declared, physical)) return sql;
 
   // Fix round 1 (m3): a WHERE or ORDER BY over total expressions exposes no type, and every value read here is
   // non-NULL, so the column is read bare: KeyCondition and PREWHERE see the key as a hand-written INNER join does.

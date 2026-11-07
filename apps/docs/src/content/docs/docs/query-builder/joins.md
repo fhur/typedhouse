@@ -192,9 +192,17 @@ The compiler appends `SETTINGS join_use_nulls = 1` (with a trailing comment) whe
 
 An outer join's `.on` takes only equalities between one column of each input. A conjunct that is not an `eq` (`lt`, `or`, `startsWith`, …) throws `join_condition_not_equi` when `.on` runs, because it would decide which rows are null-extended rather than which rows survive. An inner join moves such conditions above the join as a filter instead. An `eq` that passes the builder but is not a column-to-column equality across the two inputs fails later, at `compile`/`toSQL()`, with `join_condition_arity`. That covers a computed operand (`r.a.id.plus(1).eq(r.b.id)`), both columns from the same input, a constant (`r.a.id.eq(1)`), and an empty array of conditions. A `where` after an outer join filters the joined rows, `NULL`s included, so `where((r) => r.plan.seats.gt(0))` also drops unmatched accounts. The optimizer does not push filters into or below an outer join.
 
-### Tuple columns on ClickHouse 26.10
+### `Tuple` and `JSON` columns
 
-The descriptors above were checked against 24.8, and 24.3 returns the same for a `Tuple`. On 26.10, `join_use_nulls = 1` also wraps a `Tuple` in `Nullable`: the server reports `Nullable(Tuple(a UInt8))` where the descriptor says `Tuple(a UInt8)`, and sends `NULL` rather than a tuple of defaults for an unmatched row. Measured with `leftJoin`, `rightJoin`, `fullJoin` and `asofLeftJoin`, named and unnamed tuples: a matched row still reads as usual, and **an unmatched row makes `run` throw a `QueryError` (`decode_invalid`)**, because the declared type has no `null`. `toSQL()` does not show this. `Array`, `Map` and `Nested` columns kept their type and default on 26.10; the other kinds in the list above were not measured there. `element` is not a way around it: on an unmatched row `r.q.tup.element('a')` returned `null` while its descriptor says `UInt8`, so the value contradicts its type. On 26.10, select a `Tuple` from an input that can go unmatched only when every row matches, or use an inner join.
+From ClickHouse 26.3, `join_use_nulls = 1` also wraps a `Tuple` in `Nullable` and sends `NULL` for an unmatched row, and from 25.3 it does the same to `JSON`; 24.3 and 24.8 keep the type and send its default. So that every version returns what the descriptor says, the compiler reads a null-extended `Tuple` or `JSON` column through `ifNull`, with its printed type as a quoted literal:
+
+```sql
+ifNull(`plan`.`dims`, defaultValueOfTypeName('Tuple(w UInt32, h UInt32)'))
+```
+
+An unmatched row then reads as the type's default, `(0, 0)` or `{}`, and so does every `element` of it, in a select list, `where`, `orderBy`, `groupBy` or raw `sql`. This was measured on 24.3, 24.8, 25.3, 25.8, 25.10, 26.3 and 26.10 (`JSON` from 24.8), through `leftJoin`, `rightJoin`, `fullJoin` and `asofLeftJoin`. On older servers the wrapper changes nothing. Only reads of the null-extended input are wrapped: not `ON` conditions, not inner joins, not other column kinds, and not a column declared `Nullable(Tuple(…))`.
+
+One limit stays. A type the descriptor parser does not model, such as `Point`, is declared `unknown`, so it is read as it comes: `(0, 0)` up to 25.10 and `NULL` from 26.3 for an unmatched `Point`. Its declared type does not promise either.
 
 ## ASOF joins
 
@@ -281,7 +289,7 @@ Parameters:
 
 <!-- generated-sql:end -->
 
-`asofLeftJoin` keeps a left row with no match, with the same null extension as `leftJoin`, including [its limit on `Tuple` under 26.10](#tuple-columns-on-clickhouse-2610), and appends `join_use_nulls = 1`: here `bid` is `number | null`. A `NULL` in an equality or in the inequality, on either side, never matches. Without `join_use_nulls = 1` such a row carries type defaults, which is why the setting is always present.
+`asofLeftJoin` keeps a left row with no match, with the same null extension as `leftJoin` and appends `join_use_nulls = 1`: here `bid` is `number | null`. A `NULL` in an equality or in the inequality, on either side, never matches. Without `join_use_nulls = 1` such a row carries type defaults, which is why the setting is always present.
 
 Both `.on` and `.asof` accept computed operands and parameters, for example `r.t.id.plus(5).ge(r.q.id.plus(1))`. Each operand must read exactly one input, and a condition on one input alone is refused (`join_condition_arity` in `.on`, `invalid_asof_condition` in `.asof`). A date or time offset has no typed method; write it with a SQL snippet in the operand, such as ``sql`${r.t.ts} - ${5}`.as(col.DateTime('UTC'))``. The builder has no way to express a single-input condition in `ON`, because ClickHouse treats it as a filter before matching, which is neither a `where` above the join nor one on the input you might have meant.
 
