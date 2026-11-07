@@ -1,6 +1,6 @@
 ## Track D: `-State`/`-Merge`, `SETTINGS`, `ASOF JOIN`, `WITH FILL`, `OVER` (2026-11-05, PM)
 
-**Status.** D1 to D11 are accepted by the PM; see the acceptance sections at the end of this track. D21 (null-extended `Tuple` and `JSON`, not specific to ASOF) is ready and comes next. D12 follows D21. D13 to D15, then D16 to D19, follow in order. Q1 to Q7 are recorded under Decisions; orchestrator rulings stay open to the owner's objection. Build order is the owner's. Line numbers are at master `cd59ba9`.
+**Status.** D1 to D11 are accepted by the PM; see the acceptance sections at the end of this track. D21 (null-extended `Tuple` and `JSON`, not specific to ASOF) is in progress. D12 is ready and may start in a second worktree now; D13 waits for D21 to merge. D14 and D15, then D16 to D19, follow in order. The version sweep before `WITH FILL` and `OVER` is done (see its section). Q1 to Q7 are recorded under Decisions; orchestrator rulings stay open to the owner's objection. Build order is the owner's. Line numbers are at master `cd59ba9`.
 
 Facts below were measured on `clickhouse/clickhouse-server:24.8` (24.8.14.39) unless stated. The minimum-version checks ran on 24.3.18.7 and cover only what the 24.3 notes name. The SQL in the API proposals was run on 24.8 by hand; a compiler does not emit it yet, so the exact text is a target.
 
@@ -73,6 +73,18 @@ Facts below were measured on `clickhouse/clickhouse-server:24.8` (24.8.14.39) un
 - There is no upper bound: `TO 2000000000` produced 1999999999 rows under a 100 MB memory limit. Docs must warn.
 - `INTERPOLATE (v AS v)` carries the last value; see Q5.
 
+**Version sweep (PM, 2026-11-07).** Every claim above was rerun with `chprobe.py` on 24.3.18, 24.8.14, 25.3.14, 25.8.33, 25.10.7, 26.3.62 and 26.10.3, with the analyzer on (the default) and again with `allow_experimental_analyzer = 0`. `enable_analyzer` is unknown on 24.3, code 115. Tables, tagged with image digests: `/tmp/claude-1000/-home-fernandohur-repos-typedhouse/d8f68019-bf18-4d79-bf40-0d5ca77cb719/scratchpad/probe/fill.md`, `fill-noanalyzer-old.md`; statements in `fill.sql`. Unless a bullet below says otherwise, each claim above held, unchanged, on all seven versions, analyzer on and off: order of operations; outer filters; `LIMIT`, `OFFSET` and `LIMIT BY` counting filled rows; `count`, `ORDER BY` and `GROUP BY` over a nested fill; CTE and `UNION ALL`; empty input; parameters in `FROM`, `TO`, `STEP` and `INTERVAL` (including `DateTime64(3)` parameters); key types and refused types; integer step on `DateTime64(3)` in seconds; `MONTH` steps; sign rules; prefix and trailing keys; filled-row defaults; computed columns as defaults; `INTERPOLATE`; aliases; `max_block_size = 1` and `100`; `max_threads = 1`.
+- **Corrected: `NULLS FIRST`.** It disables the fill only without `FROM`. With `FROM`, it fills from the first non-null key and ignores the `FROM` value itself: `nv NULLS FIRST WITH FILL FROM 0` gave `NULL, 1, 2, …` with no 0, and the `Date` case did the same. Neither form is a fill a caller would expect, so the rule refusing `NULLS FIRST` on a fill key stands, now for both reasons.
+- **New, version-dependent:** a `DateTime` bound on a `DateTime64` key is accepted on 26.10 and raises 475 on 24.3 to 26.3. The planned type rule (a bound has the key's own kind) refuses it everywhere, so emission never depends on this.
+- **New: `STALENESS`** exists from 25.3 (code 62 on 24.3 and 24.8), and its result depends on the analyzer. With the analyzer off, 25.3 to 25.10 omit a trailing filled row and accept `STALENESS` with `FROM`/`TO`, which raises 475 with it on. Not exposed, on the `percent_rank` precedent: absent on the declared minimum.
+- **New: parameter types.** A `Nullable(T)` parameter in `FROM` raises 475 on all versions, so a bound on a `Nullable` key binds as `T`. A `Float64` step parameter on a `UInt32` key raises 475; `Int64` bounds on a `UInt32` key and an `Int32` bound on a `Float64` key work. So a step parameter takes the key's family (integer keys: `Int64`, so a negative `DESC` step fits; float keys: `Float64`), and bounds take the key's non-`Nullable` type.
+- **New: integer step on a zoned `DateTime` crosses DST.** `STEP 86400` on `DateTime('Europe/Berlin')` gave `12:00`, then `13:00` after the change; `INTERVAL 1 DAY` kept `12:00`. This supports the rule that temporal keys take only `INTERVAL`.
+- **New: `Bool` keys fill** (no rows added between `false` and `true`), and a `Float64` key with no step uses step 1. `Bool` stays outside the typed key set: it is not a sensible fill key.
+- **Checked: `Enum` with no zero member** raises after output started: code 36 on 24.3 and 24.8, code 691 on 25.3 to 26.3, and 26.10's framing ended the raw HTTP response early. The client's `parsedRow` path handles 26.10's framing (D6).
+- **Checked: ties.** With 3 parts, `ORDER BY d WITH FILL LIMIT 3` over tied keys returned different rows between runs on 24.8, the only version where the 5 runs disagreed. With a total order (`d WITH FILL, v`) every version was stable. Differential tests keep the total order.
+- **Checked: fill over an outer join.** A null-extended non-key `Tuple` reads `NULL` on filled rows on 26.3 and 26.10 without D21; D21's read wrap covers it.
+- **Checked: the guard.** `max_result_rows` counts filled rows (code 396), on every version.
+
 **IR.** `SortKey.fill?: { from?, to?, step? }`, where `from`/`to` are typed `Param`s and `step` is a `Param` plus an optional interval unit. No rewrite rule crosses `Sort` (only Aggregate, Project, Union, ArrayJoin and Join have push rules), the planner's rank opens a new block for a Filter above it, and the Aggregate and Distinct arms already refuse a block with a `Sort` clause. A fill key must be a bare `ColumnRef` (`invalid_fill_key`); computed keys go through `map` first. This avoids the `n + 10 AS n ... ORDER BY n` alias problem, and the probe showed the base column's filled value is a default anyway.
 
 **Passes.** `rewrite-rel`: `edges` and the `Sort` arm of `visit` must include fill parameters. `prune-columns`: fill key demand as for `Sort`; no fill-specific change. `plan-ctes`: `expressions`. `plan-selects`: a `Project` above a fill folds only if it is an identity selection (already the rule); D13 pins that with a test. `emit-naive`: three block renderers plus the naive `ORDER BY`, printing `FROM`, `TO`, `STEP` in that order, and negating the step for `DESC`.
@@ -102,6 +114,20 @@ Facts below were measured on `clickhouse/clickhouse-server:24.8` (24.8.14.39) un
 - **Window results repeat only under a total order.** One CTE joined to itself with `row_number() OVER (PARTITION BY g)` on 600,000 rows in 2 parts differed on 529,376 rows; with `ORDER BY id` it differed on 0.
 - `sumState(u) OVER ()` returns a state. A `Subquery` in a key is accepted by the server.
 - 24.3 runs all nine window functions below and the catalog aggregates under `OVER`. It has the same code 456 and the same `sum` defect, and the alias capture.
+
+**Version sweep (PM, 2026-11-07).** As for `WITH FILL`: seven versions, analyzer on and off. Tables: `/tmp/claude-1000/-home-fernandohur-repos-typedhouse/d8f68019-bf18-4d79-bf40-0d5ca77cb719/scratchpad/probe/over.md`, `over-noanalyzer.md`, `over2.md`, `over3.md` (with `-noanalyzer` variants); statements in `over*.sql`. Unless a bullet below says otherwise, each claim above held on all seven versions with the analyzer on. That covers placement (184 in `WHERE`, `HAVING`, `GROUP BY`, inside an aggregate or another window), arithmetic around `OVER`, parameters in arguments, `-If` predicates and levels, `GROUP BY` with windows matching the nested form, `DISTINCT`, `LIMIT BY`, `HAVING`, alias capture by a sibling under the default settings and not under `prefer_column_name_to_alias = 1`, qualified names, `LowCardinality` dropped from results, `Nullable` kept, empty-frame defaults, frame errors (36 or 48), first-row `lagInFrame` defaults and the `leadInFrame` default frame. It also covers every catalog aggregate and `If` form as a window function, `-State` returning a state, `-Merge` over a state column, and the shared-CTE result differing without a total order (600,000 of 600,000 rows).
+- **Corrected: code 456** happens on 24.3 to 25.8 only. 25.10 and later accept parameters in an inline `PARTITION BY`, `ORDER BY` and frame offsets, and 26.10 also in a named `WINDOW`. The `invalid_window_key` rule stays, because 24.3 is the declared minimum.
+- **Corrected: the `sum(x ± constant)` defect** exists on 24.3 to 26.3 (code 10, or a wrong row count of 1 instead of 5) and is fixed on 26.10. With the analyzer off it raises codes 215 or 47 instead. `invalid_window_argument` stays, on the same minimum-version grounds.
+- **Corrected: function availability.** `percent_rank` exists from 24.8 and `cume_dist` from 26.3. `lag`/`lead` exist from 25.8 with the analyzer on; with it off they raise code 48 on 25.8 to 26.3. The nine typed functions exist on all seven.
+- **New: `ntile` on 24.3** raises code 36 when another window function in the same SELECT has an identical spec; with the analyzer off, every version up to 26.3 does. Alone, or beside a different spec, it works everywhere. Settled on the engines precedent (Track C): the server's error surfaces as `QueryError`, documented, with no compiler workaround.
+- **New, version-dependent type: a `lagInFrame`/`leadInFrame` default of another type.** A `Float64` default on a `UInt32` argument, or `NULL`, raises 36 on 24.3 to 26.3, and on 26.10 succeeds and widens the result to `Float64` or `Nullable(UInt32)`. So the rule that the default has the argument's own type (`NoInfer`) is required, not only tidy: otherwise the result type would depend on the server.
+- **New, version-dependent rows: `RANGE` offsets over a `Nullable` key.** On the row whose key is `NULL`, 24.3 to 26.3 returned 110 and 26.10 returned 20. Settled: `invalid_window_frame` refuses `RANGE` offsets over a `Nullable` key. `ROWS` frames and `RANGE UNBOUNDED`/`CURRENT ROW` are unaffected.
+- **New: `RANGE … INTERVAL` offsets** work with the analyzer off on 24.3 to 26.3 and raise 36 with it on. Refused, as planned.
+- **New: `row_number(x)`** returned 3 on some versions and 1 on others for the same first row. It stays zero-argument only.
+- **Checked: filters and limits above a window stay above.** `EXPLAIN` shows the `Filter` step above the `Window` step for a partition-key and a non-key filter, and `LIMIT` above `Window`, on all seven. Rows are correct in both nested forms.
+- **Checked: ties.** `row_number` and `first_value` with tied `ORDER BY` keys returned different rows between runs on every version; `rank` was repeatable; `max_threads = 1` was repeatable in this probe. Differential tests order by a unique key.
+- **Checked: a window and `WITH FILL` in one SELECT.** The window column of a filled row is the type default (0), not computed. A window over a filled subquery computes over the filled rows. D13 and D17 keep the window and the fill in separate blocks unless a test pins the folded form.
+- **Checked: a window over a null-extended `Tuple`** reads `NULL` on 26.3 and 26.10 without D21.
 
 **Call shape (owner decision, Q3).**
 ```ts
@@ -176,7 +202,7 @@ SELECT sum(`amount`) OVER (PARTITION BY `category` ORDER BY `ts` DESC) AS `runni
 - `invalid_window_frame`: non-integer, negative or above 32-bit offsets, start after end, `RANGE` offsets without exactly one integer or `Date` key.
 - Emit names qualified in naive and derived forms.
 
-**Availability.** Typed: nine functions above, all on 24.3 and 24.8, plus the catalog aggregates. `lag` and `lead` do not exist; `percent_rank` only on 24.8, through the known tier; `cume_dist` on neither.
+**Availability.** Typed: nine functions above, on all seven versions (with the `ntile` limit on 24.3), plus the catalog aggregates. `lag` and `lead` do not exist; `percent_rank` only on 24.8, through the known tier; `cume_dist` on neither.
 
 **Prototype, in a scratch copy, TypeScript 5.8.3, types only.** The owner's shape, arithmetic with row and window operands, a later `where`, and a grouped query's output all infer correctly under `pnpm typecheck` apart from the pins in Q7. Bench source instantiations rose 1.03%, from 3,338,847 to 3,373,260, and passed the budget. Built inputs were not rebuilt, and 5.5.4 and 7.0.2 were not run.
 
@@ -237,14 +263,14 @@ Joins page and `compiler/select-blocks.md`; `spec.md` Joins and Join strictness 
 In `joinRead` (`emit-naive.ts`), when the input is null-extended and the declared type is a `Tuple` or `JSON`, emit `ifNull(<col>, defaultValueOfTypeName(<quoted printed type>))`. This restores the Decided row "Outer join row types": these kinds "keep their type and the server default when unmatched". A 5-line prototype passed every check in the defect note below. The prototype's `same(...)` branch order is not binding, but `ON` conditions and non-extended inputs must stay untouched.
 Accept: on 24.3, 24.8, 25.3, 25.8, 25.10, 26.3 and 26.10, on both emitters, through `leftJoin`, `rightJoin`, `fullJoin` and `asofLeftJoin`, rows and `meta` equal the 24.8 baseline for whole-column reads, each scalar element, nested `element`, and `where`, `orderBy`, `groupBy` over an element, a join over a join, and raw `sql` over the column. `JSON` where the server has it. `left-join-tuple-element-null.integration.ts` passes unchanged, which clears the 60 red tests. A `Tuple` whose printed type holds a quoted `Enum` label, a zoned `DateTime`, backticked names, and a `Nullable` member. A `col.Nullable(Tuple)` column stays unwrapped. Negative controls: no wrap for `Tuple`, no wrap for `JSON`, wrap on a non-extended input, unquoted type text. Docs: `joins.md` drops "Tuple columns on ClickHouse 26.10" and the `asofLeftJoin` link to it, and records the emitted form and the `Point` limit; `spec.md` Decided row replaces its "Known limit" with this. Edits to `null-extended-tuple-limit.integration.ts`: the Tester flips its 8 pins of the limit (`26.10 > * > an unmatched row`, `26.10 > * > meta`) to the new behaviour, once the owner has acknowledged that the fix overtakes "documented, not fixed". Nothing else existing changes.
 
-**D12. `WITH FILL` in core.** Depends: D21. Status: not started.
+**D12. `WITH FILL` in core.** Depends: none. Status: ready. It may run in a second worktree now, because it touches core and types only; it must rebase onto D21 before D13.
 `Ordering.withFill({ from?, to?, step? })`, `interval(n, unit)`, with `Ordering` carrying the key's value type (default keeps today's type). Accept: positive types for integer, float, `Date`, `DateTime`, `DateTime64` and `Nullable` keys, ascending and descending, with `thenBy`. Negative types: `String` and `Decimal` keys, bare number step on temporal, interval on numeric, wrong-typed bound, `nullsFirst` then `withFill` and the reverse, `withFill` on a grouped key. Type performance stays under ceilings.
 
-**D13. `WITH FILL` in compiler.** Depends: D12. Status: not started.
+**D13. `WITH FILL` in compiler.** Depends: D12, D21 merged. Status: not started. From the sweep: bounds bind as the key's non-`Nullable` type, the step parameter as `Int64` on integer keys and `Float64` on float keys, no `STALENESS`, `NULLS FIRST` refused, and a window and a fill never folded into one SELECT.
 `invalid_fill_key`, sign and bound checks when values are known, `Date` with sub-day unit rejected, renderers, `edges`, `expressions`, step negation.
 Accept: SQL tests for `FROM TO STEP` order and parameter numbering in scan, join and aggregate blocks; `Filter + Sort(fill) + LimitBy + Limit` folds; a `Filter`, computed `Project`, `Aggregate` or `Distinct` above opens a derived table; every renderer emits the fill (a test walks each block shape, like PREWHERE's).
 
-**D14. `WITH FILL` native and differential coverage.** Depends: D13. Owner: Tester. Status: not started.
+**D14. `WITH FILL` native and differential coverage.** Depends: D13. Owner: Tester. Status: not started. Runs on all seven sweep versions, starting from `fill.sql`, and pins each corrected or new fact in the note.
 Accept: each key type and interval unit, descending, prefix keys, trailing keys, unselected key, `LIMIT` and `LIMIT BY` counting filled rows, an outer filter seeing filled rows, aggregate block with `sumMerge`, `DISTINCT` below, empty input, join and union inputs, CTE. Defaults per column type pinned against the descriptor. `Enum` without zero surfaces code 36 on the naive path; the optimized path may succeed when it prunes that column, per results-only. Differential arbitrary gains fill under a total order. Negative controls: folding a `Filter` above, dropping fill in one renderer, not negating the step.
 
 **D15. `WITH FILL` docs and spec.** Depends: D13. Status: not started.
@@ -254,11 +280,11 @@ Ordering page; `compiler/select-blocks.md`; IR table in `spec.md`; Decided row. 
 `Mode` gains `'window'`; `OperandMode` in `gen-expr-methods.ts`, regenerated; `MapProjection` on `Query.map` and `JoinQuery.map`; widened `AggregateOperand` with the conditional return on base, `If` and `Merge`, with a separate narrow operand for `State`; `WindowCall`; `Expr.over` for `count()` and at runtime; `windowDefinitions` and the nine functions; the `Window` node; `containsWindow`; checks in every illegal builder position; `invalid_window_key`, `invalid_window_argument`, `invalid_window_function`, `invalid_window_frame`; `{ live: false }`; devtools.
 Accept: positive types with `toEqualTypeOf` and `.not.toBeAny()` for each function and aggregate, `If`, `Merge`, key and frame forms, arithmetic with row, window and constant operands, comparison, `ifNull`, `cast`, single-expression `map`, `JoinQuery.map`, a later `where`/`orderBy`/`limit` reading the result, and a grouped query's output. `any` operands keep today's types. Negative types for every row of the legal-positions table, plus mixed row and grouped operands, a direct `val()` key, `withFill` in a window key, wrong-typed `default`, `row_number(x)`, `maxState(r.x)`, `r.u.divide(window)`. Runtime tests: each builder rejection, including a JavaScript caller's row receiver with a window operand; `count().plus(1n).over(w)` raising `invalid_window_function`; `sum(r.x.plus(1)).over()` raising `invalid_window_argument`, and `sum(r.x.plus(r.y)).over()` allowed. `pnpm verify:expr-surface` passes after regeneration. `node scripts/check-type-performance.mjs --all` stays under the ceilings with no budget change; if it does not, stop and report. Pins in Q7 change only in D18.
 
-**D17. `.over()` in compiler.** Depends: D16. Status: not started.
+**D17. `.over()` in compiler.** Depends: D16. Status: not started. From the sweep: `invalid_window_frame` also refuses `RANGE` offsets over a `Nullable` key, and the `lagInFrame`/`leadInFrame` default must have the argument's type in the compiler too.
 Every dispatch listed above; `resolveWindow`, with results checked against the node (`LowCardinality` dropped); `invalid_window_placement`; validation of forged `Window` nodes; the MergeProject, Distinct and `plan-ctes` changes; emission.
 Accept: unit tests for every row of the fence table, each asserting SQL shape and hits on both emitters. Named cases: a filter above a window stays above when it reads only the partition key, when it reads the window column, and when it reads neither; `sum(r.x).over(w).divide(r.y)` is fenced exactly like a bare window, in each row; `.map(x = u + 1).map(sum(x).over())` and a key over a computed `Param` column stay nested; a window never folds into an aggregate or `Distinct` block; an unread item is pruned and its keys and arguments are no longer demanded, while a key column read by no other expression is demanded; an alias equal to a sibling's key opens a derived table and an item's own alias does not; a shared window `Project` is not a CTE; the sole-column and `FROM`-less forms keep correct SQL. Forged IR with a window in `Filter`, `Sort`, `LimitBy`, `Aggregate`, `Join.on`, `ArrayJoin`, `RawRel`, an `Agg` argument and inside a key raises `invalid_window_placement` on both emitters. Parameters number in text order, with `fn` before its spec.
 
-**D18. `.over()` native and differential coverage.** Depends: D17. Owner: Tester. Status: not started.
+**D18. `.over()` native and differential coverage.** Depends: D17. Owner: Tester. Status: not started. Runs on all seven sweep versions, starting from `over*.sql`, including the 24.3 `ntile` limit as a `QueryError` and the 26.10 fix of the `sum` defect (the rule still refuses it).
 Applies the Q7 edits, groups A to G, exactly as listed and nothing else. Accept: on 24.8 through `run` and `stream`, against handwritten SQL and a JavaScript oracle: each function and catalog aggregate; `If`, `Merge` over a rollup; frames; empty-frame and first-row values; `meta` equal to the descriptor per wrapper (`Nullable`, `LowCardinality`, `Decimal`, temporal); top-N per group through `where`; arithmetic and two windows in one item; over a join with `join_use_nulls`, an `ASOF` join, a grouped query, `ARRAY JOIN`, `PREWHERE`, a CTE and a union branch. Sibling alias capture under both `prefer_column_name_to_alias` values gives the column's result. `sum(column)` is correct after an earlier `map` computes `x + 1`, including row counts. A differential arbitrary adds `.over()` with a total order, naive and optimized rows equal, including nested arithmetic, parameters outside keys and pruning. EXPLAIN corpus: window step above a filter, no filter below it. A smoke test on 24.3 for every exported function, or a recorded reason if the harness cannot run it. Negative controls, each failing a test: removing each `Add` row in the fence table in turn; making `totalExpression` true for `Window`; removing `invalid_window_argument`; removing the `Param` check on keys; emitting unqualified names in the derived form. The types matrix runs on 5.5.4, 5.8.3 and 7.0.2, and any pin differing from the Q7 list comes back to the PM.
 
 **D19. `.over()` docs and spec.** Depends: D17. Status: not started.
@@ -517,6 +543,38 @@ Accept, per keyword before the next starts, and again at merge: `pnpm check:all`
 **Stays a limit after D21.** `Point` and other parser `Unknown` kinds that a server newly wraps: their declared type is `unknown`, so it is not a type lie, but rows differ by version (`NULL` or `[0, 0]`). Documented, not wrapped, because hand-written `Unknown` text cannot be trusted as a type name.
 
 **Sequence.** D21 Worker, D21 Tester, then D12. They touch different hunks of `emit-naive.ts`, but the 60 red tests would fail every `check:all` in between, and Worker and Tester cannot edit concurrently, so running them in parallel gains nothing against a task this small.
+
+### Version sweep before `WITH FILL` and `OVER` (PM, 2026-11-07)
+
+**Tool.** `/tmp/claude-1000/-home-fernandohur-repos-typedhouse/d8f68019-bf18-4d79-bf40-0d5ca77cb719/scratchpad/probe/chprobe.py FILE.sql [--versions …] [--params k=v] [--out FILE.md]` runs each statement on 24.3, 24.8, 25.3, 25.8, 25.10, 26.3 and 26.10, one reused container per version (`pmprobe-<version>`), and tabulates column types and rows or the error code. Versions that agree are grouped, so a difference shows at a glance. Directives: `-- # section`, `-- label:`, `-- params:` (settings and `param_*`), `-- repeat: N` (flags results that are not repeatable), `-- hide`. Every table names the server version and the image digest. It does not use `asof-support.ts`, which it only read.
+
+**Result.** Most claims in the two notes held on every version, and each note now lists what changed. The corrections:
+- `NULLS FIRST` with `FROM`.
+- The versions of code 456, the `sum` defect, `percent_rank`, `cume_dist` and `lag`/`lead`.
+
+New and version-dependent:
+- `DateTime` bounds on 26.10.
+- `STALENESS`.
+- Parameter types.
+- `ntile` on 24.3.
+- `lagInFrame` default widening on 26.10.
+- `RANGE` over `Nullable` keys.
+
+**Owner decisions.** None changes, and none is needed.
+- Q5 (`INTERPOLATE` deferred): `INTERPOLATE` works the same on all seven versions, so nothing argues for or against it.
+- Q7 (`.over()` with groups A to G): untouched; the sweep is server-side.
+- The `count().plus(1n).over(w)` gap: untouched.
+
+Each new item settles on precedent:
+- `STALENESS` is not exposed, as `percent_rank` is not typed: absent on 24.3.
+- The `ntile` limit surfaces as the server's error, as engines and `join_algorithm` do.
+- The `lagInFrame` default rule, the `RANGE`-over-`Nullable` refusal and the 26.10 `DateTime` bound all choose the form whose rows and types do not depend on the server.
+
+**Not swept.**
+- `Point` and other parser `Unknown` kinds as fill keys.
+- Fill keys of `Int128`/`UInt256`.
+- Windows over `Map` or `Array` arguments.
+- Load or large data, beyond 600,000 rows in 2 parts.
 
 ## Track A: `min`, `minIf`, `argMin`, `argMinIf`, `quantileExact`, `quantileExactIf` (2026-11-05)
 
