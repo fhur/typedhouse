@@ -1,6 +1,6 @@
 ## Track D: `-State`/`-Merge`, `SETTINGS`, `ASOF JOIN`, `WITH FILL`, `OVER` (2026-11-05, PM)
 
-**Status.** D1 to D7 are accepted by the PM, uncommitted; see the acceptance sections at the end of this track. D8 is ready for the Worker. D9 to D15, then D16 to D19, follow in order. Q1 to Q7 are recorded under Decisions; orchestrator rulings stay open to the owner's objection. Build order is the owner's. Line numbers are at master `cd59ba9`.
+**Status.** D1 to D11 are accepted by the PM; see the acceptance sections at the end of this track. D21 (null-extended `Tuple` and `JSON`, not specific to ASOF) is ready and comes next. D12 follows D21. D13 to D15, then D16 to D19, follow in order. Q1 to Q7 are recorded under Decisions; orchestrator rulings stay open to the owner's objection. Build order is the owner's. Line numbers are at master `cd59ba9`.
 
 Facts below were measured on `clickhouse/clickhouse-server:24.8` (24.8.14.39) unless stated. The minimum-version checks ran on 24.3.18.7 and cover only what the 24.3 notes name. The SQL in the API proposals was run on 24.8 by hand; a compiler does not emit it yet, so the exact text is a target.
 
@@ -219,21 +219,25 @@ Accept: `getSetting` through scan, join, CTE, `UNION ALL` and `UNION DISTINCT` o
 **D7. `SETTINGS` docs and spec.** Depends: D5. Status: accepted, uncommitted.
 `spec.md` Emission details and Decided row with the allowlist and Q1, Q2 outcomes. Accept: docs list every key and why others are refused, and state the `readonly = 1` behaviour. `pnpm docs:verify` passes.
 
-**D8. `ASOF JOIN` in core.** Depends: D7. Status: ready.
+**D8. `ASOF JOIN` in core.** Depends: D7. Status: accepted.
 `asofJoin` and `asofLeftJoin`, one aliased input per argument as `leftJoin`. `.on(equalities)` returns an intermediate whose only method is `.asof(inequality)`; `.asof` builds the node, `{ live: false }`.
 Accept: positive types for both kinds, including the `Nullable` right side on `asofLeftJoin`. Negative types: the intermediate used as a query (`where`, `map`, `toSQL`, `run`), a `.asof` before `.on`, a second `.asof`. Runtime: non-equality in `.on`, equality in `.asof`, one-side inequality, `join_condition_not_equi` wording, duplicate alias, arity.
 
-**D9. `ASOF JOIN` in compiler.** Depends: D8. Status: not started.
+**D9. `ASOF JOIN` in compiler.** Depends: D8. Status: accepted.
 Fields, `validate`, keywords, naive and planned text, rule fences, `invalid_asof_condition`, `invalid_asof_type`.
 Accept: unit tests that a right-side `Filter` stays above on `ASOF INNER` and `ASOF LEFT`, a left-side conjunct moves below, `LeftToInner` does not fire, and `join_use_nulls = 1` is emitted for `asofLeftJoin`. Forged IR rejected on both emitters. Parameters number in text order.
 
-**D10. `ASOF JOIN` native and differential coverage.** Depends: D9. Owner: Tester. Status: not started.
+**D10. `ASOF JOIN` native and differential coverage.** Depends: D9. Owner: Tester. Status: accepted.
 Accept: all four operators, reversed operands, each type family and mixed pairs, `Nullable` on both sides, expression and parameter operands, a CTE input, self-join, a null-extended `meta` check per column kind, `run` and `stream`, compared with handwritten SQL. Oracle-based test of right-filter non-commutation. Differential arbitrary gains `ASOF` with unique right keys, which is required: tied rows differ between repeat runs of one SQL. Tie tests assert only the count and that the chosen row is one of the tied rows. Mixed pairs include those raising code 386, with one `QueryError` shape on both paths, and NaN on each side, pinned as measured. The `join_algorithm` table in the design note is pinned through a client-level setting. A smoke run of the core cases on 24.3 and 26.10, or a recorded reason if the harness cannot run it. EXPLAIN corpus entry. Negative controls: admitting the right input, removing the `LeftToInner` fence, and moving residuals above the join each fail a test.
 
-**D11. `ASOF JOIN` docs and spec.** Depends: D9. Status: not started.
+**D11. `ASOF JOIN` docs and spec.** Depends: D9. Status: accepted.
 Joins page and `compiler/select-blocks.md`; `spec.md` Joins and Join strictness rows, Decided row. Accept: docs cover ties (not repeatable, and affected by `settings({ max_threads })`), the right-side filter trap with the reproduced rows, supported types and the pairs raising code 386, NaN, and unsupported `join_algorithm`s per version. `pnpm docs:verify` passes.
 
-**D12. `WITH FILL` in core.** Depends: D11. Status: not started.
+**D21. Read a null-extended `Tuple` or `JSON` as its typed default.** Depends: none. Status: ready. Worker, then Tester.
+In `joinRead` (`emit-naive.ts`), when the input is null-extended and the declared type is a `Tuple` or `JSON`, emit `ifNull(<col>, defaultValueOfTypeName(<quoted printed type>))`. This restores the Decided row "Outer join row types": these kinds "keep their type and the server default when unmatched". A 5-line prototype passed every check in the defect note below. The prototype's `same(...)` branch order is not binding, but `ON` conditions and non-extended inputs must stay untouched.
+Accept: on 24.3, 24.8, 25.3, 25.8, 25.10, 26.3 and 26.10, on both emitters, through `leftJoin`, `rightJoin`, `fullJoin` and `asofLeftJoin`, rows and `meta` equal the 24.8 baseline for whole-column reads, each scalar element, nested `element`, and `where`, `orderBy`, `groupBy` over an element, a join over a join, and raw `sql` over the column. `JSON` where the server has it. `left-join-tuple-element-null.integration.ts` passes unchanged, which clears the 60 red tests. A `Tuple` whose printed type holds a quoted `Enum` label, a zoned `DateTime`, backticked names, and a `Nullable` member. A `col.Nullable(Tuple)` column stays unwrapped. Negative controls: no wrap for `Tuple`, no wrap for `JSON`, wrap on a non-extended input, unquoted type text. Docs: `joins.md` drops "Tuple columns on ClickHouse 26.10" and the `asofLeftJoin` link to it, and records the emitted form and the `Point` limit; `spec.md` Decided row replaces its "Known limit" with this. Edits to `null-extended-tuple-limit.integration.ts`: the Tester flips its 8 pins of the limit (`26.10 > * > an unmatched row`, `26.10 > * > meta`) to the new behaviour, once the owner has acknowledged that the fix overtakes "documented, not fixed". Nothing else existing changes.
+
+**D12. `WITH FILL` in core.** Depends: D21. Status: not started.
 `Ordering.withFill({ from?, to?, step? })`, `interval(n, unit)`, with `Ordering` carrying the key's value type (default keeps today's type). Accept: positive types for integer, float, `Date`, `DateTime`, `DateTime64` and `Nullable` keys, ascending and descending, with `thenBy`. Negative types: `String` and `Decimal` keys, bare number step on temporal, interval on numeric, wrong-typed bound, `nullsFirst` then `withFill` and the reverse, `withFill` on a grouped key. Type performance stays under ceilings.
 
 **D13. `WITH FILL` in compiler.** Depends: D12. Status: not started.
@@ -299,6 +303,8 @@ Accept, per keyword before the next starts, and again at merge: `pnpm check:all`
 - **`{ max_threads: undefined }` is refused at runtime (orchestrator, open to the owner's objection).** Leave the key out instead.
 - **`max_threads` and `max_block_size` edges are accepted (orchestrator, open to the owner's objection), because they do not change rows.** This overrides D6's "every value reads back equal": on 24.8 `max_threads` is capped at 4096, `0` reads as the auto value, `max_block_size` is capped at 4294967296, and `0` reads as 65409.
 - **`@clickhouse/client` floor is `^1.13.0` in `packages/client`; `packages/codegen` stays `^1.11.0`.** 1.11.0 fails to load, and 1.12.x loses the code on 26.10.
+- **ASOF, owner (relayed by the orchestrator).** The alias-order bug is fixed on this branch. The EXPLAIN corpus edit is approved: 3 additive entries and snapshots in `explain-corpus.ts`. "26.10 `Tuple` limit documented, not fixed" is overtaken if D21 lands; see the defect note.
+- **ASOF, orchestrator (open to the owner's objection, told to the owner).** Temporal against number is refused at compile time rather than surfacing as a server error, which differs from the PM's design note. `UInt8` against `Bool` and `Enum` against `UInt8` are stricter refusals. `sql` and `Cast` are allowed in ASOF conditions, `Case` and `Subquery` refused. `JoinBuilder`'s constructor gains an optional third argument, visible in declarations.
 - **Q7, pre-existing type expectations (owner, relayed by the orchestrator): approved.** The Tester may make the edits in groups A to G below, in D18, using `.over()`, and nothing outside this list. The known gap is accepted: `count().plus(1n).over(w)` and `sum(g.count).over(w)` type-check and fail at runtime with `invalid_window_function`. Measured with a prototype on TypeScript 5.8.3 only, so any pin differing on 5.5.4 or 7.0.2, or outside this list, comes back to the owner.
 
 | Group | Locations in `test/types/` | Today | After |
@@ -443,8 +449,74 @@ Accept, per keyword before the next starts, and again at merge: `pnpm check:all`
 **D8 to D11 re-read.** No owner decision is needed before the ASOF Worker starts. Each correction fits a settled precedent:
 - Non-repeatable ties follow `LIMIT BY` without a total order (Track C) and the non-deterministic functions in `settings.md`: unspecified and documented, with unique keys in the differential. The contract's wording is unchanged by this. The owner may want to know that a repeat of one ASOF query can return different rows when right keys tie.
 - NaN follows `min`, `max` and `argMin` (Track A): documented and pinned.
-- Code 386 and code 48 follow engines (Track C): the server's error surfaces as `QueryError`, with no compiler check. `invalid_asof_type` stays for types that cannot be ordered at all.
+- Code 386 and code 48 follow engines (Track C): the server's error surfaces as `QueryError`, with no compiler check. `invalid_asof_type` stays for types that cannot be ordered at all. (Superseded in part by the orchestrator's ruling at D8 to D11 acceptance: temporal against number is refused at compile time.)
 - The builder shape, IR and rule fences in D8 and D9 are unaffected, so D8's criteria do not change.
+
+### D8 to D11 acceptance (PM, 2026-11-07)
+
+**Result: closed at commit `d0ea03c`.** The only red tests are 60 in `left-join-tuple-element-null.integration.ts`, which is the defect below, not ASOF. They block the D20 gate and `check:all`, not this acceptance. `asofLeftJoin` inherits that defect, like every outer join, and D21 fixes all four kinds. The PM ran everything marked "checked" in a frozen copy of that commit.
+
+| Figure | Value | Status |
+|---|---|---|
+| `pnpm install --frozen-lockfile` | Exit 0 | Checked |
+| `pnpm test` | 3049 passed, 1 skipped, 138 files | Checked |
+| Compiler integration | 2974 passed, 60 failed, 64 files; all 60 in the one file | Checked |
+| Codegen integration | 8 of 8 | Checked |
+| `pnpm check:all` as one command | Exit 1 at its last step, compiler integration; every earlier step passed, including format, typecheck, type corpus, build, package consumers, fixture seed | Checked |
+| `check-type-diagnostics` | 583 on 5.5.4, 5.8.3, latest | Checked |
+| `check-type-performance --all` | Budget unchanged; source on 5.8.3 3,343,884 instantiations | Checked |
+| `pnpm docs:verify` | Exit 0 | Checked |
+| Tester's native negative controls | | Reported |
+
+**Existing-test audit.** Against master, the only tracked test file added since D5 to D7 is `fixtures/corpus/explain-corpus.ts`: the import, 3 `asof/*` entries and their spread, as approved, with 3 new snapshots. No other existing test, snapshot or script changed.
+
+**Criteria against the diff.**
+- **D8.** `asofJoin`, `asofLeftJoin`, `.on`, `.asof` in `join.ts`, `{ live: false }`, argument order kept. Negative types cover the intermediate, `.asof` before `.on`, a second `.asof`, and arity.
+- **D9.** `strictness` on `Join`, carried by `strictnessOf` on every rebuild. `LeftToInner` is fenced, `PushFilterJoin` admits only the first input, and validation runs on both emitters.
+- **D10.** All four operators, each type family and pair, `Nullable`, operands, inputs, and `meta`, on 24.3, 24.8 and 26.10 by test title. The differential runs 300 recipes with unique right keys and has non-vacuity checks. EXPLAIN pins right filter above and left filter below.
+- **D11.** `joins.md` covers ties, the right-filter trap with rows, types, pairs raising code 386, NaN, `Decimal` scale overflow, and `join_algorithm` per version. `spec.md` and `select-blocks.md` agree.
+
+**PM's negative controls, 18 mutations on 304 unit tests in 5 files.** All failed tests: strictness lost in `PushFilterJoin` (14) and `visit` (10); right input admitted (7); `LeftToInner` fires (3); inequality fences the left push (5); keyword dropped (35); last element unchecked (2); one-input inequality (1); any operand type (2); `LowCardinality` on both sides (2); folding off (11); builder equality any (4), inequality any (4), any comparison (3); live (2); ASOF left typed as inner (8); ASOF inputs from a merged record (2); outer inputs from a merged record (9).
+
+**Minor.** `JoinBuilder`'s third argument is not checked against `inputs`; only internal callers pass it, but the class is exported.
+
+### Defect: null-extended `Tuple` and `JSON` by server version (PM, 2026-11-07)
+
+**Predates this track, and is not specific to ASOF.** Under `join_use_nulls = 1`, newer servers put these kinds in `Nullable`, against the Decided row "Outer join row types".
+
+**When it starts, measured on 24.3.18, 24.8.14, 25.3.14, 25.8.33, 25.10.7, 26.3.62 and 26.10.3.** Point releases between these were not measured.
+
+| Kind | Up to | From | Unmatched row |
+|---|---|---|---|
+| `Tuple` | 25.10 | **26.3**, not only 26.10 | `Nullable(Tuple)`, `NULL`, instead of a tuple of defaults |
+| `Point` (a `Tuple` alias, `Unknown` to the parser) | 25.10 | 26.3 | `NULL` instead of `[0, 0]` |
+| `JSON` | 24.8 | **25.3** | `Nullable(JSON)`, `NULL`, instead of `{}` |
+| `Variant`, `Dynamic` | No change, 24.8 to 26.10 | | Keep their type and send `NULL` on all of them; the declared `unknown` holds |
+| `Array`, `Nested`, `Ring`, `Map`, `AggregateFunction`, wrappable scalars, `LowCardinality`, `SimpleAggregateFunction` | No change, 24.8 to 26.10 | | As the Decided row says |
+
+24.3 was not in this sweep except for `Tuple`, because the DDL used experimental flags it does not know.
+
+**Through the builder on 26.3 and 26.10, both emitters, at `d0ea03c`.** A whole `Tuple` raises `decode_invalid`. `element` gives `null` for `UInt8` and `String`, and `decode_invalid` for `Int64`. `where(element.eq(0))` returns no rows where earlier versions return the unmatched ones. `groupBy(element)` gives a `null` group instead of 0. `JSON` gives `null` from 25.3 and `{}` on 24.8. Nested `element` differs only on 26.10.
+
+**Options measured.**
+
+| Option | Result |
+|---|---|
+| Server setting | **Ruled out twice.** `allow_experimental_nullable_tuple_type` exists from 26.3 and `enable_nullable_tuple_type` only on 26.10, and each raises code 115 on every version below. Neither helps: at 0 the type stays `Nullable(Tuple)` on 26.3 (where 0 is already the default) and 26.10 |
+| `assumeNotNull` in the emitter | **Rejected.** A `Tuple` with an `Enum` without a zero member raises code 691 or a truncated response on 26.3 and 26.10. `assumeNotNull(element)` also strips a declared `Nullable` member |
+| **`ifNull(col, defaultValueOfTypeName(type))` at the read, recommended** | **All 16 element types and the whole `Tuple` equal the 24.8 baseline on all 7 versions, both emitters**, including `where`, `orderBy`, `groupBy`, right, full and ASOF left, a join over a join, and `JSON` wherever available. Identity on older servers. No measurable cost on 3M rows |
+| Fail closed on `.element()` | Refuses working queries on 24.x and pins 4 existing uses (`slice4b-adversarial.test.ts:99`, `slice4a-adversarial.integration.ts:330`, `slice4b-adversarial.integration.ts:534`, `test/types/slice4a-adversarial.ts:61`). It also leaves whole-column reads, sorting and grouping |
+| Client version detection | Not permitted by the design: `Backend.compile` is synchronous and caches plans by `Rel`, and `toSQL()` has no connection. Not needed |
+
+**Prototype evidence, in a scratch copy.** The wrap in `joinRead`: `pnpm test` 3049 passed with no SQL pin changed. Compiler integration: all 60 red tests pass, and of the rest only 8 fail, all pins of the documented limit in `null-extended-tuple-limit.integration.ts`. Another 3 failed only because that copy excluded `apps/`, which `asof-docs-pushdown-claim` reads. Types, the docs gate and the 5.5.4 matrix were not run on the prototype.
+
+**Decision: settled by precedent, so this is task D21, not an owner choice.** The Decided row already says these kinds keep their type and the server default, and `joinRead` already wraps reads to keep descriptors true (`toNullable`). Two things go to the owner as information:
+- D21 also removes the loud limit the owner chose to document, so that decision is overtaken, and the 8 pins flip. The owner should acknowledge this.
+- Generated SQL for outer-join `Tuple` reads gains the wrapper, visible in `toSQL()`.
+
+**Stays a limit after D21.** `Point` and other parser `Unknown` kinds that a server newly wraps: their declared type is `unknown`, so it is not a type lie, but rows differ by version (`NULL` or `[0, 0]`). Documented, not wrapped, because hand-written `Unknown` text cannot be trusted as a type name.
+
+**Sequence.** D21 Worker, D21 Tester, then D12. They touch different hunks of `emit-naive.ts`, but the 60 red tests would fail every `check:all` in between, and Worker and Tester cannot edit concurrently, so running them in parallel gains nothing against a task this small.
 
 ## Track A: `min`, `minIf`, `argMin`, `argMinIf`, `quantileExact`, `quantileExactIf` (2026-11-05)
 
