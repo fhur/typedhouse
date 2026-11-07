@@ -10,14 +10,12 @@ import {
   table,
 } from '@typedhouse/core';
 import { compile } from '@typedhouse/compiler';
-import { QueryError } from '../src/index.js';
 import { connect, startServer, type Connection } from './asof-support.js';
 
-/** A documented limit, by owner decision (joins.md, "Tuple columns on ClickHouse 26.10"). Under
- * `join_use_nulls = 1`, 26.10 wraps a Tuple in Nullable and sends NULL for an unmatched row, where the
- * descriptor, from 24.8, keeps Tuple and its default. So on 26.10 a matched row reads normally and an
- * unmatched one raises QueryError with decode_invalid. 24.3 and 24.8 keep Tuple and its default.
- * `.element()` over such a column is not covered by this limit: left-join-tuple-element-null. */
+/** A null-extended Tuple reads as its typed default on every version (D21, owner decision: the fix
+ * replaces the limit this file used to pin). Under `join_use_nulls = 1`, 26.10 wraps a Tuple in Nullable
+ * and sends NULL; the emitter reads it through ifNull, so a matched row reads normally, an unmatched one
+ * reads the default, and `meta` equals the descriptor, as on 24.3 and 24.8. */
 const opts = { engine: 'MergeTree', sortingKey: ['k'], partitionKey: [] } as const;
 
 const l = table('tuple_limit_l', { k: col.UInt8, ts: col.UInt32 }, opts);
@@ -96,7 +94,7 @@ describe.each(['24.3', '24.8', '26.10'] as const)('on %s', version => {
       expect(await c.optimized.run(q)).toEqual([matched]);
     });
 
-    it('an unmatched row: its default before 26.10, QueryError with decode_invalid on 26.10', async () => {
+    it('an unmatched row reads its default, on 26.10 too', async () => {
       const q = query(from(l).where(x => x.k.eq(2)));
 
       const paths = [
@@ -110,30 +108,18 @@ describe.each(['24.3', '24.8', '26.10'] as const)('on %s', version => {
       ];
 
       for (const path of paths) {
-        if (version !== '26.10') {
-          const rows = (await path()) as { k: number | null }[];
-          // fullJoin also keeps the right row k = 1, with `t` unmatched.
-          expect(rows.filter(row => row.k === 2)).toEqual([unmatched]);
-          continue;
-        }
-
-        const error = await path().then(
-          () => undefined,
-          (e: unknown) => e,
-        );
-
-        expect(error).toBeInstanceOf(QueryError);
-        expect(String((error as QueryError).cause)).toMatch(/decode_invalid: Tuple\(/);
+        const rows = (await path()) as { k: number | null }[];
+        // fullJoin also keeps the right row k = 1, with `t` unmatched.
+        expect(rows.filter(row => row.k === 2)).toEqual([unmatched]);
       }
     });
 
-    it('meta: Tuple before 26.10, Nullable(Tuple) on 26.10; Array and Map keep their type', async () => {
+    it('meta: Tuple on every version, as the descriptor says; Array and Map keep their type', async () => {
       const compiled = compile(query(from(l)).ir);
       const { meta } = await c.json(compiled.sql, {}, compiled.params);
       const types = Object.fromEntries(meta.map(m => [m.name, m.type]));
-      const wrap = (t: string) => (version === '26.10' ? `Nullable(${t})` : t);
-      expect(types['named']).toBe(wrap('Tuple(a UInt8, b String)'));
-      expect(types['unnamed']).toBe(wrap('Tuple(UInt8, String)'));
+      expect(types['named']).toBe('Tuple(a UInt8, b String)');
+      expect(types['unnamed']).toBe('Tuple(UInt8, String)');
       expect(types['arr']).toBe('Array(UInt8)');
       expect(types['mp']).toBe('Map(String, UInt8)');
       expect(print(compiled.columns['named']!)).toBe('Tuple(a UInt8, b String)');
