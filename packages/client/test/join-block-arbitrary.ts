@@ -1,5 +1,15 @@
 import fc from 'fast-check';
-import { count, crossJoin, join, sum, type Query } from '@typedhouse/core';
+import {
+  cast,
+  col,
+  count,
+  crossJoin,
+  join,
+  sql,
+  sum,
+  type Expr,
+  type Query,
+} from '@typedhouse/core';
 import {
   buildTree,
   nativeTree,
@@ -94,6 +104,7 @@ export interface Colliding {
   aggs: 'collide' | 'plain';
   having: 'none' | 'count' | 'key';
   order: 'none' | 'count' | 'key';
+  keyExpression?: 'column' | 'cast' | 'raw';
 }
 
 export const colliding: fc.Arbitrary<Colliding> = fc.record({
@@ -102,6 +113,7 @@ export const colliding: fc.Arbitrary<Colliding> = fc.record({
   aggs: fc.constantFrom('collide' as const, 'plain' as const),
   having: fc.constantFrom('none' as const, 'count' as const, 'key' as const),
   order: fc.constantFrom('none' as const, 'count' as const, 'key' as const),
+  keyExpression: fc.constantFrom('column' as const, 'cast' as const, 'raw' as const),
 });
 
 export function collidingShape(r: Colliding) {
@@ -128,14 +140,24 @@ export function buildColliding(
     ? crossJoin({ a: left, b })
     : join({ a: left, b }).on(x => [x.a.id.eq(x.b.id), x.a.tenant.eq(x.b.tenant)]);
 
+  // These retain the exact String grouping values, while varying whether the
+  // colliding alias reads a direct, cast or opaque expression. The independent
+  // oracle deliberately keeps its qualified direct-column grouping expression.
+  const keyExpression = (column: Expr<string, string, 'row'>) =>
+    r.keyExpression === 'cast'
+      ? cast(column, col.String)
+      : r.keyExpression === 'raw'
+        ? sql`${column}`.as(col.String)
+        : column;
+
   const grouped = joined.groupBy(x =>
     r.key === 'id'
-      ? { id: x.a.id }
+      ? { id: keyExpression(x.a.id) }
       : r.key === 'tenant'
-        ? { tenant: x.b.id }
+        ? { tenant: keyExpression(x.b.id) }
         : r.key === 'waste'
-          ? { waste: x.a.tenant }
-          : { k: x.a.id },
+          ? { waste: keyExpression(x.a.tenant) }
+          : { k: keyExpression(x.a.id) },
   );
 
   let q = (r.aggs === 'collide'

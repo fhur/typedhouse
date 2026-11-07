@@ -6,12 +6,28 @@ const options = { seed: 20261027, numRuns: 2000 };
 
 it('never throws on arbitrary strings; Unknown preserves bytes', () => {
   fc.assert(
-    fc.property(fc.string({ maxLength: 3000 }), s => {
-      const t = parseCHType(s);
+    fc.property(
+      fc.oneof(
+        fc.string({ maxLength: 3000 }),
+        // Grammar-shaped strings reach parser states that uniform text rarely does.
+        fc.tuple(types(2), fc.nat(), fc.string({ maxLength: 20 })).map(([type, cut, suffix]) => {
+          const raw = print(type);
+          return raw.slice(0, cut % (raw.length + 1)) + suffix;
+        }),
+        fc
+          .tuple(
+            fc.constantFrom('FixedString', 'Decimal', 'DateTime64', 'Enum8'),
+            fc.oneof(fc.string({ maxLength: 30 }), fc.bigInt().map(String)),
+          )
+          .map(([name, argument]) => `${name}(${argument})`),
+      ),
+      s => {
+        const t = parseCHType(s);
 
-      if (t.kind === 'Unknown') expect(print(t)).toBe(s);
-      else expect(parseCHType(print(t))).toEqual(t);
-    }),
+        if (t.kind === 'Unknown') expect(print(t)).toBe(s);
+        else expect(parseCHType(print(t))).toEqual(t);
+      },
+    ),
     { ...options, numRuns: 10000 },
   );
 });
@@ -22,19 +38,49 @@ function types(depth: number): fc.Arbitrary<CHType> {
       .constantFrom(...scalarNames.filter(n => n !== 'DateTime'))
       .map(name => ({ kind: 'scalar' as const, name })),
     fc.string().map(tz => ({ kind: 'DateTime' as const, tz })),
-    fc.integer({ min: 0, max: 9 }).map(precision => ({ kind: 'DateTime64' as const, precision })),
-    fc.integer({ min: 1, max: 1000 }).map(n => ({ kind: 'FixedString' as const, n })),
     fc
-      .array(fc.record({ name: fc.string(), value: fc.integer({ min: -128, max: 127 }) }), {
-        maxLength: 5,
+      .record({
+        precision: fc.integer({ min: 0, max: 9 }),
+        tz: fc.option(fc.string(), { nil: undefined }),
       })
-      .map(values => ({ kind: 'Enum' as const, bits: 8 as const, values })),
-    fc.constant({ kind: 'Decimal' as const, precision: 18, scale: 4 }),
+      .map(({ precision, tz }) => ({
+        kind: 'DateTime64' as const,
+        precision,
+        ...(tz === undefined ? {} : { tz }),
+      })),
+    fc.integer({ min: 1, max: 1000 }).map(n => ({ kind: 'FixedString' as const, n })),
+    fc.constantFrom(8 as const, 16 as const).chain(bits =>
+      fc
+        .array(
+          fc.record({
+            name: fc.string(),
+            value: fc.integer(bits === 8 ? { min: -128, max: 127 } : { min: -32768, max: 32767 }),
+          }),
+          { maxLength: 5 },
+        )
+        .map(values => ({ kind: 'Enum' as const, bits, values })),
+    ),
+    fc
+      .integer({ min: 1, max: 76 })
+      .chain(precision =>
+        fc
+          .integer({ min: 0, max: precision })
+          .map(scale => ({ kind: 'Decimal' as const, precision, scale })),
+      ),
     fc.constant({ kind: 'Dynamic' as const }),
   );
 
   if (!depth) return leaf;
   const child = types(depth - 1);
+
+  const fn = fc.oneof(
+    fc.constantFrom('sum', 'uniq', 'groupArray', 'argMax'),
+    fc.integer({ min: 1, max: 100 }).map(n => `uniqUpTo(${n})`),
+    fc
+      .tuple(fc.double({ min: 0, max: 1, noNaN: true }), fc.double({ min: 0, max: 1, noNaN: true }))
+      .map(([a, b]) => `quantiles(${a}, ${b})`),
+    fc.constant("sequenceMatch('(?1).*(?2)')"),
+  );
 
   return fc.oneof(
     leaf,
@@ -53,9 +99,11 @@ function types(depth: number): fc.Arbitrary<CHType> {
       .array(fc.record({ name: fc.string(), type: child }), { maxLength: 3 })
       .map(items => ({ kind: 'Tuple' as const, items })),
     fc
-      .array(child, { maxLength: 3 })
-      .map(args => ({ kind: 'AggregateFunction' as const, fn: 'sum', args })),
-    child.map(inner => ({ kind: 'SimpleAggregateFunction' as const, fn: 'sum', inner })),
+      .tuple(fn, fc.array(child, { maxLength: 3 }))
+      .map(([fn, args]) => ({ kind: 'AggregateFunction' as const, fn, args })),
+    fc
+      .tuple(fn, child)
+      .map(([fn, inner]) => ({ kind: 'SimpleAggregateFunction' as const, fn, inner })),
   );
 }
 

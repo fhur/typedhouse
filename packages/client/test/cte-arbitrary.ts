@@ -5,6 +5,7 @@ import {
   nativeTree,
   recipeArbitrary as pruningRecipes,
   source,
+  liveSource,
   topology,
   type Tree,
 } from './pruning-arbitrary.js';
@@ -18,6 +19,7 @@ export interface Recipe {
   take: number;
   renames: number;
   nested: boolean;
+  live?: boolean;
 }
 
 export const recipeArbitrary: fc.Arbitrary<Recipe> = fc.record({
@@ -34,12 +36,14 @@ export const recipeArbitrary: fc.Arbitrary<Recipe> = fc.record({
   take: fc.integer({ min: 0, max: 7 }),
   renames: fc.integer({ min: 0, max: 3 }),
   nested: fc.boolean(),
+  live: fc.boolean(),
 });
 
 export const shape = (r: Recipe) => `${r.mode}/${r.fence}/${topology(r.tree)}`;
 
 export function build(r: Recipe) {
-  let shared = buildTree(r.tree).map(x => ({ id: x.id, amount: x.amount }));
+  const scan = r.live ? liveSource : source;
+  let shared = buildTree(r.tree, scan).map(x => ({ id: x.id, amount: x.amount }));
 
   for (let i = 0; i < r.renames; i++)
     shared = shared
@@ -65,9 +69,7 @@ export function build(r: Recipe) {
   } else if (r.mode === 'in') {
     const set = shared.map(x => x.id);
 
-    q = source
-      .where(x => x.id.in(set).and(x.id.in(set)))
-      .map(x => ({ id: x.id, amount: x.amount }));
+    q = scan.where(x => x.id.in(set).and(x.id.in(set))).map(x => ({ id: x.id, amount: x.amount }));
   } else if (r.mode === 'latest') {
     const newest = shared.groupBy(x => ({ id: x.id })).aggregate(g => ({ amount: max(g.amount) }));
 

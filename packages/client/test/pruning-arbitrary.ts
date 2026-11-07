@@ -3,19 +3,21 @@ import { col, crossJoin, from, join, table, type Query } from '@typedhouse/core'
 
 export const seed = 20261107;
 
-export const source = from(
-  table(
-    'pruning_wide',
-    {
-      id: col.String,
-      tenant: col.String,
-      amount: col.UInt64,
-      spare: col.String,
-      ids: col.Array(col.String),
-      waste: col.String,
-    },
-    { engine: 'MergeTree', sortingKey: ['tenant', 'id'], partitionKey: [] },
-  ),
+const columns = {
+  id: col.String,
+  tenant: col.String,
+  amount: col.UInt64,
+  spare: col.String,
+  ids: col.Array(col.String),
+  waste: col.String,
+};
+
+const meta = { engine: 'MergeTree', sortingKey: ['tenant', 'id'], partitionKey: [] };
+
+export const source = from(table('pruning_wide', columns, meta));
+
+export const liveSource = from(
+  table('pruning_wide', columns, { ...meta, source: { kind: 'test' } }),
 );
 
 export interface Row {
@@ -69,10 +71,10 @@ export const recipeArbitrary: fc.Arbitrary<Recipe> = fc.record({
   nested: fc.boolean(),
 });
 
-export function buildTree(tree: Tree): Query<Row> {
+export function buildTree(tree: Tree, scan: Query<Row> = source): Query<Row> {
   if ('left' in tree) {
-    const left = buildTree(tree.left);
-    const right = tree.kind === 'shared' ? left : buildTree(tree.right);
+    const left = buildTree(tree.left, scan);
+    const right = tree.kind === 'shared' ? left : buildTree(tree.right, scan);
 
     // Preserve an actual nested Join interface, not merely a sequence of flat
     // templates. Each recursive subtree can have a different topology and size.
@@ -83,7 +85,7 @@ export function buildTree(tree: Tree): Query<Row> {
           )
         : join({ l: left, r: right }).on(r => [r.l.id.eq(r.r.id), r.l.tenant.eq(r.r.tenant)]);
 
-    return join({ pair, anchor: source })
+    return join({ pair, anchor: scan })
       .on(r => [r.pair.l.id.eq(r.anchor.id), r.pair.l.tenant.eq(r.anchor.tenant)])
       .map(r => ({
         id: r.pair.l.id,
@@ -96,10 +98,10 @@ export function buildTree(tree: Tree): Query<Row> {
 
   const q =
     tree.kind === 'scan'
-      ? source
+      ? scan
       : tree.kind === 'array'
-        ? source.arrayJoin(r => r.ids, 'element')
-        : source.leftArrayJoin(r => r.ids, 'element');
+        ? scan.arrayJoin(r => r.ids, 'element')
+        : scan.leftArrayJoin(r => r.ids, 'element');
 
   return q.map(r => ({ id: r.id, tenant: r.tenant, amount: r.amount, spare: r.spare, ids: r.ids }));
 }
