@@ -144,9 +144,15 @@ export function mutation(recipe: Recipe): {
   const missing = recipe.malformation === 'missing' ? undefined : null;
   const wrongRecord = recipe.malformation === 'wrongContainer' ? [] : missing;
   const wrongArray = recipe.malformation === 'wrongContainer' ? {} : missing;
+  // Wrapper schema policy: isolate structural faults with the valid source
+  // output by default; selected cases propagate node.output for semantic checks.
   let wrapperOutput = source.ir.output;
-  let diagnosticNode: unknown;
-  let rootDiagnostic = false;
+  // Node identity policy: normally resolve the reported path; a few diagnostics
+  // locate a child edge but identify its owning relation instead.
+  let diagnosticNodeOverride: unknown;
+  // Path policy: malformed pass-through schemas fail at the outermost view,
+  // rather than at the wrapped mutation's original edge.
+  let reportAtOutermostRoot = false;
 
   const knownEvidence = (name: string, isAggregate: boolean) => ({
     catalog: { [name]: { isAggregate, deterministic: true, aliasTo: '' } },
@@ -156,6 +162,22 @@ export function mutation(recipe: Recipe): {
 
   const type = (descriptor: unknown) => {
     node = structuredClone(source.ir);
+    node.output.columns.id = descriptor;
+  };
+
+  const projectStringChoice = () => {
+    const choice = multiIf(
+      [val(recipe.value % 2 === 0, col.Bool), String(recipe.value)],
+      'fallback',
+    );
+
+    return structuredClone(source.map(() => ({ id: choice })).ir);
+  };
+
+  // Align the expression and both schema declarations to test the result type.
+  const setProjectedIdType = (descriptor: unknown) => {
+    node.exprs.id.type = descriptor;
+    node.columns.id = descriptor;
     node.output.columns.id = descriptor;
   };
 
@@ -208,8 +230,7 @@ export function mutation(recipe: Recipe): {
     case 'metadata':
       if (recipe.malformation === 'missing' && recipe.value % 2 === 1) {
         // A valid evidence object does not authorize a typed-origin call.
-        // Reuse the recipe's value discriminator so unrelated generated cases
-        // keep their existing stream; even values retain missing metadata.
+        // Odd values exercise typed-origin evidence; even values omit metadata.
         node.pred.fn.known = knownEvidence('gt', false);
         edge = '.pred';
         code = 'invalid_function_metadata';
@@ -368,8 +389,8 @@ export function mutation(recipe: Recipe): {
         edge = '.inputs[1].output';
         code = 'union_schema_mismatch';
         // Union diagnostics identify the union node while locating the child's
-        // schema; the existing property still checks both identities exactly.
-        diagnosticNode = node;
+        // schema; the property checks both identities exactly.
+        diagnosticNodeOverride = node;
       } else {
         node.inputs[1] = null;
         edge = '.inputs[1]';
@@ -394,7 +415,7 @@ export function mutation(recipe: Recipe): {
         } else {
           node.exprs = { renamed: node.exprs.id };
           edge = '.exprs.id';
-          diagnosticNode = node;
+          diagnosticNodeOverride = node;
         }
       } else {
         node.exprs = wrongRecord;
@@ -446,17 +467,10 @@ export function mutation(recipe: Recipe): {
         edge = '';
         code = 'invalid_output';
       } else if (recipe.malformation === 'invalidChild') {
-        const choice = multiIf(
-          [val(recipe.value % 2 === 0, col.Bool), String(recipe.value)],
-          'fallback',
-        );
-
-        node = structuredClone(source.map(() => ({ id: choice })).ir);
+        node = projectStringChoice();
         // Keep the published output and Expr descriptor consistent with each
         // other, but inconsistent with multiIf's authoritative String result.
-        node.exprs.id.type = col.UInt64.type;
-        node.columns.id = col.UInt64.type;
-        node.output.columns.id = col.UInt64.type;
+        setProjectedIdType(col.UInt64.type);
         wrapperOutput = node.output;
         edge = '.exprs.id';
         code = 'invalid_expression_type';
@@ -470,7 +484,7 @@ export function mutation(recipe: Recipe): {
       if (recipe.malformation === 'invalidChild') {
         node.output.order = [];
         wrapperOutput = node.output;
-        rootDiagnostic = true;
+        reportAtOutermostRoot = true;
         edge = '';
         code = 'invalid_ir';
       } else {
@@ -498,7 +512,7 @@ export function mutation(recipe: Recipe): {
         } else node.output.inputs[0][0] = `a\u0000${recipe.value}`;
 
         wrapperOutput = node.output;
-        rootDiagnostic = true;
+        reportAtOutermostRoot = true;
         edge = '';
         code = 'invalid_ir';
       } else {
@@ -514,7 +528,7 @@ export function mutation(recipe: Recipe): {
         // Top-level fields and nested relation aliases share one namespace.
         node.output.fields = { shape: 'flat', columns: { a: col.UInt64.type }, order: ['a'] };
         wrapperOutput = node.output;
-        rootDiagnostic = true;
+        reportAtOutermostRoot = true;
         edge = '';
         code = 'invalid_ir';
       } else {
@@ -689,9 +703,7 @@ export function mutation(recipe: Recipe): {
               ? payloadDescriptors[recipe.payload].type
               : { kind: 'FixedString', n: recipe.value % 2 ? -width : width + 0.5 };
 
-          node.exprs.id.type = descriptor;
-          node.columns.id = descriptor;
-          node.output.columns.id = descriptor;
+          setProjectedIdType(descriptor);
           code = 'unsupported_raw_result';
         }
 
@@ -714,12 +726,7 @@ export function mutation(recipe: Recipe): {
       break;
     case 'caseBranch':
       if (recipe.malformation === 'invalidChild') {
-        const choice = multiIf(
-          [val(recipe.value % 2 === 0, col.Bool), String(recipe.value)],
-          'fallback',
-        );
-
-        node = structuredClone(source.map(() => ({ id: choice })).ir);
+        node = projectStringChoice();
         node.exprs.id.args[0].type = null;
         wrapperOutput = node.output;
         edge = '.exprs.id';
@@ -760,8 +767,9 @@ export function mutation(recipe: Recipe): {
     edge = '.input' + edge;
   }
 
-  // Wrappers sharing a corrupt output would report its shape first. Keep their
-  // own valid schema: the selected mutation must remain at its selected edge.
+  // Apply the selected wrapper schema policy. Structural cases retain a valid
+  // schema to reach the selected edge; others intentionally propagate malformed
+  // output so semantic diagnostics can arise at the consuming wrapper.
   let cursor = root;
 
   for (let i = 0; i < recipe.wrappers.length; i++) {
@@ -770,7 +778,7 @@ export function mutation(recipe: Recipe): {
   }
 
   // A malformed pass-through output is first consumed at the outermost view.
-  const path = rootDiagnostic ? 'root' : 'root' + edge;
+  const path = reportAtOutermostRoot ? 'root' : 'root' + edge;
 
   const offending = path
     .slice(5)
@@ -780,5 +788,5 @@ export function mutation(recipe: Recipe): {
     .filter(Boolean)
     .reduce((o, key) => o?.[key], root);
 
-  return { root: root as Rel, path, code, offending: diagnosticNode ?? offending };
+  return { root: root as Rel, path, code, offending: diagnosticNodeOverride ?? offending };
 }

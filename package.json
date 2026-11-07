@@ -7,9 +7,7 @@
   "engines": {
     "node": "^22.22.0 || ^24.11.0 || >=26.0.0"
   },
-  "nx": {
-    "includedScripts": []
-  },
+  "nx": { "includedScripts": [] },
   "scripts": {
     "format": "node scripts/format.mjs",
     "format:check": "node scripts/format.mjs --check",
@@ -29,6 +27,7 @@
     "verify:query-package": "node scripts/verify-query-package.mjs",
     "typecheck": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/typedhouse/typecheck.tsbuildinfo",
     "test": "vitest run",
+    "test:coverage": "vitest run --config vitest.coverage.config.ts --coverage",
     "verify:type-corpus": "pnpm capture:type-corpus --check",
     "verify:core-package": "node scripts/verify-core-package.mjs",
     "test:codegen-integration": "vitest run --config vitest.codegen.config.ts",

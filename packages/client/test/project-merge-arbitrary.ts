@@ -5,9 +5,11 @@ import {
   count,
   Expr,
   exprNode,
+  type ExprNode,
   from,
   join,
   Query,
+  type Rel,
   scalar,
   sql,
   table,
@@ -130,6 +132,111 @@ function apply(q: Query<Row>, step: Step): Query<Row> {
   }
 }
 
+type MutableNode<T> = T extends Rel | ExprNode ? { -readonly [K in keyof T]: T[K] } : never;
+
+/** Clone once to preserve shared graph identity, then normalize only IR graph nodes. */
+function normalizeOwnership(result: Query<Row>, ownership: Recipe['ownership']): Query<Row> {
+  if (!ownership || ownership === 'constructed') return result;
+  const ir = structuredClone(result.ir);
+
+  if (ownership === 'implicitRowMode' || ownership === 'implicitScope') {
+    const seen = new WeakSet<Rel | ExprNode>();
+    const scopes = new Map<Rel['id'], Rel['id']>();
+    const refs: MutableNode<Extract<ExprNode, { kind: 'ColumnRef' }>>[] = [];
+    const pending: (Rel | ExprNode)[] = [ir];
+
+    while (pending.length) {
+      const next = pending.pop()!;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      const node = next as MutableNode<Rel | ExprNode>;
+
+      // Follow graph edges only, never parameter values, descriptors or metadata.
+      switch (node.kind) {
+        case 'ColumnRef':
+          refs.push(node);
+          // Explicit grouped modes remain authoritative.
+          if (ownership === 'implicitRowMode' && node.mode === 'row') delete node.mode;
+          break;
+        case 'Scan':
+        case 'Literal':
+        case 'Param':
+          break;
+        case 'Call':
+        case 'Raw':
+        case 'RawRel':
+          pending.push(...node.args);
+          break;
+        case 'Agg':
+          pending.push(...node.args, ...node.params);
+          break;
+        case 'Case':
+          for (const branch of node.branches) pending.push(branch.when, branch.then);
+          pending.push(node.otherwise);
+          break;
+        case 'Cast':
+          pending.push(node.expr);
+          break;
+        case 'Subquery':
+          pending.push(node.rel);
+          break;
+        case 'Filter':
+        case 'Prewhere':
+          pending.push(node.input, node.pred);
+          break;
+        case 'Project':
+          pending.push(node.input, ...Object.values(node.exprs));
+          break;
+        case 'Aggregate':
+          pending.push(node.input, ...Object.values(node.keys), ...Object.values(node.aggs));
+          break;
+        case 'Join':
+          if (ownership === 'implicitScope' && node.scope !== undefined) {
+            scopes.set(node.scope, node.id);
+            delete node.scope;
+          }
+
+          for (const [, input] of node.inputs) pending.push(input);
+          pending.push(...node.on);
+          break;
+        case 'ArrayJoin':
+          pending.push(node.input, node.expr);
+          break;
+        case 'Sort':
+          pending.push(node.input, ...node.keys.map(key => key.expr));
+          break;
+        case 'LimitBy':
+          pending.push(node.input, ...node.keys);
+          break;
+        case 'Limit':
+        case 'Distinct':
+        case 'Materialize':
+          pending.push(node.input);
+          break;
+        case 'Union':
+          pending.push(...node.inputs);
+          break;
+
+        default: {
+          const unhandled: never = node;
+
+          throw new Error(
+            `Ownership normalization: unsupported IR kind ${(unhandled as { kind: string }).kind}`,
+          );
+        }
+      }
+    }
+
+    // A ref may precede its Join in the walk; remap only after all scopes are known.
+    for (const ref of refs) {
+      const scope = scopes.get(ref.rel);
+      if (scope !== undefined) ref.rel = scope;
+    }
+  }
+
+  return new Query<Row>(ir, result.caps);
+}
+
 export function build(recipe: Recipe) {
   const source = recipe.live ? liveItems : items;
 
@@ -200,6 +307,8 @@ export function build(recipe: Recipe) {
               .thenBy(r => r.tenant)
           : q.orderBy(r => r.tenant);
 
+  // Omit mode before thenBy's builder rebinding to exercise that boundary too;
+  // post-build ownership normalization alone cannot test mode-free sort inputs.
   const sortKey = <T, N extends string>(expr: Expr<T, N, 'row'>): Expr<T, N, 'row'> => {
     if (recipe.ownership !== 'implicitRowMode' || expr.ir.kind !== 'ColumnRef') return expr;
     const { rel, path, type } = expr.ir;
@@ -212,53 +321,7 @@ export function build(recipe: Recipe) {
     .thenBy(r => r.label)
     .thenBy(r => r.amount);
 
-  if (!recipe.ownership || recipe.ownership === 'constructed') return result;
-  const ir = structuredClone(result.ir);
-
-  if (recipe.ownership === 'implicitRowMode' || recipe.ownership === 'implicitScope') {
-    // Manual IR may omit row mode or a Join's separate callback scope. Grouped
-    // markers remain authoritative; implicit Join scopes bind to the Join id.
-    const seen = new WeakSet<object>();
-    const scopes = new Map<number, number>();
-    const nodes: Record<string, unknown>[] = [];
-    const pending: unknown[] = [ir];
-
-    while (pending.length) {
-      const value = pending.pop();
-      if (!value || typeof value !== 'object' || seen.has(value)) continue;
-      seen.add(value);
-      const node = value as Record<string, unknown>;
-      nodes.push(node);
-
-      if (
-        recipe.ownership === 'implicitRowMode' &&
-        node.kind === 'ColumnRef' &&
-        node.mode === 'row'
-      ) {
-        delete node.mode;
-      }
-
-      if (
-        recipe.ownership === 'implicitScope' &&
-        node.kind === 'Join' &&
-        typeof node.scope === 'number' &&
-        typeof node.id === 'number'
-      ) {
-        scopes.set(node.scope, node.id);
-        delete node.scope;
-      }
-
-      pending.push(...Object.values(node));
-    }
-
-    for (const node of nodes) {
-      if (node.kind !== 'ColumnRef' || typeof node.rel !== 'number') continue;
-      const scope = scopes.get(node.rel);
-      if (scope !== undefined) node.rel = scope;
-    }
-  }
-
-  return new Query<Row>(ir, result.caps);
+  return normalizeOwnership(result, recipe.ownership);
 }
 
 /** Independent native SQL: every stage is its own qualified subquery, so no alias can shadow a column. */
