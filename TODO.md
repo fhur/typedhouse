@@ -637,6 +637,14 @@ No other existing test, snapshot or script changed. The 12 unit tests that pinne
 - `asof-native`'s `meta` coverage is complete on 26.10 again.
 - Under heavy host load, `outer-join.integration.ts` and the weekly-Date tests in `query.integration.ts` time out. They passed when rerun alone; a slow-host timeout policy may be worth a look.
 
+## Property-arbitrary coverage hardening
+
+- Expanded CHType and Decimal-normalization generators; malformed-IR expression, descriptor, metadata and output-schema cases; project-merge/CTE provenance, cloning and join scopes; aggregate alias keys, range guards and nullable rollups.
+- During the research phase, existing native oracles, assertions, seeds, run counts and production source stayed unchanged; no tests were added. Matching V8 coverage provider added for measurement only.
+- Historical fixed-source benchmark (before the F1 production fix): 3308/3553 → 3380/3553 (95.13%). Archived research branch `autoresearch/coverage-hardening-20260717` retains experiment provenance.
+- Prior verification passed full units, typecheck, native campaigns, extra seeds 104729/130363/155921 and six negative controls. Final cleanup passed `pnpm check:all:uncached-baseline`, `pnpm test:coverage` (124 files; 1806 passed, 1 pre-existing skip; 3380/3553 branches), all three extra seeds and all six negative controls. Root compiler checks also passed on TypeScript 5.5.4 and 7.0.2; full version-specific gates and docs were not rerun.
+- **F1 — fixed:** typed scalar and aggregate resolvers now reject non-`undefined` `fn.js` metadata as `invalid_function_metadata`, matching known-function validation. Both compiler paths report the original expression/path as `ValidationError` before rewriting; supplied functions are never invoked. Regression tests cover stacked filters, projections and aggregates with function and non-function payloads. The previously failing property-generator expansion is enabled, and type tests pin `js?: never` for calls and aggregates. Verification passed: the new regressions failed before the fix and pass afterward; `pnpm check:all:uncached-baseline` (including 766 compiler/client integration tests), malformed-IR campaigns under seeds 104729/130363/155921, and root compiler checks on TypeScript 5.5.4/7.0.2.
+
 ## Track A: `min`, `minIf`, `argMin`, `argMinIf`, `quantileExact`, `quantileExactIf` (2026-11-05)
 
 **Status: complete on branch `agg-min-exact`, uncommitted. The final gate at merge is pending.**

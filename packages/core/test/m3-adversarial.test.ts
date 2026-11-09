@@ -190,6 +190,25 @@ it('rejects inherited map entries rather than treating a custom object as an emp
   expect(() => mapKey(inherited)).toThrow();
 });
 
+const decimalSpellings = fc
+  .record({
+    magnitude: fc.integer({ min: 0, max: 100000 }),
+    scale: fc.integer({ min: 0, max: 4 }),
+    negative: fc.boolean(),
+    leadingZeros: fc.integer({ min: 0, max: 4 }),
+    positiveSign: fc.constantFrom('', '+'),
+  })
+  .map(({ magnitude, scale, negative, leadingZeros, positiveSign }) => {
+    const digits = String(magnitude).padStart(scale + 1, '0');
+    const whole = scale ? digits.slice(0, -scale) : digits;
+    const fraction = scale ? digits.slice(-scale) : '';
+
+    return {
+      padded: `${negative ? '-' : positiveSign}${'0'.repeat(leadingZeros)}${whole}.${fraction.padEnd(4, '0')}`,
+      normalized: `${negative ? '-' : ''}${whole}${scale ? '.' + fraction : ''}`,
+    };
+  });
+
 it('retains nested map multiplicities and normalizes decimal keys without delimiter collisions', () => {
   const type = col.Array(
     col.Map(
@@ -205,17 +224,17 @@ it('retains nested map multiplicities and normalizes decimal keys without delimi
   const key = (value: unknown) => canonicalKey({ value }, [['value', type]]);
 
   fc.assert(
-    fc.property(fc.bigInt(), fc.string(), (n, text) => {
+    fc.property(fc.bigInt(), fc.string(), decimalSpellings, (n, text, spellings) => {
       const tuple = { ['__proto__']: n, 42: text, 0: new Date(0) };
 
       const a = [
-        ['01.2000', tuple],
+        [spellings.padded, tuple],
         ['2.0000', tuple],
       ];
 
       const b = [
         ['2', { 0: new Date(0), 42: text, ['__proto__']: n }],
-        ['1.2', tuple],
+        [spellings.normalized, tuple],
       ];
 
       expect(key([a])).toBe(key([b]));

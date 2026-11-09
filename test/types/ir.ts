@@ -61,3 +61,19 @@ expectTypeOf(flatOutput([['42', col.String.type]]).shape).toEqualTypeOf<'flat'>(
 // @ts-expect-error Node ids are not arbitrary numbers.
 const invalid: NodeId = 1;
 void invalid;
+
+type CallMetadata = Extract<ExprNode, { kind: 'Call' }>['fn'];
+
+type AggregateMetadata = Extract<ExprNode, { kind: 'Agg' }>['fn'];
+
+expectTypeOf<CallMetadata['js']>().toEqualTypeOf<undefined>();
+expectTypeOf<AggregateMetadata['js']>().toEqualTypeOf<undefined>();
+const metadata = { name: 'manual', origin: 'typed', deterministic: true } as const;
+
+// @ts-expect-error Function implementations are not valid scalar SQL metadata.
+const invalidCall: CallMetadata = { ...metadata, js: () => 1 };
+
+// @ts-expect-error Aggregates cannot supply JavaScript implementations either.
+const invalidAggregate: AggregateMetadata = { ...metadata, linear: false, js: () => 1 };
+void invalidCall;
+void invalidAggregate;

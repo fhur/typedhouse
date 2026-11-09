@@ -117,7 +117,7 @@ Registry availability depends on the release you use.
 
 ## Execute or stream typed results
 
-Append this to the quick example in a **server-side** TypeScript module. Your ClickHouse table must match the descriptor. This snippet is typechecked but never executed by documentation builds.
+Append this to the quick example in a **server-side** TypeScript module. Your ClickHouse table must match the descriptor.
 
 ```ts typecheck-only
 import { createClient } from '@typedhouse/client';
@@ -228,8 +228,11 @@ This is an ESM-only pnpm workspace using strict TypeScript. The maintained integ
 ```sh
 pnpm typecheck
 pnpm test
+pnpm test:coverage
 pnpm check:all
 ```
+
+`pnpm test:coverage` runs the full unit workload and reports V8 coverage for core and compiler production code in `coverage/` (HTML and JSON). Some unit suites also need Docker. Keep the V8 coverage provider version aligned with Vitest when upgrading.
 
 `pnpm check:all` includes builds, package verification, and Docker-backed integration tests. It requires a working Docker installation; see [Testcontainers setup notes](patches/README.md) if the environment check fails.
 

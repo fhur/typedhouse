@@ -7,7 +7,7 @@ sidebar:
 
 The **Query Builder** lets you express and reuse query logic in TypeScript, with typed columns and explicit relational operations. Its job is to construct a query—not to execute JavaScript callbacks against fetched rows or hide the SQL from you.
 
-Each concept below has a standalone code example and the **final SQL and parameters actually generated** by `compile`. Examples are executed and typechecked against the workspace implementation. The [Simplifying Compiler](/docs/compiler/overview/) may combine operations or move safe filters, so the resulting SQL need not contain a separate SELECT for every builder call.
+Each concept below has a standalone code example and the **final SQL and parameters actually generated** by `compile`. The [Simplifying Compiler](/docs/compiler/overview/) may combine operations or move safe filters, so the resulting SQL need not contain a separate SELECT for every builder call.
 
 ## Concepts
 

@@ -1,23 +1,36 @@
 import fc from 'fast-check';
-import { col, from, join, table, type Query } from '@typedhouse/core';
+import {
+  cast,
+  col,
+  count,
+  Expr,
+  exprNode,
+  type ExprNode,
+  from,
+  join,
+  Query,
+  type Rel,
+  scalar,
+  sql,
+  table,
+  val,
+} from '@typedhouse/core';
 
 export const seed = 20261113;
 
 const meta = { engine: 'Memory', sortingKey: [], partitionKey: [] };
 
-export const items = from(
-  table(
-    'merge_items',
-    {
-      tenant: col.String,
-      id: col.String,
-      category: col.Nullable(col.String),
-      amount: col.UInt64,
-      score: col.Int64,
-    },
-    meta,
-  ),
-);
+const columns = {
+  tenant: col.String,
+  id: col.String,
+  category: col.Nullable(col.String),
+  amount: col.UInt64,
+  score: col.Int64,
+};
+
+export const items = from(table('merge_items', columns, meta));
+
+const liveItems = from(table('merge_items', columns, { ...meta, source: { kind: 'test' } }));
 
 export interface Row {
   tenant: string;
@@ -42,6 +55,9 @@ export interface Recipe {
   minimum: number;
   nullable: boolean;
   shared: boolean;
+  ordering?: 'column' | 'castConstant' | 'rawConstant' | 'scalar';
+  live?: boolean;
+  ownership?: 'constructed' | 'plain' | 'implicitRowMode' | 'implicitScope';
 }
 
 const stepArbitrary: fc.Arbitrary<Step> = fc.oneof(
@@ -64,6 +80,19 @@ export const recipeArbitrary: fc.Arbitrary<Recipe> = fc.record({
   minimum: fc.integer({ min: -3, max: 6 }),
   nullable: fc.boolean(),
   shared: fc.boolean(),
+  ordering: fc.constantFrom(
+    'column' as const,
+    'castConstant' as const,
+    'rawConstant' as const,
+    'scalar' as const,
+  ),
+  live: fc.boolean(),
+  ownership: fc.constantFrom(
+    'constructed' as const,
+    'plain' as const,
+    'implicitRowMode' as const,
+    'implicitScope' as const,
+  ),
 });
 
 function apply(q: Query<Row>, step: Step): Query<Row> {
@@ -103,8 +132,115 @@ function apply(q: Query<Row>, step: Step): Query<Row> {
   }
 }
 
+type MutableNode<T> = T extends Rel | ExprNode ? { -readonly [K in keyof T]: T[K] } : never;
+
+/** Clone once to preserve shared graph identity, then normalize only IR graph nodes. */
+function normalizeOwnership(result: Query<Row>, ownership: Recipe['ownership']): Query<Row> {
+  if (!ownership || ownership === 'constructed') return result;
+  const ir = structuredClone(result.ir);
+
+  if (ownership === 'implicitRowMode' || ownership === 'implicitScope') {
+    const seen = new WeakSet<Rel | ExprNode>();
+    const scopes = new Map<Rel['id'], Rel['id']>();
+    const refs: MutableNode<Extract<ExprNode, { kind: 'ColumnRef' }>>[] = [];
+    const pending: (Rel | ExprNode)[] = [ir];
+
+    while (pending.length) {
+      const next = pending.pop()!;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      const node = next as MutableNode<Rel | ExprNode>;
+
+      // Follow graph edges only, never parameter values, descriptors or metadata.
+      switch (node.kind) {
+        case 'ColumnRef':
+          refs.push(node);
+          // Explicit grouped modes remain authoritative.
+          if (ownership === 'implicitRowMode' && node.mode === 'row') delete node.mode;
+          break;
+        case 'Scan':
+        case 'Literal':
+        case 'Param':
+          break;
+        case 'Call':
+        case 'Raw':
+        case 'RawRel':
+          pending.push(...node.args);
+          break;
+        case 'Agg':
+          pending.push(...node.args, ...node.params);
+          break;
+        case 'Case':
+          for (const branch of node.branches) pending.push(branch.when, branch.then);
+          pending.push(node.otherwise);
+          break;
+        case 'Cast':
+          pending.push(node.expr);
+          break;
+        case 'Subquery':
+          pending.push(node.rel);
+          break;
+        case 'Filter':
+        case 'Prewhere':
+          pending.push(node.input, node.pred);
+          break;
+        case 'Project':
+          pending.push(node.input, ...Object.values(node.exprs));
+          break;
+        case 'Aggregate':
+          pending.push(node.input, ...Object.values(node.keys), ...Object.values(node.aggs));
+          break;
+        case 'Join':
+          if (ownership === 'implicitScope' && node.scope !== undefined) {
+            scopes.set(node.scope, node.id);
+            delete node.scope;
+          }
+
+          for (const [, input] of node.inputs) pending.push(input);
+          pending.push(...node.on);
+          break;
+        case 'ArrayJoin':
+          pending.push(node.input, node.expr);
+          break;
+        case 'Sort':
+          pending.push(node.input, ...node.keys.map(key => key.expr));
+          break;
+        case 'LimitBy':
+          pending.push(node.input, ...node.keys);
+          break;
+        case 'Limit':
+        case 'Distinct':
+        case 'Materialize':
+          pending.push(node.input);
+          break;
+        case 'Union':
+          pending.push(...node.inputs);
+          break;
+
+        default: {
+          const unhandled: never = node;
+
+          throw new Error(
+            `Ownership normalization: unsupported IR kind ${(unhandled as { kind: string }).kind}`,
+          );
+        }
+      }
+    }
+
+    // A ref may precede its Join in the walk; remap only after all scopes are known.
+    for (const ref of refs) {
+      const scope = scopes.get(ref.rel);
+      if (scope !== undefined) ref.rel = scope;
+    }
+  }
+
+  return new Query<Row>(ir, result.caps);
+}
+
 export function build(recipe: Recipe) {
-  let q: Query<Row> = items.map(r => ({
+  const source = recipe.live ? liveItems : items;
+
+  let q: Query<Row> = source.map(r => ({
     tenant: r.tenant,
     id: r.id,
     category: r.category,
@@ -149,13 +285,43 @@ export function build(recipe: Recipe) {
       }));
   }
 
-  // Complete rows are functionally determined by the sort key: duplicates are exact copies.
-  return q
-    .orderBy(r => r.tenant)
-    .thenBy(r => r.id)
+  // Parameter-only leading keys are identical for every row. They must survive
+  // replacing a previous ordering without being rebound into its row scope.
+  // The native oracle omits this invariant prefix; tenant/id/... still defines
+  // the same complete ordering, including the duplicate-row tie invariant.
+  const ordered =
+    recipe.ordering === 'scalar'
+      ? q
+          .orderBy(r => r.id)
+          .orderBy(() => scalar(q.aggregate(() => ({ rows: count() }))))
+          .thenBy(r => r.tenant)
+      : recipe.ordering === 'castConstant'
+        ? q
+            .orderBy(r => r.id)
+            .orderBy(() => cast(val(BigInt(recipe.minimum), col.Int64), col.String))
+            .thenBy(r => r.tenant)
+        : recipe.ordering === 'rawConstant'
+          ? q
+              .orderBy(r => r.id)
+              .orderBy(() => sql`${val(String(recipe.minimum), col.String)}`.as(col.String))
+              .thenBy(r => r.tenant)
+          : q.orderBy(r => r.tenant);
+
+  // Omit mode before thenBy's builder rebinding to exercise that boundary too;
+  // post-build ownership normalization alone cannot test mode-free sort inputs.
+  const sortKey = <T, N extends string>(expr: Expr<T, N, 'row'>): Expr<T, N, 'row'> => {
+    if (recipe.ownership !== 'implicitRowMode' || expr.ir.kind !== 'ColumnRef') return expr;
+    const { rel, path, type } = expr.ir;
+    return new Expr(exprNode({ kind: 'ColumnRef', rel, path, type }), expr.name, expr.mode);
+  };
+
+  const result = ordered
+    .thenBy(r => sortKey(r.id))
     .thenBy(r => r.total)
     .thenBy(r => r.label)
     .thenBy(r => r.amount);
+
+  return normalizeOwnership(result, recipe.ownership);
 }
 
 /** Independent native SQL: every stage is its own qualified subquery, so no alias can shadow a column. */

@@ -89,7 +89,8 @@ export function resolveAggregate(
     e.fn.deterministic !== def.deterministic ||
     e.fn.linear !== def.linear ||
     e.fn.argumentPolicies !== undefined ||
-    e.fn.repeatedArgs !== undefined
+    e.fn.repeatedArgs !== undefined ||
+    e.fn.js !== undefined
   )
     throw new Error('invalid_function_metadata');
 
@@ -233,7 +234,8 @@ export function resolveCall(
     e.fn.sqlName !== def.sqlName ||
     e.fn.deterministic !== def.deterministic ||
     JSON.stringify(e.fn.argumentPolicies) !== JSON.stringify(def.argumentPolicies) ||
-    e.fn.repeatedArgs !== def.repeatedArgs
+    e.fn.repeatedArgs !== def.repeatedArgs ||
+    e.fn.js !== undefined
   )
     throw new Error('invalid_function_metadata');
 

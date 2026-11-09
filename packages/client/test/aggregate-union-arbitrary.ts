@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { Query, count, join, max, sum, unionAll } from '@typedhouse/core';
+import { Query, cast, col, count, join, max, sum, unionAll } from '@typedhouse/core';
 import {
   buildTree,
   nativeTree,
@@ -14,7 +14,7 @@ type Row = { id: string; amount: bigint };
 
 export type Composition =
   | { kind: 'leaf'; tree: Tree; latest: boolean }
-  | { kind: 'rollup'; input: Composition }
+  | { kind: 'rollup'; input: Composition; guarded?: boolean }
   | {
       kind: 'union';
       left: Composition;
@@ -44,7 +44,11 @@ function compositions(depth: number): fc.Arbitrary<Composition> {
 
   return fc.oneof(
     leaf,
-    fc.record({ kind: fc.constant('rollup' as const), input: compositions(depth - 1) }),
+    fc.record({
+      kind: fc.constant('rollup' as const),
+      input: compositions(depth - 1),
+      guarded: fc.boolean(),
+    }),
     fc.record({
       kind: fc.constant('union' as const),
       left: compositions(depth - 1),
@@ -73,7 +77,7 @@ export function shape(c: Composition): string {
       : `union-${c.all}-${c.repeat}-${c.fence}(${shape(c.left)},${shape(c.right)})`;
 }
 
-export function buildComposition(c: Composition): Query<Row> {
+export function buildComposition(c: Composition, nullableSum = false): Query<Row> {
   if (c.kind === 'leaf') {
     const s = buildTree(c.tree).map(r => ({ id: r.id, amount: r.amount }));
     if (!c.latest) return s;
@@ -84,14 +88,38 @@ export function buildComposition(c: Composition): Query<Row> {
       .map(r => ({ id: r.s.id, amount: r.s.amount }));
   }
 
-  if (c.kind === 'rollup')
-    return buildComposition(c.input)
-      .groupBy(r => ({ key: r.id }))
-      .aggregate(g => ({ total: sum(g.amount) }))
-      .map(r => ({ id: r.key, amount: r.total }));
+  if (c.kind === 'rollup') {
+    const input = buildComposition(c.input, nullableSum);
 
-  let left = buildComposition(c.left),
-    right = c.repeat ? left : buildComposition(c.right);
+    if (nullableSum && !c.guarded) {
+      // Inputs remain non-null in value, but the intermediate aggregate reads a
+      // real nullable column. Restore the non-null interface after aggregation.
+      return input
+        .map(r => ({ id: r.id, amount: cast(r.amount, col.Nullable(col.UInt64)) }))
+        .groupBy(r => ({ key: r.id }))
+        .aggregate(g => ({ total: sum(g.amount) }))
+        .map(r => ({ id: r.key, amount: r.total.ifNull(0n) }));
+    }
+
+    return input
+      .groupBy(r => ({ key: r.id }))
+      .aggregate(g => {
+        const total = sum(g.amount);
+
+        // UInt64 totals (including wrapping sums) always satisfy this range.
+        // The equivalent aggregate expression exercises repeated aggregate
+        // references and BETWEEN's repeatability rules; native SQL keeps SUM.
+        return {
+          total: c.guarded
+            ? total.multiply(cast(total.between(0n, (1n << 64n) - 1n), col.UInt64))
+            : total,
+        };
+      })
+      .map(r => ({ id: r.key, amount: r.total }));
+  }
+
+  let left = buildComposition(c.left, nullableSum),
+    right = c.repeat ? left : buildComposition(c.right, nullableSum);
 
   if (c.fence) {
     left = left
@@ -120,7 +148,9 @@ export function buildComposition(c: Composition): Query<Row> {
 }
 
 export function build(r: Recipe) {
-  return buildComposition(r.composition)
+  // Reuse an existing discriminator so replay/accounting JSON and RNG draws
+  // stay unchanged; non-empty take values exercise the nullable representation.
+  return buildComposition(r.composition, r.take % 2 !== 0)
     .groupBy(x => ({ key: x.id }))
     .aggregate(g => ({ n: count(), total: sum(g.amount), highest: max(g.amount) }))
     .where(x => x.key.eq(r.key).and(x.n.gt(BigInt(r.minimum))))

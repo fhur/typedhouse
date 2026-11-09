@@ -17,7 +17,7 @@ CREATE TABLE events (
 ) ENGINE = MergeTree ORDER BY id;
 ```
 
-The descriptor below describes that existing table, including its `DEFAULT` metadata; `table()` does not create it. Keep the descriptor synchronized with the live schema. The TypeScript example is typechecked, but **never executed by the docs build**. Run it only in a server application, never a browser bundle or the playground.
+The descriptor below describes that existing table, including its `DEFAULT` metadata; `table()` does not create it. Keep the descriptor synchronized with the live schema. Run it only in a server application, never a browser bundle or the playground.
 
 ```ts typecheck-only
 import {
