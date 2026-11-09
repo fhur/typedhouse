@@ -1,6 +1,6 @@
 ## Track D: `-State`/`-Merge`, `SETTINGS`, `ASOF JOIN`, `WITH FILL`, `OVER` (2026-11-05, PM)
 
-**Status.** D1 to D11 are accepted by the PM; see the acceptance sections at the end of this track. D21 (null-extended `Tuple` and `JSON`, not specific to ASOF) is in progress. D12 is ready and may start in a second worktree now; D13 waits for D21 to merge. D14 and D15, then D16 to D19, follow in order. The version sweep before `WITH FILL` and `OVER` is done (see its section). Q1 to Q7 are recorded under Decisions; orchestrator rulings stay open to the owner's objection. Build order is the owner's. Line numbers are at master `cd59ba9`.
+**Status.** D1 to D11 and D21 are accepted by the PM; see the acceptance sections at the end of this track. D12 to D19 run in parallel worktrees: `with-fill` stacked on `five-keywords`, `over` stacked on `with-fill`, rebased by the orchestrator at each landing. Q1 to Q7 are recorded under Decisions; orchestrator rulings stay open to the owner's objection. Build order is the owner's. Line numbers are at master `cd59ba9`.
 
 Facts below were measured on `clickhouse/clickhouse-server:24.8` (24.8.14.39) unless stated. The minimum-version checks ran on 24.3.18.7 and cover only what the 24.3 notes name. The SQL in the API proposals was run on 24.8 by hand; a compiler does not emit it yet, so the exact text is a target.
 
@@ -259,7 +259,7 @@ Accept: all four operators, reversed operands, each type family and mixed pairs,
 **D11. `ASOF JOIN` docs and spec.** Depends: D9. Status: accepted.
 Joins page and `compiler/select-blocks.md`; `spec.md` Joins and Join strictness rows, Decided row. Accept: docs cover ties (not repeatable, and affected by `settings({ max_threads })`), the right-side filter trap with the reproduced rows, supported types and the pairs raising code 386, NaN, and unsupported `join_algorithm`s per version. `pnpm docs:verify` passes.
 
-**D21. Read a null-extended `Tuple` or `JSON` as its typed default.** Depends: none. Status: ready. Worker, then Tester.
+**D21. Read a null-extended `Tuple` or `JSON` as its typed default.** Depends: none. Status: accepted at `643281f`. The form changed during the work, see "D21 acceptance". Worker, then Tester.
 In `joinRead` (`emit-naive.ts`), when the input is null-extended and the declared type is a `Tuple` or `JSON`, emit `ifNull(<col>, defaultValueOfTypeName(<quoted printed type>))`. This restores the Decided row "Outer join row types": these kinds "keep their type and the server default when unmatched". A 5-line prototype passed every check in the defect note below. The prototype's `same(...)` branch order is not binding, but `ON` conditions and non-extended inputs must stay untouched.
 Accept: on 24.3, 24.8, 25.3, 25.8, 25.10, 26.3 and 26.10, on both emitters, through `leftJoin`, `rightJoin`, `fullJoin` and `asofLeftJoin`, rows and `meta` equal the 24.8 baseline for whole-column reads, each scalar element, nested `element`, and `where`, `orderBy`, `groupBy` over an element, a join over a join, and raw `sql` over the column. `JSON` where the server has it. `left-join-tuple-element-null.integration.ts` passes unchanged, which clears the 60 red tests. A `Tuple` whose printed type holds a quoted `Enum` label, a zoned `DateTime`, backticked names, and a `Nullable` member. A `col.Nullable(Tuple)` column stays unwrapped. Negative controls: no wrap for `Tuple`, no wrap for `JSON`, wrap on a non-extended input, unquoted type text. Docs: `joins.md` drops "Tuple columns on ClickHouse 26.10" and the `asofLeftJoin` link to it, and records the emitted form and the `Point` limit; `spec.md` Decided row replaces its "Known limit" with this. Edits to `null-extended-tuple-limit.integration.ts`: the Tester flips its 8 pins of the limit (`26.10 > * > an unmatched row`, `26.10 > * > meta`) to the new behaviour, once the owner has acknowledged that the fix overtakes "documented, not fixed". Nothing else existing changes.
 
@@ -331,6 +331,8 @@ Accept, per keyword before the next starts, and again at merge: `pnpm check:all`
 - **`@clickhouse/client` floor is `^1.13.0` in `packages/client`; `packages/codegen` stays `^1.11.0`.** 1.11.0 fails to load, and 1.12.x loses the code on 26.10.
 - **ASOF, owner (relayed by the orchestrator).** The alias-order bug is fixed on this branch. The EXPLAIN corpus edit is approved: 3 additive entries and snapshots in `explain-corpus.ts`. "26.10 `Tuple` limit documented, not fixed" is overtaken if D21 lands; see the defect note.
 - **ASOF, orchestrator (open to the owner's objection, told to the owner).** Temporal against number is refused at compile time rather than surfacing as a server error, which differs from the PM's design note. `UInt8` against `Bool` and `Enum` against `UInt8` are stricter refusals. `sql` and `Cast` are allowed in ASOF conditions, `Case` and `Subquery` refused. `JoinBuilder`'s constructor gains an optional third argument, visible in declarations.
+- **D21, orchestrator (open to the owner's objection, told to the owner).** The 12 unit tests pinning the first form's SQL were updated by the Tester: they were written on this branch, not a prior contract. `Point` and other parser `Unknown` kinds are not widened, because the owner approved D21 with `Point` staying a documented limit; widening is a follow-up.
+- **Process (orchestrator).** D12 to D19 run in parallel worktrees: `with-fill` stacked on `five-keywords`, `over` stacked on `with-fill`, with branches rebased by the orchestrator at each landing.
 - **Q7, pre-existing type expectations (owner, relayed by the orchestrator): approved.** The Tester may make the edits in groups A to G below, in D18, using `.over()`, and nothing outside this list. The known gap is accepted: `count().plus(1n).over(w)` and `sum(g.count).over(w)` type-check and fail at runtime with `invalid_window_function`. Measured with a prototype on TypeScript 5.8.3 only, so any pin differing on 5.5.4 or 7.0.2, or outside this list, comes back to the owner.
 
 | Group | Locations in `test/types/` | Today | After |
@@ -575,6 +577,65 @@ Each new item settles on precedent:
 - Fill keys of `Int128`/`UInt256`.
 - Windows over `Map` or `Array` arguments.
 - Load or large data, beyond 600,000 rows in 2 parts.
+
+### D21 acceptance (PM, 2026-11-09)
+
+**Result: closed at `643281f`.** The final form differs from the task text. The first form, `defaultValueOfTypeName('<declared>')`, changed matched rows when the descriptor lagged the table (a lagging `Enum` matched row read `1`), and `ifNull` alone changed `meta` even on 24.8, dropping `LowCardinality` members, `SimpleAggregateFunction` and `Point`. The accepted form takes the type from the column, so no descriptor text reaches the SQL: `CAST(ifNull(c, defaultValueOfTypeName(T)), T)` with `T = replaceRegexpOne(toTypeName(c), '(?s)^Nullable\\((.*)\\)$', '\\1')`. It also covers `SimpleAggregateFunction` over `Tuple` or `JSON`. The PM ran everything marked "checked" in a frozen copy of that commit.
+
+| Figure | Value | Status |
+|---|---|---|
+| `pnpm install --frozen-lockfile` | Exit 0 | Checked |
+| `pnpm check:all`, as one command | Exit 1 on 3 timeouts in compiler integration (`outer-join.integration.ts`: a driver "Timeout error" in one of 500 recipes; `query.integration.ts`: two weekly-Date tests over 30 s and 120 s). Every earlier step passed. The host load average was about 17 on 16 cores, with other agents' suites running | Checked |
+| The two files with timeouts, rerun alone | 107 of 107 | Checked |
+| Inside `check:all`: `pnpm test` | 3080 passed, 1 skipped | Checked |
+| Inside `check:all`: compiler integration | 3887 passed, 1 skipped, 3 failed as above, 70 files | Checked |
+| Inside `check:all`: codegen 8 of 8, type corpus, package consumers, fixture seed | Clean | Checked |
+| `check-type-diagnostics` | 583 on 5.5.4, 5.8.3, latest | Checked |
+| Full-project `tsc` | Clean on 5.5.4 and latest (the first 5.5.4 run ran out of memory without the heap flag; rerun with it) | Checked |
+| `check-type-performance --all` | Budget unchanged; source on 5.8.3 3,343,884 instantiations | Checked |
+| `pnpm docs:verify` | Exit 0 | Checked |
+| 802 null-extension tests across 7 versions, a 55-test regex suite, the 3,360-query comparison against `d0ea03c`, cost within noise at 3M rows | | Reported |
+
+**Existing-test audit, since `d0ea03c`.**
+- `null-extended-tuple-limit.integration.ts` is renamed `null-extended-tuple-default.integration.ts`, with its 26.10 pins flipped as the owner approved.
+- `asof-native.integration.ts` includes `tup` on 26.10 again, which restores coverage; it weakens nothing.
+- `left-join-tuple-element-null.integration.ts` changes only its header comment.
+
+No other existing test, snapshot or script changed. The 12 unit tests that pinned the first form are from this branch (orchestrator ruling above).
+
+**PM's own server check, `chprobe.py` on all 7 versions (`probe/d21.md`).** The accepted form, written by hand, gave the same types and rows on 24.3 to 26.10 for every case tried:
+- a `Tuple` with a `LowCardinality` member;
+- `Enum` labels with a quote and a newline, plus a `Nullable` member;
+- `Map` and `Array(Tuple)` members;
+- `Point` and a zoned `DateTime64` member;
+- backticked names, including one with a parenthesis;
+- `SimpleAggregateFunction(any, Tuple)`;
+- `WHERE` and `GROUP BY` over an element, which keeps the unmatched row;
+- an inner join, where it is the identity.
+
+`toTypeName` returns a multi-line type name for named tuples, which is why the regex needs `(?s)`. A `Tuple` with an `AggregateFunction` member could be filled only on 26.10, so it was checked there only.
+
+**PM's negative controls, 8 mutations on 138 unit tests in 6 files.** All failed tests:
+
+| Mutation | Failed |
+|---|---|
+| No wrap | 19 |
+| `ifNull` without the `CAST` | 18 |
+| The first form's declared type text | 17 |
+| `JSON` not wrapped | 3 |
+| `SimpleAggregateFunction` not unwrapped | 2 |
+| Wrap on non-extended inputs | 4 |
+| Regex without `(?s)` | 17 |
+| `Unknown` widened | 6 |
+
+**Docs.** `joins.md` and the `spec.md` Decided row describe the accepted form, the versions, the lagging-descriptor behaviour, and the `Unknown` kinds, and the PM's probes agree. The PM checked those sentences, not every sentence in the page.
+
+**Follow-ups.**
+- Widening the read to parser `Unknown` kinds. The Worker measured `Point`, `Tuple(p Point, …)` and `JSON(a UInt8)` declared as `Unknown` safe; this needs the owner, since `Point` was approved as a documented limit.
+- `toSQL()` text is long for wrapped columns, about 170 characters each.
+- "Wrap on a non-extended input" cannot be caught natively, since it is the identity there; only unit tests catch it.
+- `asof-native`'s `meta` coverage is complete on 26.10 again.
+- Under heavy host load, `outer-join.integration.ts` and the weekly-Date tests in `query.integration.ts` time out. They passed when rerun alone; a slow-host timeout policy may be worth a look.
 
 ## Track A: `min`, `minIf`, `argMin`, `argMinIf`, `quantileExact`, `quantileExactIf` (2026-11-05)
 
