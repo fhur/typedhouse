@@ -166,7 +166,7 @@ importers:
   packages/client:
     dependencies:
       '@clickhouse/client':
-        specifier: ^1.11.0
+        specifier: ^1.13.0
         version: 1.24.1
       '@typedhouse/compiler':
         specifier: workspace:*

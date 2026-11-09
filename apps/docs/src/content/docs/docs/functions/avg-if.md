@@ -7,7 +7,7 @@ sidebar:
 
 `avgIf(value, predicate)` computes the mean of integer or float values for which a Bool predicate is true. False and NULL predicates exclude rows; NULL values are skipped. The condition applies only to this aggregate, not to the entire group.
 
-The result is `Float64` (`number`), nullable when the value operand is nullable. Predicate nullability alone does not make the result nullable. Decimal operands are unsupported, unlike `sumIf`. With non-null values and no qualifying rows, the result is NaN. `State`/`Merge` execution is not exposed.
+The result is `Float64` (`number`), nullable when the value operand is nullable. Predicate nullability alone does not make the result nullable. Decimal operands are unsupported, unlike `sumIf`. With non-null values and no qualifying rows, the result is NaN. Stacked combinators such as `avgStateIf` are not available.
 
 ## Example
 

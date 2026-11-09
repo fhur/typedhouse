@@ -226,6 +226,59 @@ export function defineFunction<
   ) as unknown as DefinedFunction<A, R, P, S>;
 }
 
+/** The type a state stores for an argument: on 24.8 the server drops `LowCardinality` at every depth, and the
+ * `SimpleAggregateFunction` wrapper it already drops when reading `SimpleAggregateFunction(f, LowCardinality(T))`. */
+export function stateArgument(t: CHType): CHType {
+  switch (t.kind) {
+    case 'LowCardinality':
+      return stateArgument(t.inner);
+    case 'Nullable':
+      return { kind: 'Nullable', inner: stateArgument(t.inner) };
+    case 'Array':
+      return { kind: 'Array', inner: stateArgument(t.inner) };
+    case 'Map':
+      return { kind: 'Map', key: stateArgument(t.key), value: stateArgument(t.value) };
+    case 'Tuple':
+      return { kind: 'Tuple', items: t.items.map(i => ({ ...i, type: stateArgument(i.type) })) };
+    case 'SimpleAggregateFunction':
+      return t.inner.kind === 'LowCardinality' ? stateArgument(t.inner) : t;
+    default:
+      return t;
+  }
+}
+
+/** The level is a Float64 query parameter, so the server spells 0 and 1 as `0.` and `1.`. */
+const stateLevel = (level: unknown): string =>
+  Number.isInteger(level) ? `${Math.abs(level as number)}.` : String(level);
+
+/** Parametric states carry the level in the type: `AggregateFunction(quantile(0.9), Float64)`. */
+export function aggregateStateType(
+  def: AggregateDefinition,
+  args: readonly CHType[],
+  params: readonly unknown[],
+): CHType {
+  return {
+    kind: 'AggregateFunction',
+    fn: params.length ? `${def.name}(${params.map(stateLevel).join(', ')})` : def.name,
+    args: args.map(stateArgument),
+  };
+}
+
+/** A merge finalizes like the base function over the state's stored arguments. */
+export function aggregateMergeType(def: AggregateDefinition, stateArgs: readonly CHType[]): CHType {
+  const args = stateArgs.map(stateArgument);
+  const returns = def.returns;
+
+  const type =
+    typeof returns === 'function'
+      ? returns(args, [])
+      : returns === 'arg0'
+        ? args[0]!
+        : returns.type;
+
+  return def.nullable !== 'never' && args.some(isNullable) ? nullable(type) : type;
+}
+
 export function aggregateCall(
   def: AggregateDefinition,
   args: readonly unknown[],
@@ -245,13 +298,13 @@ export function aggregateCall(
   const fn: AggregateMetadata = { ...metadata(def), linear: def.linear };
 
   const type = combinators.includes('State')
-    ? {
-        kind: 'AggregateFunction' as const,
-        fn: def.name,
-        args: args.map(a =>
+    ? aggregateStateType(
+        def,
+        args.map(a =>
           a instanceof Expr ? (a.ir.type ?? unknownType) : (defaultType(a) ?? unknownType),
         ),
-      }
+        params,
+      )
     : resolveReturn(def, combinators.includes('If') ? args.slice(0, -1) : args);
 
   return new Expr(

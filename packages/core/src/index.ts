@@ -14,6 +14,7 @@ export * from './subquery.js';
 export * from './ordering.js';
 export * from './types.js';
 export * from './ir.js';
+export * from './settings.js';
 export * from './output.js';
 export * from './canonical-key.js';
 export * from './type-mapping.js';

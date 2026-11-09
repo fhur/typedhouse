@@ -9,12 +9,14 @@ import {
   type ExprNode,
   type FlatColumns,
   type Rel,
+  type Settings,
   type SortKey,
 } from './ir.js';
 import type { CHType } from './ch-type.js';
 import type { TableDef } from './table.js';
 import type { Infer, Row } from './types.js';
 import { InsertCommand, type InsertRow, type ExactInsertRow } from './insert.js';
+import { settingsIssue, type QuerySettings } from './settings.js';
 
 export interface Caps {
   readonly live: boolean;
@@ -43,6 +45,15 @@ let compiler: QueryCompiler | undefined;
  */
 export function registerCompiler(implementation: QueryCompiler): void {
   compiler = implementation;
+}
+
+function compileRel(rel: Rel): CompiledQuery {
+  if (!compiler)
+    throw new Error(
+      'compiler_not_registered: call registerCompiler(emitNaive) from @typedhouse/compiler',
+    );
+
+  return compiler(rel);
 }
 
 export type IsLive<Q> = Q extends { readonly caps: infer C extends Caps } ? C['live'] : never;
@@ -364,7 +375,7 @@ function liveRelation(rel: Rel, active: Set<Rel>): boolean {
           child(rel.input) && [...Object.values(rel.keys), ...Object.values(rel.aggs)].every(expr)
         );
       case 'Join':
-        return rel.inputs.every(([, r]) => child(r)) && rel.on.every(expr);
+        return !rel.strictness && rel.inputs.every(([, r]) => child(r)) && rel.on.every(expr);
       case 'Union':
         return rel.inputs.every(child);
       case 'Sort':
@@ -834,12 +845,47 @@ export class Query<R, C extends Caps = Caps, Proxy = Row<R>, Nested extends bool
    * @throws If no compiler has been registered, or the query fails compilation.
    */
   toSQL(): CompiledQuery {
-    if (!compiler)
-      throw new Error(
-        'compiler_not_registered: call registerCompiler(emitNaive) from @typedhouse/compiler',
-      );
+    return compileRel(this.ir);
+  }
 
-    return compiler(this.ir);
+  /** Attach ClickHouse query settings. This ends the query: the result can only be run,
+   * streamed or passed to `toSQL()`, because `SETTINGS` applies to the whole query.
+   * Only the keys of {@link QuerySettings} are accepted, and values are validated here.
+   * @example
+   * ```ts
+   * from(components).limit(100).settings({ max_threads: 2, log_comment: 'report' });
+   * ```
+   * @throws If a key is not allowed or a value is invalid.
+   */
+  settings(settings: QuerySettings): SettingsQuery<R> {
+    const issue = settingsIssue(settings);
+    if (issue) throw new Error(`${issue.code} at ${issue.path}: ${issue.detail}`);
+
+    return new TerminalQuery<R>(
+      relNode({ kind: 'Settings', input: this.ir, settings, output: this.ir.output }),
+    );
+  }
+}
+
+/** A query with settings attached. It has no builder methods and is not a query input. */
+export interface SettingsQuery<R> {
+  readonly _rowType: R;
+  readonly ir: Settings;
+  readonly caps: { readonly live: false };
+  toSQL(): CompiledQuery;
+}
+
+class TerminalQuery<R> implements SettingsQuery<R> {
+  declare readonly _rowType: R;
+
+  readonly caps = Object.freeze({ live: false as const });
+
+  constructor(readonly ir: Settings) {
+    Object.freeze(this);
+  }
+
+  toSQL(): CompiledQuery {
+    return compileRel(this.ir);
   }
 }
 

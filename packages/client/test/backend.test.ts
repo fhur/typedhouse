@@ -268,7 +268,11 @@ it('isolates mode caches and closes only the explicitly owned driver', async () 
   const naive = createClickHouseBackend({}, 'clickhouse-naive');
   const plugin = createClientFromBackend(naive);
   const naiveCompile = vi.spyOn(naive, 'compile');
-  own.query.mockResolvedValue({ json: async () => [{ id: '4' }], close: vi.fn() });
+
+  own.query.mockResolvedValue({
+    stream: () => Readable.from([[{ json: () => ({ id: '4' }) }]]),
+    close: vi.fn(),
+  });
 
   injected.query.mockImplementation(async () => ({
     stream: () => Readable.from([[{ json: () => ({ id: '5' }) }]]),
@@ -352,7 +356,10 @@ it('buffered plans enforce ownership and retain JSON rejection context and clean
   expect(driver.query).not.toHaveBeenCalled();
   const f = response();
   const failure = new Error('buffered JSON failure');
-  f.result.json.mockRejectedValueOnce(failure);
+
+  f.parsed[0]!.mockImplementation(() => {
+    throw failure;
+  });
 
   await expect(a.runBuffered(plan)).rejects.toMatchObject({
     cause: failure,
@@ -361,7 +368,7 @@ it('buffered plans enforce ownership and retain JSON rejection context and clean
   });
 
   expect(f.result.close).toHaveBeenCalledTimes(1);
-  expect(f.result.stream).not.toHaveBeenCalled();
+  expect(f.result.stream).toHaveBeenCalledTimes(1);
   f.stream.destroy();
   await a.close();
   await b.close();
@@ -371,8 +378,8 @@ it('default client retains buffered JSON run and owns cleanup, including decode 
   const client = createClient();
   const f = response(['bad']);
   await expect(client.run(q)).rejects.toBeInstanceOf(QueryError);
-  expect(f.result.json).toHaveBeenCalledTimes(1);
-  expect(f.result.stream).not.toHaveBeenCalled();
+  expect(f.result.stream).toHaveBeenCalledTimes(1);
+  expect(f.result.json).not.toHaveBeenCalled();
   expect(f.result.close).toHaveBeenCalledTimes(1);
   f.stream.destroy();
   await client.close();

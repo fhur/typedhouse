@@ -7,7 +7,7 @@ sidebar:
 
 `avg(value)` computes the arithmetic mean of integer or float values and returns `Float64` (`number`). NULL inputs are skipped; nullable operands produce a nullable result descriptor. Empty non-null input produces NaN.
 
-Decimal operands are not supported by this typed surface, unlike `sum`. Aggregate `State`/`Merge` execution is not exposed for `avg`.
+Decimal operands are not supported by this typed surface, unlike `sum`. Rollups use [`avgState` and `avgMerge`](/docs/functions/state-merge/).
 
 ## Example
 

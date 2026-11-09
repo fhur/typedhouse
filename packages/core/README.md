@@ -30,7 +30,7 @@ const { sql, params } = compile(query.ir); // values become {p0:String} paramete
 ```
 
 - **Typed columns and expressions** for ClickHouse types, including `Nullable`, `LowCardinality`, `Array`, `Tuple`, `Map` and dates.
-- **Joins** (`join`, `leftJoin(left, right).on(...)` with nullable right side), **aggregation**, `ARRAY JOIN`, `DISTINCT`, **unions**, scalar and set **subqueries**, `FINAL`/`SAMPLE`.
+- **Joins** (`join`, `leftJoin(left, right).on(...)` with nullable right side, `asofJoin(left, right).on(...).asof(...)`), **aggregation**, `ARRAY JOIN`, `DISTINCT`, **unions**, scalar and set **subqueries**, `FINAL`/`SAMPLE`.
 - **Typed ClickHouse functions** such as `countIf`, `uniqExact`, `quantile`, `argMax` and `toStartOfWeek`, plus bounded user-defined functions.
 
 Read the [query builder guide](https://fhur.github.io/typedhouse/docs/query-builder/overview/) or try queries in the [browser playground](https://fhur.github.io/typedhouse/playground/).

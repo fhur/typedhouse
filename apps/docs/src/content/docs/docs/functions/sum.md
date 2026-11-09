@@ -7,7 +7,7 @@ sidebar:
 
 `sum(value)` adds numeric values, skipping NULL. Integers up to 64 bits produce `Int64` or `UInt64` (`bigint`); 128- and 256-bit integers retain their width. Floats produce `Float64` (`number`). Nullable input keeps a nullable result descriptor.
 
-Decimal input is supported: the result preserves scale and uses precision 38, or 76 when input precision exceeds 38. Unlike `sum`, `avg` and `quantile` do not support Decimal operands. `State` and `Merge` execution is not supported by the compiler.
+Decimal input is supported: the result preserves scale and uses precision 38, or 76 when input precision exceeds 38. Unlike `sum`, `avg` and `quantile` do not support Decimal operands. Rollups use [`sumState` and `sumMerge`](/docs/functions/state-merge/).
 
 ## Example
 

@@ -109,8 +109,9 @@ it('rejects forged levels, metadata, descriptors, arity, combinators and foreign
   check({ fn: { ...agg.fn, deterministic: true } }, /invalid_function_metadata/);
   check({ fn: { ...agg.fn, sqlName: 'unsafe' } }, /invalid_function_metadata/);
 
-  for (const combinators of [['State'], ['Merge'], ['If', 'If']] as const)
-    check({ combinators }, /unsupported_aggregate_combinator/);
+  check({ combinators: ['State'] }, /invalid_expression_type/);
+  check({ combinators: ['Merge'] }, /invalid_merge_state/);
+  check({ combinators: ['If', 'If'] }, /unsupported_aggregate_combinator/);
 
   check({ args: [q.row.n.ir] }, /invalid_expression_mode/);
   check({ args: [root.aggs.x] }, /invalid_aggregate_placement/);

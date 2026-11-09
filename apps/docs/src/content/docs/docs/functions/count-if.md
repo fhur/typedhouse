@@ -7,7 +7,7 @@ sidebar:
 
 `countIf(predicate)` counts only rows where a Bool predicate is true. False and NULL predicates do not contribute. It returns non-null `UInt64` (`bigint`), with zero when no rows qualify.
 
-Unlike filtering the query before grouping, the condition applies only to this aggregate: groups with no qualifying rows still exist if they have input rows. The compiler supports the `If` combinator, not `State`/`Merge` execution or stacked combinators.
+Unlike filtering the query before grouping, the condition applies only to this aggregate: groups with no qualifying rows still exist if they have input rows. Stacked combinators such as `countStateIf` are not available.
 
 ## Example
 

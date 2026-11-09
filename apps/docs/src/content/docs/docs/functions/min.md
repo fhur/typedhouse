@@ -11,7 +11,7 @@ An empty or all-NULL nullable input returns NULL. An empty non-null input return
 
 Float NaN makes the result depend on block and read order. A NaN in the first row of the input or of a group makes the result NaN. Without `groupBy`, a NaN at the start of a later data block also hides the rest of that block: inserting `(5),(4)` and then `(nan),(1)` gives `4` with `max_threads=1`, and on a multi-part MergeTree table the result can change with the thread count (`2` or NaN when the true minimum is `1`). Filter NaN out first when the result must be stable.
 
-Use [`argMin`](/docs/functions/arg-min/) instead when you want a different column from the row with the smallest value, and [`max`](/docs/functions/max/) for the largest value. `State` and `Merge` are not exposed.
+Use [`argMin`](/docs/functions/arg-min/) instead when you want a different column from the row with the smallest value, and [`max`](/docs/functions/max/) for the largest value. Rollups use [`minState` and `minMerge`](/docs/functions/state-merge/).
 
 ## Example
 

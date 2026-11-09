@@ -7,7 +7,7 @@ sidebar:
 
 `uniqExact(value)` counts distinct non-NULL strings exactly. It returns `UInt64` (`bigint`), including `0n` for empty or all-NULL input. Exact counting can use substantially more memory than approximate `uniq` as cardinality grows.
 
-The current typed surface supports only `String` and `Nullable(String)`, not arbitrary ClickHouse distinct-count operands or LowCardinality wrappers. Distinct aggregate `State`/`Merge` execution is not exposed.
+The current typed surface supports only `String` and `Nullable(String)`, not arbitrary ClickHouse distinct-count operands or LowCardinality wrappers. Rollups use [`uniqExactState` and `uniqExactMerge`](/docs/functions/state-merge/).
 
 ## Example
 

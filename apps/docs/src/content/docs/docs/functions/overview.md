@@ -43,6 +43,8 @@ Conditional aggregates apply their aggregate only to rows whose predicate is tru
 
 [countIf](/docs/functions/count-if/) · [sumIf](/docs/functions/sum-if/) · [minIf](/docs/functions/min-if/) · [maxIf](/docs/functions/max-if/) · [argMinIf](/docs/functions/arg-min-if/) · [argMaxIf](/docs/functions/arg-max-if/) · [avgIf](/docs/functions/avg-if/) · [quantileIf](/docs/functions/quantile-if/) · [quantileExactIf](/docs/functions/quantile-exact-if/) · [uniqExactIf](/docs/functions/uniq-exact-if/)
 
+[State and Merge](/docs/functions/state-merge/) pairs store and finalize each of the aggregates above, for [rollups and materialized views](/docs/query-builder/rollups/).
+
 See [groupBy / aggregate](/docs/query-builder/aggregation/) for constructing aggregate queries.
 
 ## Expression helpers

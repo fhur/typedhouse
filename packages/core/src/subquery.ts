@@ -87,9 +87,12 @@ export type MembershipReceiver<D> = [CHType] extends [D]
     ? never
     : unknown;
 
-export type SetQuery<R, T> = { readonly _rowType: R; readonly ir: Rel } & ([OneKey<R>] extends [
-  never,
-]
+export type SetQuery<R, T> = {
+  readonly _rowType: R;
+  readonly ir: Rel;
+  // Absent on a terminal SettingsQuery, which is not a query input.
+  readonly row: unknown;
+} & ([OneKey<R>] extends [never]
   ? { readonly set_column_count: never }
   : [R[OneKey<R>]] extends [NonNullable<T> | null]
     ? PlainStringSet<R[OneKey<R>], T>
@@ -145,6 +148,7 @@ export function setOperand(value: unknown): ExprNode {
     throw new Error('invalid_set_operand');
 
   const rel = value.ir as Rel;
+  if (rel?.kind === 'Settings') throw new Error('invalid_settings_placement at Subquery.rel');
   return exprNode({ kind: 'Subquery', rel, usage: 'in', type: setDescriptor(rel) });
 }
 

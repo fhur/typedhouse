@@ -11,7 +11,7 @@ The catalog accepts any value descriptor, subject to ClickHouse support for the 
 
 Float NaN makes the result depend on block and read order, as [`min`](/docs/functions/min/) describes: a NaN in the first qualifying row makes the result NaN, and without `groupBy` a NaN in the first qualifying row of a later data block hides the rest of that block. Filter NaN out first when the result must be stable.
 
-`State`/`Merge` are not exposed.
+Stacked combinators such as `minStateIf` are not available.
 
 ## Example
 

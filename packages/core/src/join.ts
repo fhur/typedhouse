@@ -82,9 +82,10 @@ export class JoinBuilder<I extends Record<string, Input>, R = Rows<I>, V = Value
   constructor(
     inputs: I,
     readonly kind: Exclude<JoinKind, 'cross'> = 'inner',
+    // Outer joins pass their argument order: a merged record sorts integer-like keys, and position
+    // decides which input is null-extended.
+    entries: readonly (readonly [string, Input])[] = Object.entries(inputs),
   ) {
-    const entries = Object.entries(inputs);
-
     if (entries.length < 2 || Object.getOwnPropertySymbols(inputs).length)
       throw new Error('join_input_count');
 
@@ -331,12 +332,12 @@ type One<I> = keyof I extends never
 type Disjoint<A, B> =
   Extract<keyof A, keyof B> extends never ? unknown : { readonly outer_join_alias: never };
 
-function outer(
-  kind: 'left' | 'right' | 'full',
+function binaryInputs(
+  name: string,
   args: readonly unknown[],
-): JoinBuilder<Record<string, Input>> {
+): readonly [Record<string, Input>, Record<string, Input>] {
   if (args.length !== 2)
-    throw new Error(`outer_join_arity: ${kind}Join takes exactly two inputs, (left, right)`);
+    throw new Error(`outer_join_arity: ${name} takes exactly two inputs, (left, right)`);
 
   const [left, right] = args as [Record<string, Input>, Record<string, Input>];
 
@@ -348,14 +349,26 @@ function outer(
       Object.keys(side).length !== 1
     )
       throw new Error(
-        `outer_join_arity: each ${kind}Join argument is a record with exactly one aliased input`,
+        `outer_join_arity: each ${name} argument is a record with exactly one aliased input`,
       );
   }
 
   if (Object.hasOwn(right, Object.keys(left)[0]!))
-    throw new Error(`outer_join_alias: ${kind}Join inputs need distinct aliases`);
+    throw new Error(`outer_join_alias: ${name} inputs need distinct aliases`);
 
-  return new JoinBuilder({ ...left, ...right }, kind);
+  return [left, right];
+}
+
+function outer(
+  kind: 'left' | 'right' | 'full',
+  args: readonly unknown[],
+): JoinBuilder<Record<string, Input>> {
+  const [left, right] = binaryInputs(`${kind}Join`, args);
+
+  return new JoinBuilder({ ...left, ...right }, kind, [
+    ...Object.entries(left),
+    ...Object.entries(right),
+  ]);
 }
 
 /** LEFT ALL JOIN: the right input is null-extended. */
@@ -383,4 +396,213 @@ export function fullJoin<
   right: R & One<R> & Disjoint<L, R>,
 ): OuterJoinBuilder<L & R, keyof L | keyof R> {
   return outer('full', [...arguments]) as unknown as OuterJoinBuilder<L & R, keyof L | keyof R>;
+}
+
+/** An ASOF join with its equalities, awaiting the one inequality. Not a query. */
+export interface AsofJoinPending<V, R> {
+  /** Supply the inequality that picks the closest right row for each left row. It compares one
+   * input with the other, in `ge`, `gt`, `le` or `lt`, on either side.
+   * Which row wins among rows tied on the equalities and the inequality is unspecified and can
+   * differ between two runs of the same SQL.
+   * @example
+   * ```ts
+   * asofJoin({ t: from(trades) }, { q: from(quotes) })
+   *   .on(r => r.t.symbol.eq(r.q.symbol))
+   *   .asof(r => r.t.ts.ge(r.q.ts))
+   *   .map(r => ({ id: r.t.id, bid: r.q.bid }));
+   * ```
+   */
+  asof(
+    f: (row: R) => Expr<boolean | null, string, 'row'>,
+  ): JoinQuery<V, { readonly live: false }, R>;
+}
+
+/** An ASOF join awaiting its equalities. */
+export interface AsofJoinBuilder<V, R> {
+  /** Match on equalities between the two inputs, with a predicate or an array of predicates
+   * combined with AND. At least one is required. A condition on one input belongs in that input's
+   * `where()`: in ASOF, filtering the right input and filtering the joined rows give different
+   * rows, so no such condition moves above or below the join.
+   * @example
+   * ```ts
+   * asofJoin({ t: from(trades) }, { q: from(quotes) }).on(r => r.t.symbol.eq(r.q.symbol));
+   * ```
+   */
+  on(
+    f: (
+      row: R,
+    ) => Expr<boolean | null, string, 'row'> | readonly Expr<boolean | null, string, 'row'>[],
+  ): AsofJoinPending<V, R>;
+}
+
+const asofInequalities: readonly string[] = ['ge', 'gt', 'le', 'lt'];
+
+/** Input aliases an ON operand reads, or undefined for a form the ON text cannot hold. */
+function operandAliases(e: ExprNode): readonly string[] | undefined {
+  switch (e.kind) {
+    case 'ColumnRef':
+      return [e.path[0]!];
+    case 'Param':
+    case 'Literal':
+      return [];
+    case 'Cast':
+      return operandAliases(e.expr);
+
+    case 'Call':
+    case 'Raw': {
+      const parts = e.args.map(operandAliases);
+      return parts.every(p => p !== undefined) ? parts.flat() : undefined;
+    }
+
+    default:
+      return undefined;
+  }
+}
+
+/** Whether a two-argument call reads exactly one input in each operand, and not the same one. */
+function connectsInputs(e: Extract<ExprNode, { kind: 'Call' }>): boolean {
+  if (e.args.length !== 2) return false;
+  const [a, b] = e.args.map(arg => new Set(operandAliases(arg) ?? []));
+  return a!.size === 1 && b!.size === 1 && [...a!][0] !== [...b!][0];
+}
+
+function asof(
+  name: string,
+  kind: 'inner' | 'left',
+  args: readonly unknown[],
+): AsofJoinBuilder<unknown, unknown> {
+  const sides = binaryInputs(name, args);
+  const entries = sides.flatMap(side => Object.entries(side));
+
+  if (entries.some(([alias, q]) => alias.includes('\0') || !(q instanceof Query)))
+    throw new Error('invalid_join_input');
+
+  // Built from the arguments, not a merged record: an integer-like alias would reorder its keys.
+  const inputs = Object.freeze(entries.map(([alias, q]) => Object.freeze([alias, q.ir] as const)));
+
+  return Object.freeze({
+    on(f: (row: unknown) => unknown) {
+      const output = joinOutput(kind, inputs);
+
+      // The reserved occurrence scope both callbacks bind to, as in JoinBuilder.on.
+      const scope = relNode({
+        kind: 'Join',
+        joinKind: kind,
+        inputs,
+        on: [],
+        output,
+        strictness: 'asof',
+      });
+
+      const result = f(rowOf(scope));
+      const predicates: readonly unknown[] = Array.isArray(result) ? result : [result];
+
+      if (predicates.some(e => !(e instanceof Expr) || e.mode !== 'row'))
+        throw new Error('invalid_join_predicate');
+
+      const split = (e: ExprNode): readonly ExprNode[] =>
+        e.kind === 'Call' && e.fn.origin === 'typed' && e.fn.name === 'and'
+          ? e.args.flatMap(split)
+          : [e];
+
+      const equalities = (predicates as readonly Expr<unknown, string, 'row'>[]).flatMap(e =>
+        split(e.ir),
+      );
+
+      if (!equalities.length)
+        throw new Error('join_condition_arity: an ASOF join needs at least one equality');
+
+      for (const e of equalities) {
+        if (e.kind !== 'Call' || e.fn.origin !== 'typed' || e.fn.name !== 'eq')
+          throw new Error(
+            'join_condition_not_equi: an ASOF join on() condition must be an equality between the two inputs; the inequality goes in asof()',
+          );
+
+        if (!connectsInputs(e))
+          throw new Error(
+            "join_condition_arity: an ASOF join equality reads one input on each side; a condition on one input belongs in that input's where()",
+          );
+      }
+
+      return Object.freeze({
+        asof(g: (row: unknown) => unknown) {
+          const e = g(rowOf(scope));
+
+          if (!(e instanceof Expr) || e.mode !== 'row') throw new Error('invalid_join_predicate');
+          const ir: ExprNode = e.ir;
+
+          if (
+            ir.kind !== 'Call' ||
+            ir.fn.origin !== 'typed' ||
+            !asofInequalities.includes(ir.fn.name)
+          )
+            throw new Error(
+              'invalid_asof_condition: asof() takes one ge, gt, le or lt between the two inputs; equalities go in on()',
+            );
+
+          if (!connectsInputs(ir))
+            throw new Error(
+              'invalid_asof_condition: the ASOF inequality reads one input on each side',
+            );
+
+          return new JoinQuery(
+            relNode({
+              kind: 'Join',
+              joinKind: kind,
+              inputs,
+              on: [...equalities, ir],
+              output,
+              scope: scope.id,
+              strictness: 'asof',
+            }),
+            { live: false },
+          );
+        },
+      });
+    },
+  }) as AsofJoinBuilder<unknown, unknown>;
+}
+
+/** ASOF INNER JOIN: each left row with a match gets the closest right row by the inequality.
+ * Complete it with `.on(equalities).asof(inequality)`.
+ * @example
+ * ```ts
+ * asofJoin({ t: from(trades) }, { q: from(quotes) })
+ *   .on(r => r.t.symbol.eq(r.q.symbol))
+ *   .asof(r => r.t.ts.ge(r.q.ts));
+ * ```
+ */
+export function asofJoin<
+  const L extends Record<string, Input>,
+  const R extends Record<string, Input>,
+>(
+  left: L & One<L>,
+  right: R & One<R> & Disjoint<L, R>,
+): AsofJoinBuilder<Values<L & R>, Rows<L & R>> {
+  return asof('asofJoin', 'inner', [...arguments]) as unknown as AsofJoinBuilder<
+    Values<L & R>,
+    Rows<L & R>
+  >;
+}
+
+/** ASOF LEFT JOIN: as {@link asofJoin}, and a left row with no match stays, with its right input
+ * null-extended exactly as in {@link leftJoin}.
+ * @example
+ * ```ts
+ * asofLeftJoin({ t: from(trades) }, { q: from(quotes) })
+ *   .on(r => r.t.symbol.eq(r.q.symbol))
+ *   .asof(r => r.t.ts.ge(r.q.ts));
+ * ```
+ */
+export function asofLeftJoin<
+  const L extends Record<string, Input>,
+  const R extends Record<string, Input>,
+>(
+  left: L & One<L>,
+  right: R & One<R> & Disjoint<L, R>,
+): AsofJoinBuilder<OuterJoinValues<L & R, keyof R>, OuterRows<L & R, keyof R>> {
+  return asof('asofLeftJoin', 'left', [...arguments]) as unknown as AsofJoinBuilder<
+    OuterJoinValues<L & R, keyof R>,
+    OuterRows<L & R, keyof R>
+  >;
 }

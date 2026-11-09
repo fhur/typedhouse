@@ -211,6 +211,7 @@ function normalizeOwnership(result: Query<Row>, ownership: Recipe['ownership']):
         case 'Limit':
         case 'Distinct':
         case 'Materialize':
+        case 'Settings':
           pending.push(node.input);
           break;
         case 'Union':

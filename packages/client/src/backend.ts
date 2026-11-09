@@ -1,5 +1,7 @@
 import {
+  ClickHouseError,
   createClient as createDriver,
+  parseError,
   type ClickHouseClientConfigOptions,
 } from '@clickhouse/client';
 import { compile, emitNaive, quoteIdentifier } from '@typedhouse/compiler';
@@ -34,13 +36,35 @@ export interface Backend {
  * JSON output settings sent with every query so values arrive exactly. Without
  * them a DateTime is wall-clock time with no offset, NaN/Inf become null, and a
  * Decimal is an unquoted number that JSON.parse rounds past ~17 digits.
+ * Without the last one, a server before 25.11 reports an error raised after output
+ * started as a final `{"exception": "Code: 396. ..."}` line under HTTP 200, which cannot
+ * be told from a row of a real `exception` column. With it, that line is plain text.
  */
 export const outputSettings = {
   date_time_output_format: 'iso',
   output_format_json_quote_64bit_integers: 1,
   output_format_json_quote_denormals: 1,
   output_format_json_quote_decimals: 1,
+  http_write_exception_in_output_format: 0,
 } as const;
+
+/** A JSONEachRow line is always a JSON object, so a line that does not parse is not data. If it
+ * starts as the server's error text, it is the error the server sent after output started: see
+ * outputSettings. A multi-line message keeps only its first line.
+ */
+function parsedRow(row: { readonly text: string; json(): unknown }): unknown {
+  try {
+    return row.json();
+  } catch (cause) {
+    const code = /^Code: (\d+)\. /.exec(row.text)?.[1];
+    if (code === undefined) throw cause;
+    const error = parseError(row.text);
+
+    throw error instanceof ClickHouseError
+      ? error
+      : new ClickHouseError({ message: row.text, code, type: 'UNKNOWN' });
+  }
+}
 
 /** Thin adapter over @clickhouse/client: options are passed through unchanged.
  * The driver owns HTTP, auth/TLS/compression, pooling, parsing, backpressure and
@@ -49,7 +73,7 @@ export const outputSettings = {
  * Owns one driver. close() closes that driver, not any other backend's driver.
  * Keep plans only for this instance's lifetime. Preparation/foreign-plan errors
  * are not QueryErrors; transport and decoding errors carry the compiled query.
- * runBuffered retains the legacy client's JSON buffering path; plugin consumers
+ * runBuffered collects every row before returning; plugin consumers
  * need only the three Backend methods. run yields singleton batches so unread
  * driver rows are never eagerly decoded.
  */
@@ -58,6 +82,7 @@ export function createClickHouseBackend(
   mode: 'clickhouse' | 'clickhouse-naive' = 'clickhouse',
 ) {
   const driver = createDriver(options);
+
   const decoders = new WeakMap<Plan, ReturnType<typeof rowDecoder>>();
 
   function prepare(plan: Plan) {
@@ -106,7 +131,13 @@ export function createClickHouseBackend(
         const result = await execute(compiled);
 
         try {
-          return (await result.json<unknown>()).map(decode);
+          // Not result.json(): it throws a bare SyntaxError on the error line, losing its text.
+          const rows: unknown[] = [];
+
+          for await (const batch of result.stream<unknown>())
+            for (const row of batch) rows.push(decode(parsedRow(row)));
+
+          return rows;
         } finally {
           result.close();
         }
@@ -126,7 +157,7 @@ export function createClickHouseBackend(
 
           try {
             for await (const rows of stream) {
-              for (const row of rows) yield [decode(row.json())];
+              for (const row of rows) yield [decode(parsedRow(row))];
             }
           } finally {
             stream.destroy();

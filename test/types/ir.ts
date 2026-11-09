@@ -50,6 +50,7 @@ expectTypeOf<Rel['kind']>().toEqualTypeOf<
   | 'Distinct'
   | 'Union'
   | 'Materialize'
+  | 'Settings'
 >();
 
 expectTypeOf<ExprNode['kind']>().toEqualTypeOf<

@@ -32,6 +32,8 @@ Expected parameters:
 { "p0": "acme' OR 1=1 --" }
 ```
 
+Values passed to [`settings`](/docs/query-builder/settings/) are the exception, like `LIMIT`: ClickHouse has no parameters in `SETTINGS`, so they are validated per key and written as literals.
+
 The output row remains `{ tenant: string; category: string; id: number }`. The quote characters remain data. Do not interpolate input into SQL or turn it into identifiers. Parameterization is not authorization: the application must establish the tenant value and access rules correctly.
 
 ## Compile a query

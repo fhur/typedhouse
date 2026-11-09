@@ -9,7 +9,7 @@ sidebar:
 
 Integer and float operands keep their type, so a `UInt64` above 2^53 stays an exact `bigint`, and a nullable input keeps a nullable result. Decimal operands are unsupported. NULL and NaN values are skipped. Empty or all-NULL nullable input returns NULL; empty non-null input returns `0` for integers and NaN for floats, and all-NaN input returns NaN. The result does not depend on row order.
 
-It holds every value in memory, so prefer `quantile` when an estimate is enough on large groups. Each application creates a fresh level parameter; reusing the resulting expression shares that parameter. `State`/`Merge` are not exposed.
+It holds every value in memory, so prefer `quantile` when an estimate is enough on large groups. Each application creates a fresh level parameter; reusing the resulting expression shares that parameter. Rollups use [`quantileExactState` and `quantileExactMerge`](/docs/functions/state-merge/).
 
 ## Example
 

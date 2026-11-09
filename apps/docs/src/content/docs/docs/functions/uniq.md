@@ -7,7 +7,7 @@ sidebar:
 
 `uniq(value)` estimates the number of distinct non-NULL strings. Its `UInt64` result decodes to `bigint`, but that integer is an approximate cardinality, not an exact count. Use `uniqExact` when exactness matters. Empty or all-NULL input returns `0n`.
 
-The current typed surface is String-only: `String` and `Nullable(String)` are supported, not numeric values or LowCardinality wrappers. This function emits `uniq`, not `countDistinct`. `State`/`Merge` execution is unsupported.
+The current typed surface is String-only: `String` and `Nullable(String)` are supported, not numeric values or LowCardinality wrappers. This function emits `uniq`, not `countDistinct`. Rollups use [`uniqState` and `uniqMerge`](/docs/functions/state-merge/).
 
 ## Example
 

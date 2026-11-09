@@ -7,7 +7,7 @@ sidebar:
 
 `sumIf(value, predicate)` adds numeric values only where the Bool predicate is true. False or NULL predicates exclude a row, and NULL values are skipped. The condition affects this aggregate rather than removing groups.
 
-Result widening matches `sum`: small integers become 64-bit integers (`bigint`), 128/256-bit integers retain their width, and floats become `Float64`. Decimal input preserves scale with precision 38 or 76. Nullable values retain nullable result descriptors; predicate nullability alone does not make the result nullable. `State`/`Merge` execution is unsupported.
+Result widening matches `sum`: small integers become 64-bit integers (`bigint`), 128/256-bit integers retain their width, and floats become `Float64`. Decimal input preserves scale with precision 38 or 76. Nullable values retain nullable result descriptors; predicate nullability alone does not make the result nullable. Stacked combinators such as `sumStateIf` are not available.
 
 ## Example
 

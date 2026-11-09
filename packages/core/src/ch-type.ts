@@ -45,6 +45,41 @@ export type CHType =
   | { kind: 'SimpleAggregateFunction'; fn: string; inner: CHType }
   | { kind: 'Unknown'; raw: string };
 
+/** Whether a type holds an aggregate state at any depth: a state in a `Map` or `Tuple` is still binary on the wire.
+ * `Dynamic` says nothing about its contents, so a state stored in one is not detected. */
+export function containsAggregateState(t: CHType): boolean {
+  switch (t.kind) {
+    case 'AggregateFunction':
+      return true;
+    case 'Nullable':
+    case 'LowCardinality':
+    case 'Array':
+    case 'SimpleAggregateFunction':
+      return containsAggregateState(t.inner);
+    case 'Map':
+      return containsAggregateState(t.key) || containsAggregateState(t.value);
+    case 'Tuple':
+      return t.items.some(item => containsAggregateState(item.type));
+    case 'Variant':
+      return t.items.some(containsAggregateState);
+    case 'Unknown':
+      return unmodelledState(t.raw);
+    default:
+      return false;
+  }
+}
+
+/** Fails closed on type text the parser cannot model, such as `AggregateFunction(uniq, Point)` or
+ * `Nested(a AggregateFunction(uniq, String))`. Quoted text is an Enum label or a name, unless it quotes the type name
+ * itself, which the server accepts. An unterminated quote leaves the rest in scope. */
+function unmodelledState(raw: string): boolean {
+  const text = raw.replace(/'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"/gs, quoted =>
+    quoted.slice(1, -1) === 'AggregateFunction' && quoted[0] !== "'" ? 'AggregateFunction' : "''",
+  );
+
+  return /\bAggregateFunction\s*\(/.test(text);
+}
+
 export function quoteString(s: string): string {
   return `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t').replace(/\0/g, '\\0').replace(/\x08/g, '\\b').replace(/\f/g, '\\f')}'`;
 }

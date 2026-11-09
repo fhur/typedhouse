@@ -109,6 +109,8 @@ A filter conjunct is *null-rejecting* on an input when it is false or `NULL` on 
 - `leftJoin` with a null-rejecting conjunct on the second input becomes inner; `rightJoin` likewise on the first input;
 - `fullJoin` becomes `leftJoin` or `rightJoin` when one input is rejected, and inner when both are.
 
+Over an [ASOF join](/docs/query-builder/joins/#asof-joins), `PushFilterJoin` admits only the left input, on both kinds, because filtering the right input first changes which row matches. `LeftToInner` does not apply. An inequality between two direct columns does not stop a left-side predicate from moving, whatever its type.
+
 `or`, `isNull`, `ifNull(…)`-wrapped operands, Param-only conjuncts and predicates on the preserved input alone are not null-rejecting. A predicate on a projected column counts after projection substitution: `map(r => ({ s: r.b.s })).where(r => r.s.eq('x'))` rejects `b`, while `ifNull(b.n, 0) > 1` does not. A column already `Nullable` in its table still qualifies, because ClickHouse comparisons with `NULL` are falsy in `WHERE`.
 
 <details>

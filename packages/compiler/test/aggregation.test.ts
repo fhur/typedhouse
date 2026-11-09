@@ -62,9 +62,10 @@ it('validates mean operands, modes, metadata and result descriptors authoritativ
   check({ args: [root.aggs.mean, agg.args[1]!] }, /invalid_aggregate_placement/);
   check({ args: [agg.args[0]!, val(1).ir] }, /invalid_predicate/);
 
-  for (const combinators of [['State'], ['Merge'], ['If', 'If']] as const)
-    check({ combinators }, /unsupported_aggregate_combinator/);
+  for (const combinators of [['State'], ['Merge']] as const)
+    check({ combinators }, /invalid_argument_arity/);
 
+  check({ combinators: ['If', 'If'] }, /unsupported_aggregate_combinator/);
   check({ params: [val(1).ir] }, /unsupported_aggregate_combinator/);
   const foreign = columnExpr(col.UInt32, other.ir.id, ['n'], 'n', 'grouped');
 
@@ -161,7 +162,7 @@ it('validates both argMax operands, conditional predicates and authoritative met
   );
 
   check({ type: col.Float64.type }, /invalid_expression_type at root.aggs.latest/);
-  check({ combinators: ['State'] }, /unsupported_aggregate_combinator/);
+  check({ combinators: ['State'] }, /invalid_argument_arity/);
 
   for (let index = 0; index < 3; index++) {
     const args = [...agg.args];
@@ -336,10 +337,14 @@ it('adversarial argMax rejects invalid constant payloads in every operand and ne
   const { id: _id, ...fields } = valid;
   const { id: _agg, ...agg } = valid.aggs.n;
 
-  for (const combinators of [['If', 'If'], ['Merge'], ['State']] as const) {
+  for (const [combinators, error] of [
+    [['If', 'If'], /unsupported_aggregate_combinator at root.aggs.n/],
+    [['Merge'], /invalid_argument_arity at root.aggs.n/],
+    [['State'], /invalid_expression_type at root.aggs.n/],
+  ] as const) {
     expect(() =>
       emitNaive(relNode({ ...fields, aggs: { n: exprNode({ ...agg, combinators }) } })),
-    ).toThrow(/unsupported_aggregate_combinator at root.aggs.n/);
+    ).toThrow(error);
   }
 
   expect(() =>
