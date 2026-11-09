@@ -117,7 +117,7 @@ Registry availability depends on the release you use.
 
 ## Execute or stream typed results
 
-Append this to the quick example in a **server-side** TypeScript module. Your ClickHouse table must match the descriptor. This snippet is typechecked but never executed by documentation builds.
+Append this to the quick example in a **server-side** TypeScript module. Your ClickHouse table must match the descriptor.
 
 ```ts typecheck-only
 import { createClient } from '@typedhouse/client';

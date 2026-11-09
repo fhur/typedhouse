@@ -138,7 +138,7 @@ Core deliberately has no implicit compiler dependency. Import `registerCompiler`
 
 **Optional:** install `@typedhouse/client` for your server application. Build that package too if working from source. The real ClickHouse table must match the descriptor; compilation does not validate a live database.
 
-Append this to the module above. This example is typechecked but is **not executed** by the docs build.
+Append this to the module above.
 
 ```ts typecheck-only
 import { createClient } from '@typedhouse/client';
