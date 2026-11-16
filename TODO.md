@@ -1,3 +1,8 @@
+## Portable max_threads integration expectations
+
+- Replaced hard-coded max_threads cap expectations with an independent native SQL read-back on the same server. Optimized buffered, streamed, and naive execution must all match; large UInt64 inputs remain covered.
+- Verification: all 434 tests in `settings-native.integration.ts` pass; `pnpm typecheck` passes. Full release gate not rerun.
+
 ## Track D: `-State`/`-Merge`, `SETTINGS`, `ASOF JOIN`, `WITH FILL`, `OVER` (2026-11-05, PM)
 
 **Status.** D1 to D11 and D21 are accepted by the PM; see the acceptance sections at the end of this track. D12 to D19 run in parallel worktrees: `with-fill` stacked on `five-keywords`, `over` stacked on `with-fill`, rebased by the orchestrator at each landing. Q1 to Q7 are recorded under Decisions; orchestrator rulings stay open to the owner's objection. Build order is the owner's. Line numbers are at master `cd59ba9`.

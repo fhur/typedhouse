@@ -71,6 +71,19 @@ const runStream = async <R>(query: Executable<R>): Promise<R[]> => {
   return rows;
 };
 
+/** Read the server's normalization independently of either TypedHouse emitter. */
+const nativeMaxThreads = async (value: number | bigint): Promise<string> => {
+  const result = await admin.query({
+    // These numeric test fixtures need literal SETTINGS syntax on ClickHouse 24.8.
+    query: `SELECT toString(getSetting('max_threads')) AS v SETTINGS max_threads = ${value}`,
+    format: 'JSONEachRow',
+  });
+
+  const rows = await result.json<{ v: string }>();
+
+  return rows[0]!.v;
+};
+
 /** optimized run, optimized stream, naive buffered. */
 const all = async <R>(query: Executable<R>) => [
   await optimized.run(query),
@@ -390,7 +403,9 @@ describe('ordinary values read back exactly', () => {
     for (const row of rows) expect(row).toEqual([{ v: String(value) }]);
   });
 
-  it.each([1, 2, 1024, 4096])('max_threads = %i, up to the cap', async value => {
+  it.each([1, 2, 1024, 4096])('max_threads = %i matches native normalization', async value => {
+    const expected = await nativeMaxThreads(value);
+
     const rows = await all(
       others
         .limit(1)
@@ -398,7 +413,7 @@ describe('ordinary values read back exactly', () => {
         .settings({ max_threads: value }),
     );
 
-    for (const row of rows) expect(row).toEqual([{ v: String(value) }]);
+    for (const row of rows) expect(row).toEqual([{ v: expected }]);
   });
 
   it.each([1, 2, 65409, 65536, 4294967296])('max_block_size = %i, up to the cap', async value => {
@@ -446,9 +461,9 @@ describe('edges the server normalizes, as measured on 24.8', () => {
   });
 
   it.each([4097, 2 ** 40, Number.MAX_SAFE_INTEGER, 2n ** 64n - 1n])(
-    'max_threads = %s reads as 4096',
+    'max_threads = %s matches native normalization',
     async value => {
-      expect(await read('max_threads', value)).toBe('4096');
+      expect(await read('max_threads', value)).toBe(await nativeMaxThreads(value));
     },
   );
 
