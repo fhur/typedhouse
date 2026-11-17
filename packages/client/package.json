@@ -1,6 +1,6 @@
 {
   "name": "@typedhouse/client",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Run TypedHouse queries against ClickHouse from Node.js with typed, decoded rows, async-iterator streaming and structured errors.",
   "keywords": [
     "clickhouse",
