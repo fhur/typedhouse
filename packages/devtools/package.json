@@ -1,6 +1,22 @@
 {
   "name": "@typedhouse/devtools",
   "version": "0.1.0",
+  "description": "Inspect TypedHouse relational query graphs and export SVG or Mermaid diagrams.",
+  "keywords": ["clickhouse", "typescript", "typedhouse", "devtools", "query-builder", "mermaid"],
+  "homepage": "https://github.com/fhur/typedhouse/tree/master/packages/devtools",
+  "bugs": {
+    "url": "https://github.com/fhur/typedhouse/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fhur/typedhouse.git",
+    "directory": "packages/devtools"
+  },
+  "license": "MIT",
+  "author": "Fernando Hurtado",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "files": ["dist"],
   "exports": {
