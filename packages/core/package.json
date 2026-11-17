@@ -1,6 +1,6 @@
 {
   "name": "@typedhouse/core",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Type-safe ClickHouse query builder for TypeScript: typed table descriptors, expressions and composable, reusable queries with inferred result types.",
   "keywords": [
     "clickhouse",

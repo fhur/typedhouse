@@ -1,6 +1,6 @@
 {
   "name": "@typedhouse/codegen",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Generate TypeScript table types from a live ClickHouse schema, and check them for schema drift in CI.",
   "keywords": [
     "clickhouse",

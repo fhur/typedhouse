@@ -1,6 +1,6 @@
 {
   "name": "@typedhouse/compiler",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Compile TypedHouse queries to flat, parameterized ClickHouse SQL, with filter push-down, column pruning and shared CTEs.",
   "keywords": [
     "clickhouse",
