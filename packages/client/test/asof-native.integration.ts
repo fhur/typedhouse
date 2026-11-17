@@ -1085,10 +1085,9 @@ describe.each(['24.3', '24.8', '26.10'] as const)('ASOF native on %s', (version:
   });
 
   describe('Decimal across scales, where the common scale overflows', () => {
-    // Pinned as measured. The server compares in Decimal(38, 30), where 1e17 wraps: `1e17 >= 1` is
-    // false and `1e17 <= 1` true, with no error, on a plain comparison too. "Decimal across scales
-    // compared correctly" in the docs does not hold here.
-    it('a wrong match, with no error, on the same terms as the plain comparison', async () => {
+    // Overflow behavior can vary across server builds; preserve native ASOF semantics
+    // rather than pinning a particular overflow result.
+    it('matches native ASOF behavior when rescaling can overflow', async () => {
       await c.admin.command({
         query: `INSERT INTO asof_mix_l (id, k, d18z) VALUES (50, 7, 100000000000000000)`,
       });
@@ -1100,14 +1099,36 @@ describe.each(['24.3', '24.8', '26.10'] as const)('ASOF native on %s', (version:
           .where((r: any) => r.t.k.eq(7))
           .map(pick);
 
-      expect(
-        await handwritten(
-          `SELECT toDecimal64('100000000000000000', 0) >= toDecimal128('1', 30) AS g`,
-        ),
-      ).toEqual([{ g: 0 }]);
+      for (const [op, comparison] of [
+        ['ge', '>='],
+        ['le', '<='],
+      ] as const) {
+        const outcome = await handwritten(
+          `SELECT t.id AS id, q.id AS rid FROM asof_mix_l AS t
+           ASOF INNER JOIN asof_mix_r AS q ON t.k = q.k AND t.d18z ${comparison} q.d38z
+           WHERE t.k = 7`,
+        ).then(
+          rows => ({ kind: 'rows' as const, rows }),
+          (error: unknown) => ({
+            kind: 'error' as const,
+            code: String((error as { code?: unknown })?.code),
+          }),
+        );
 
-      await allEqual(on('ge'), []);
-      await allEqual(on('le'), [{ id: 50, rid: 50 }]);
+        if (outcome.kind === 'rows') {
+          await allEqual(on(op), outcome.rows);
+        } else {
+          // Newer builds may reject the overflowing conversion instead of wrapping.
+          expect(outcome.code).toBe('407');
+
+          expect(await failures(c, on(op))).toEqual({
+            run: outcome.code,
+            stream: outcome.code,
+            naiveRun: outcome.code,
+            naiveStream: outcome.code,
+          });
+        }
+      }
 
       await c.admin.command({
         query: `ALTER TABLE asof_mix_l DELETE WHERE k = 7 SETTINGS mutations_sync = 2`,

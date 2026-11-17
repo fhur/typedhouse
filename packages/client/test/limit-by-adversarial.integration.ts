@@ -1510,8 +1510,14 @@ describe('grouping of float keys', () => {
   // Decision on record: float keys group by bit pattern, with nothing normalised.
   it('NaNs of one bit pattern are one group, NaNs of different patterns are two, and signed zeros are separate', async () => {
     await driver.command({
-      query:
-        'INSERT INTO lba_nan VALUES (1, nan), (2, nan), (3, 0/0), (4, 0/0), (5, -nan), (6, 0.0), (7, 0.0), (8, -0.0), (9, -0.0), (10, 1)',
+      // Arithmetic NaN signs differ across platforms. Construct the exact keys under test.
+      query: `INSERT INTO lba_nan SELECT id, reinterpretAsFloat64(bits)
+        FROM values('id UInt32, bits UInt64',
+          (1, 9221120237041090560), (2, 9221120237041090560),
+          (3, 18444492273895866368), (4, 18444492273895866368),
+          (5, 18444492273895866368), (6, 0), (7, 0),
+          (8, 9223372036854775808), (9, 9223372036854775808),
+          (10, 4607182418800017408))`,
     });
 
     const bits = await native('SELECT id, reinterpretAsUInt64(f) AS bits FROM lba_nan ORDER BY id');
@@ -1521,7 +1527,7 @@ describe('grouping of float keys', () => {
       '9221120237041090560', // nan
       '18444492273895866368',
       '18444492273895866368',
-      '18444492273895866368', // 0/0 and -nan
+      '18444492273895866368', // negative NaN
       '0',
       '0',
       '9223372036854775808',

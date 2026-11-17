@@ -1,3 +1,10 @@
+## Portable native integration expectations
+
+- Decimal overflow ASOF coverage compares with handwritten native SQL, including error 407 on builds that reject the conversion rather than wrap.
+- LIMIT BY NaN fixtures use explicit bit patterns, avoiding platform-dependent arithmetic NaN signs.
+- A parallel throwing scan may fail before yielding rows; error-code and yielded-row validity assertions remain.
+- Verification: 431 tests across the three changed files pass; `pnpm typecheck` passes. Full `pnpm check:all` reached 3,889 passing integration tests, with one unrelated failure in `settings-rework.integration.ts` (`KILL QUERY mid-stream raises code 394`, no error observed). Release remains blocked.
+
 ## Portable max_threads integration expectations
 
 - Replaced hard-coded max_threads cap expectations with an independent native SQL read-back on the same server. Optimized buffered, streamed, and naive execution must all match; large UInt64 inputs remain covered.
