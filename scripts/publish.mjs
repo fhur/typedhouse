@@ -4,6 +4,7 @@
 //   pnpm check:publish            full release: preflight → checks → pack → publish → commit/tag/push
 //   pnpm check:publish --dry-run  everything except `npm publish` and git writes (checks still run)
 //   pnpm check:publish --dry-run --skip-checks   fast rehearsal of version selection and packing
+//   pnpm check:publish --unsafe-dont-run-checks   publish without the full gate (still builds/audits/inspects)
 //
 // Idempotent: the version comes from the registry, never from package.json.
 //   - nothing published            → 0.0.1
@@ -22,11 +23,21 @@ const args = new Set(process.argv.slice(2));
 
 const dryRun = args.has('--dry-run');
 
-const skipChecks = args.has('--skip-checks');
-if (skipChecks && !dryRun) fail('--skip-checks is only allowed together with --dry-run.');
+const unsafeDontRunChecks = args.has('--unsafe-dont-run-checks');
+
+const skipChecks = args.has('--skip-checks') || unsafeDontRunChecks;
+
+if (args.has('--skip-checks') && !dryRun)
+  fail('--skip-checks is only allowed together with --dry-run.');
 
 for (const a of args)
-  if (!['--dry-run', '--skip-checks'].includes(a)) fail(`Unknown argument ${a}`);
+  if (!['--dry-run', '--skip-checks', '--unsafe-dont-run-checks'].includes(a))
+    fail(`Unknown argument ${a}`);
+
+if (unsafeDontRunChecks)
+  console.warn(
+    'WARNING: --unsafe-dont-run-checks bypasses the full validation gate. Only use after validating this release.',
+  );
 
 function fail(message) {
   console.error(`\ncheck:publish: ${message}`);
@@ -324,7 +335,12 @@ try {
   }
 
   if (toPublish.length) {
-    if (skipChecks) log('Skipping checks (--dry-run --skip-checks)');
+    if (skipChecks)
+      log(
+        unsafeDontRunChecks
+          ? 'Skipping full gate (--unsafe-dont-run-checks); audit, build and tarball checks remain enabled'
+          : 'Skipping checks (--dry-run --skip-checks)',
+      );
     else {
       log('Running the full gate: pnpm check:all');
       run('pnpm', ['check:all']);

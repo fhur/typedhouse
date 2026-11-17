@@ -1,3 +1,8 @@
+## Explicit unsafe publish retry
+
+- Added `pnpm check:publish --unsafe-dont-run-checks` to bypass `check:all` for release retries. Still requires clean/up-to-date master and npm authentication, audits dependencies, rebuilds packages, and inspects tarballs. Default publishing remains unchanged; `--skip-checks` remains dry-run-only.
+- Verification: JavaScript syntax check passed; legacy non-dry-run `--skip-checks` and unknown flags are rejected.
+
 ## Portable native integration expectations
 
 - Decimal overflow ASOF coverage compares with handwritten native SQL, including error 407 on builds that reject the conversion rather than wrap.
